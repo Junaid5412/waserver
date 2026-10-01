@@ -1,7 +1,9 @@
 name: Validate
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
-  check:
+  application:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -12,3 +14,32 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+  mysql:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: ci-only-root-password
+          MYSQL_DATABASE: zelon_ci
+          MYSQL_USER: zelon_ci
+          MYSQL_PASSWORD: ci-only-database-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-only-root-password"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    env:
+      MYSQL_HOST: 127.0.0.1
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: zelon_ci
+      MYSQL_USER: zelon_ci
+      MYSQL_PASSWORD: ci-only-database-password
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: node --test test/mysql.test.js

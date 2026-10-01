@@ -4,7 +4,7 @@ A private, self-hosted WhatsApp integration application. Responsive marketing we
 
 ## Status
 
-Implementation release 0.1.0. **Not yet production certified or deployed.** Automated checks cover authentication, instance authorization, API-key scoping, origin protection, encryption, unsafe webhook targets and local database persistence. Real WhatsApp linking, messaging, MySQL integration, Hostinger runtime support and mobile browser QA must be verified before production use. This is not a full GREEN-API clone. Status publishing, AI products, large media uploads, SDK packages, bulk campaigns, chat synchronization and billing are not implemented.
+Implementation release 0.2.0. **Not yet production certified or deployed.** Automated checks cover authentication, instance authorization, API-key scoping, origin protection, encryption, unsafe webhook targets and local database persistence. Real WhatsApp linking, messaging, Hostinger runtime support and visual mobile/browser QA must be verified before production use. MySQL integration is exercised by a dedicated CI job; see its latest result before deploying. Local tests include interface DOM flows, but the cloud browser could not reach the internal preview. This is not a full GREEN-API clone. Status publishing, AI products, large media uploads, SDK packages, bulk campaigns, chat synchronization and billing are not implemented.
 
 Uses Baileys, an unofficial WhatsApp Web integration, not Meta's official WhatsApp Business Platform. No guarantee of unlimited usage or uninterrupted WhatsApp connectivity. No Zelon plan limits; infrastructural and WhatsApp limits still apply.
 
@@ -24,15 +24,25 @@ The deployment requires persistent outbound WhatsApp WebSocket connectivity and 
 
 Production refuses to start without MySQL and an encryption key. SQLite is strictly a development fallback. Keep the **same database and ENCRYPTION_KEY** across redeploys. Back up the database and encryption key separately; losing the key makes encrypted messages and WhatsApp credentials unrecoverable.
 
-Run **one process per database**. A dedicated MySQL advisory lock prevents a second process from starting concurrently. There is no horizontal scaling design in this release. MySQL must use a trusted/private network; a TLS-required public database needs connection TLS configuration before use.
+Run **one process per database**. If the connection holding the worker lease is lost, processing stops rather than silently allowing two workers. A dedicated MySQL advisory lock prevents a second process from starting concurrently. There is no horizontal scaling design in this release. MySQL must use a trusted/private network, or set `MYSQL_SSL=true` for a public TLS-enabled database using a trusted certificate authority.
 
 Messages interrupted while sending become `unknown` on restart instead of being automatically resent. Investigate before manually retrying. Scheduled messages wait while disconnected. Media is capped at 500 KB; requests are capped at 1 MB. Webhook delivery retries up to eight times, does not follow redirects, and resolves/pins public IPv4 destinations to reduce SSRF exposure. Verify HMAC SHA-256 signatures against the raw request bytes and deduplicate event IDs.
 
-Data is retained indefinitely in this release; arrange periodic archival/retention for production. Storage uses a JSON record table for this initial implementation. Large histories need indexed relational tables and paginated reads; current reads load records in each namespace before filtering.
+Data is retained indefinitely in this release; arrange periodic archival/retention for production. The record table includes indexed user, instance, status, due-time and creation-time columns. Message/event reads use cursor pagination instead of loading entire histories. Worker scans select bounded due-job batches. Existing records are backfilled during schema migration.
 
 ## Local development
 
 Copy `.env.example` values into your shell or use `node --env-file=.env src/server.js`. Set `NODE_ENV=development`, `APP_ORIGIN=http://localhost:3000`, ADMIN_EMAIL, ADMIN_PASSWORD and ENCRYPTION_KEY. Omit MYSQL_HOST for local SQLite. Run `npm ci`, `npm test`, `npm run build`, `npm start`.
+
+## Accounts and reliability
+
+Administrators create user accounts from the console using the + button and a popup. Initial passwords are generated and shown once. Each user sees only their own instances. Disable an account to revoke both session and API access. Users can change their own passwords; that revokes their existing sessions.
+
+Send an `Idempotency-Key` header (8–200 characters) on every message creation request. Replaying the same key and content returns the original job; reusing a key for different content returns 409. Keys are scoped to an instance. Without this header, each POST creates a new message. Queue claim and cancellation transitions are atomic.
+
+`POST /api/instances/:id/messages/:messageId/cancel` cancels a queued message; messages already sending cannot be cancelled. History endpoints accept `limit` (1–100), and `before` (ISO creation time) together with `beforeId` (last record ID) to retrieve the next page.
+
+GitHub CI has separate application and real MySQL 8.4 tests, covering database persistence, indexes, worker exclusivity, atomic state transitions and pagination. A skipped local MySQL test is not a successful MySQL verification.
 
 ## API
 
