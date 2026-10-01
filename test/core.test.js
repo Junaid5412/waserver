@@ -1,0 +1,13 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {randomBytes} from 'node:crypto';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {cipher,jid,passwordHash,passwordMatches} from '../src/security.js';
+import {publicAddress,webhookUrl} from '../src/webhooks.js';
+import {openStore} from '../src/store.js';
+test('Encrypted session roundtrip and tamper rejection',()=>{const c=cipher(randomBytes(32).toString('base64'));const secret='sensitive credentials';const sealed=c.seal(secret);assert(!sealed.includes(secret));assert.equal(c.open(sealed),secret);const bytes=Buffer.from(sealed,'base64');bytes[bytes.length-1]^=1;assert.throws(()=>c.open(bytes.toString('base64')));assert.throws(()=>cipher('invalid'));});
+test('Password verification never accepts wrong password or malformed hashes',()=>{const h=passwordHash('correct password');assert(passwordMatches('correct password',h));assert(!passwordMatches('wrong password',h));assert(!passwordMatches('a','bad'));});
+test('Recipients reject malformed IDs and normalize phone numbers',()=>{assert.equal(jid('+97450014037'),'97450014037@s.whatsapp.net');assert.equal(jid('123456789@g.us'),'123456789@g.us');assert.throws(()=>jid('abc'));assert.throws(()=>jid('127.0.0.1'));});
+test('Webhooks reject unsafe targets',()=>{for(const ip of ['127.0.0.1','10.1.2.3','172.16.0.1','192.168.1.1','169.254.169.254','100.64.0.1','::1'])assert(!publicAddress(ip));assert(publicAddress('8.8.8.8'));for(const url of ['http://example.com','https://user:pass@example.com','https://localhost','https://example.com:8080'])assert.throws(()=>webhookUrl(url));});
+test('Persistent records survive database close and reopen',async()=>{const dir=await mkdtemp(tmpdir()+'/zelon-');process.env.SQLITE_PATH=dir+'/db.sqlite';const s=await openStore();await s.set('test','1',{hello:'world'});await s.close();const reopened=await openStore();assert.deepEqual(await reopened.get('test','1'),{hello:'world'});await reopened.delete('test','1');assert.equal(await reopened.get('test','1'),null);await reopened.close();await rm(dir,{recursive:true});});
