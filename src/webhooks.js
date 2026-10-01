@@ -1,7 +1,71 @@
-import {lookup} from 'node:dns/promises';
-import {request} from 'node:https';
-import {isIP} from 'node:net';
-import {createHmac} from 'node:crypto';
-export function publicAddress(ip){if(isIP(ip)!==4)return false;const [a,b]=ip.split('.').map(Number);return !(a===0||a===10||a===127||a===169&&b===254||a===172&&b>=16&&b<=31||a===192&&b===168||a===100&&b>=64&&b<=127||a>=224||a===198&&(b===18||b===19)||a===192&&b===0);}
-export function webhookUrl(value){const u=new URL(value);if(u.protocol!=='https:'||u.username||u.password||u.port&&u.port!=='443'||u.hostname==='localhost')throw Error('Use a public HTTPS webhook URL on port 443');return u;}
-export async function deliver(url,payload,secret){const u=webhookUrl(url);const addresses=await lookup(u.hostname,{all:true,family:4});if(!addresses.length||addresses.some(x=>!publicAddress(x.address)))throw Error('Webhook must resolve to a public IPv4 address');const body=JSON.stringify(payload);const signature=createHmac('sha256',secret).update(body).digest('hex');return new Promise((resolve,reject)=>{const r=request(u,{method:'POST',lookup:(hostname,options,callback)=>callback(null,addresses[0].address,4),headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(body),'X-Zelon-Signature':'sha256='+signature,'X-Zelon-Event-ID':payload.id},timeout:10000},res=>{res.resume();res.on('end',()=>res.statusCode>=200&&res.statusCode<300?resolve():reject(Error('Webhook returned '+res.statusCode)));});r.on('timeout',()=>r.destroy(Error('Webhook timeout')));r.on('error',reject);r.end(body);});}
+import { lookup } from "node:dns/promises";
+import { request } from "node:https";
+import { isIP } from "node:net";
+import { createHmac } from "node:crypto";
+export function publicAddress(ip) {
+  if (isIP(ip) !== 4) return false;
+  const [a, b] = ip.split(".").map(Number);
+  return !(
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    a >= 224 ||
+    (a === 198 && (b === 18 || b === 19)) ||
+    (a === 192 && b === 0)
+  );
+}
+export function webhookUrl(value) {
+  const u = new URL(value);
+  if (
+    u.protocol !== "https:" ||
+    u.username ||
+    u.password ||
+    (u.port && u.port !== "443") ||
+    u.hostname === "localhost"
+  )
+    throw Error("Use a public HTTPS webhook URL on port 443");
+  return u;
+}
+export async function deliver(url, payload, secret) {
+  const u = webhookUrl(url);
+  const addresses = await lookup(u.hostname, { all: true, family: 4 });
+  if (!addresses.length || addresses.some((x) => !publicAddress(x.address)))
+    throw Error("Webhook must resolve to a public IPv4 address");
+  const body = JSON.stringify(payload);
+  const signature = createHmac("sha256", secret).update(body).digest("hex");
+  return new Promise((resolve, reject) => {
+    const r = request(
+      u,
+      {
+        method: "POST",
+        family: 4,
+        lookup: (hostname, options, callback) =>
+          options.all
+            ? callback(null, [addresses[0]])
+            : callback(null, addresses[0].address, 4),
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body),
+          "X-Zelon-Signature": "sha256=" + signature,
+          "X-Zelon-Event-ID": payload.id,
+        },
+        timeout: 10000,
+      },
+      (res) => {
+        res.resume();
+        res.on("end", () =>
+          res.statusCode >= 200 && res.statusCode < 300
+            ? resolve()
+            : reject(Error("Webhook returned " + res.statusCode)),
+        );
+      },
+    );
+    r.on("timeout", () => r.destroy(Error("Webhook timeout")));
+    r.on("error", reject);
+    r.end(body);
+  });
+}

@@ -1,10 +1,199 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import {randomBytes} from 'node:crypto';
-import {openStore} from '../src/store.js';
-import {cipher} from '../src/security.js';
-import {enqueueMessage} from '../src/messages.js';
-import {createWorker} from '../src/worker.js';
-test('Idempotency is atomic, instance-scoped, rejects conflicts and replays while offline',async()=>{process.env.SQLITE_PATH=':memory:';const store=await openStore(),enc=cipher(randomBytes(32).toString('base64'));const x={id:'number1',userId:'owner'},d={to:'97450000000@s.whatsapp.net',type:'text',text:'Test'};try{const results=await Promise.all(Array.from({length:12},()=>enqueueMessage(store,enc,x,d,'unique-request',()=>{})));assert.equal(results.filter(r=>r.httpStatus===202).length,1);assert.equal((await store.all('messages')).length,1);const replay=await enqueueMessage(store,enc,x,d,'unique-request',()=>{throw Error('offline');});assert.equal(replay.httpStatus,200);await assert.rejects(enqueueMessage(store,enc,x,{...d,text:'Different'},'unique-request',()=>{}),{status:409});await enqueueMessage(store,enc,{...x,id:'number2'},d,'unique-request',()=>{});assert.equal((await store.all('messages')).length,2);}finally{await store.close();}});
-test('Worker honors schedule and connectivity, sends once and records failure without auto retry',async()=>{process.env.SQLITE_PATH=':memory:';const store=await openStore(),enc=cipher(randomBytes(32).toString('base64'));const x={id:'number1',userId:'owner',status:'connected'},offline={id:'number2',userId:'owner',status:'disconnected'};await store.set('instances',x.id,x);await store.set('instances',offline.id,offline);let calls=0;const wa={active:()=>({sendMessage:async(to,c)=>{calls++;if(c.text==='fail')throw Error('Network lost');return {key:{id:'WA'+calls}};}})};const work=createWorker(store,enc,wa,d=>({text:d.text}));try{await enqueueMessage(store,enc,x,{to:'123@s.whatsapp.net',type:'text',text:'now'},'request-now',()=>{});await enqueueMessage(store,enc,x,{to:'123@s.whatsapp.net',type:'text',text:'later',sendAt:new Date(Date.now()+3600000).toISOString()},'request-later',()=>{});await enqueueMessage(store,enc,offline,{to:'123@s.whatsapp.net',type:'text',text:'offline'},'request-offline',()=>{});await enqueueMessage(store,enc,x,{to:'123@s.whatsapp.net',type:'text',text:'fail'},'request-fail',()=>{});await Promise.all([work(),work()]);assert.equal(calls,2);assert.equal((await store.query('messages',{status:'sent'})).length,1);assert.equal((await store.query('messages',{status:'failed'})).length,1);assert.equal((await store.query('messages',{status:'queued'})).length,2);await work();assert.equal(calls,2);}finally{await store.close();}});
-test('Indexed history pagination keeps tenant records isolated, including equal timestamps',async()=>{process.env.SQLITE_PATH=':memory:';const store=await openStore();try{const t='2026-10-01T00:00:00Z';for(const id of ['a','b','c','d'])await store.set('events',id,{id,instanceId:'A',createdAt:t});await store.set('events','z',{id:'z',instanceId:'B',createdAt:t});const page=await store.query('events',{instanceId:'A',limit:2});assert.deepEqual(page.map(r=>r.id),['d','c']);const next=await store.query('events',{instanceId:'A',limit:2,before:Date.parse(t),beforeKey:page.at(-1).id});assert.deepEqual(next.map(r=>r.id),['b','a']);assert.equal((await store.query('events',{instanceId:'B'})).length,1);}finally{await store.close();}});
+import test from "node:test";
+import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
+import { openStore } from "../src/store.js";
+import { cipher } from "../src/security.js";
+import { enqueueMessage } from "../src/messages.js";
+import { createWorker } from "../src/worker.js";
+test("Idempotency is atomic, instance-scoped, rejects conflicts and replays while offline", async () => {
+  process.env.SQLITE_PATH = ":memory:";
+  const store = await openStore(),
+    enc = cipher(randomBytes(32).toString("base64"));
+  const x = { id: "number1", userId: "owner" },
+    d = { to: "97450000000@s.whatsapp.net", type: "text", text: "Test" };
+  try {
+    const results = await Promise.all(
+      Array.from({ length: 12 }, () =>
+        enqueueMessage(store, enc, x, d, "unique-request", () => {}),
+      ),
+    );
+    assert.equal(results.filter((r) => r.httpStatus === 202).length, 1);
+    assert.equal((await store.all("messages")).length, 1);
+    const replay = await enqueueMessage(
+      store,
+      enc,
+      x,
+      d,
+      "unique-request",
+      () => {
+        throw Error("offline");
+      },
+    );
+    assert.equal(replay.httpStatus, 200);
+    await assert.rejects(
+      enqueueMessage(
+        store,
+        enc,
+        x,
+        { ...d, text: "Different" },
+        "unique-request",
+        () => {},
+      ),
+      { status: 409 },
+    );
+    await enqueueMessage(
+      store,
+      enc,
+      { ...x, id: "number2" },
+      d,
+      "unique-request",
+      () => {},
+    );
+    assert.equal((await store.all("messages")).length, 2);
+  } finally {
+    await store.close();
+  }
+});
+test("Worker honors schedule and connectivity, sends once and records failure without auto retry", async () => {
+  process.env.SQLITE_PATH = ":memory:";
+  const store = await openStore(),
+    enc = cipher(randomBytes(32).toString("base64"));
+  const x = { id: "number1", userId: "owner", status: "connected" },
+    offline = { id: "number2", userId: "owner", status: "disconnected" };
+  await store.set("instances", x.id, x);
+  await store.set("instances", offline.id, offline);
+  let calls = 0;
+  const wa = {
+    active: () => ({
+      sendMessage: async (to, c) => {
+        calls++;
+        if (c.text === "fail") throw Error("Network lost");
+        return { key: { id: "WA" + calls } };
+      },
+    }),
+  };
+  const work = createWorker(store, enc, wa, (d) => ({ text: d.text }));
+  try {
+    await enqueueMessage(
+      store,
+      enc,
+      x,
+      { to: "123@s.whatsapp.net", type: "text", text: "now" },
+      "request-now",
+      () => {},
+    );
+    await enqueueMessage(
+      store,
+      enc,
+      x,
+      {
+        to: "123@s.whatsapp.net",
+        type: "text",
+        text: "later",
+        sendAt: new Date(Date.now() + 3600000).toISOString(),
+      },
+      "request-later",
+      () => {},
+    );
+    await enqueueMessage(
+      store,
+      enc,
+      offline,
+      { to: "123@s.whatsapp.net", type: "text", text: "offline" },
+      "request-offline",
+      () => {},
+    );
+    await enqueueMessage(
+      store,
+      enc,
+      x,
+      { to: "123@s.whatsapp.net", type: "text", text: "fail" },
+      "request-fail",
+      () => {},
+    );
+    await Promise.all([work(), work()]);
+    assert.equal(calls, 2);
+    assert.equal((await store.query("messages", { status: "sent" })).length, 1);
+    assert.equal(
+      (await store.query("messages", { status: "failed" })).length,
+      1,
+    );
+    assert.equal(
+      (await store.query("messages", { status: "queued" })).length,
+      2,
+    );
+    await work();
+    assert.equal(calls, 2);
+  } finally {
+    await store.close();
+  }
+});
+test("Indexed history pagination keeps tenant records isolated, including equal timestamps", async () => {
+  process.env.SQLITE_PATH = ":memory:";
+  const store = await openStore();
+  try {
+    const t = "2026-10-01T00:00:00Z";
+    for (const id of ["a", "b", "c", "d"])
+      await store.set("events", id, { id, instanceId: "A", createdAt: t });
+    await store.set("events", "z", { id: "z", instanceId: "B", createdAt: t });
+    const page = await store.query("events", { instanceId: "A", limit: 2 });
+    assert.deepEqual(
+      page.map((r) => r.id),
+      ["d", "c"],
+    );
+    const next = await store.query("events", {
+      instanceId: "A",
+      limit: 2,
+      before: Date.parse(t),
+      beforeKey: page.at(-1).id,
+    });
+    assert.deepEqual(
+      next.map((r) => r.id),
+      ["b", "a"],
+    );
+    assert.equal((await store.query("events", { instanceId: "B" })).length, 1);
+  } finally {
+    await store.close();
+  }
+});
+test("Atomic cancellation blocks a worker claim, and partial instance updates preserve concurrent settings", async () => {
+  process.env.SQLITE_PATH = ":memory:";
+  const store = await openStore();
+  try {
+    await store.set("messages", "cancel-me", {
+      id: "cancel-me",
+      status: "queued",
+    });
+    assert(
+      await store.transition("messages", "cancel-me", "queued", {
+        id: "cancel-me",
+        status: "cancelled",
+      }),
+    );
+    assert(
+      !(await store.transition("messages", "cancel-me", "queued", {
+        id: "cancel-me",
+        status: "sending",
+      })),
+    );
+    await store.set("instances", "number", {
+      id: "number",
+      name: "Original",
+      webhookUrl: "",
+      status: "disconnected",
+    });
+    await Promise.all([
+      store.patch("instances", "number", { name: "Renamed" }),
+      store.patch("instances", "number", {
+        webhookUrl: "https://example.com/hook",
+      }),
+      store.patch("instances", "number", { status: "connected" }),
+    ]);
+    const row = await store.get("instances", "number");
+    assert.equal(row.name, "Renamed");
+    assert.equal(row.webhookUrl, "https://example.com/hook");
+    assert.equal(row.status, "connected");
+  } finally {
+    await store.close();
+  }
+});

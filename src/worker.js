@@ -1,2 +1,78 @@
-import {deliver} from './webhooks.js';
-export function createWorker(store,enc,wa,content){let pending=null,stopped=false;async function execute(){try{await store.health();for(const x of await store.query('instances',{status:'connected',limit:1000})){for(const row of await store.query('messages',{instanceId:x.id,status:'queued',dueBefore:Date.now(),limit:25,ascending:true})){row.status='sending';if(!await store.transition('messages',row.id,'queued',row))continue;try{const d=JSON.parse(enc.open(row.payload));const sent=await wa.active(x.id).sendMessage(d.to,content(d));row.status='sent';row.waId=sent?.key?.id;}catch{row.status='failed';row.error='Send failed; check connection before manually retrying';}await store.set('messages',row.id,row);}}for(const h of await store.query('hooks',{status:'pending',dueBefore:Date.now(),limit:100,ascending:true})){const x=await store.get('instances',h.instanceId);if(!x?.webhookUrl){h.status='cancelled';await store.set('hooks',h.id,h);continue;}try{await deliver(x.webhookUrl,JSON.parse(enc.open(h.event)),enc.open(x.webhookSecret));h.status='delivered';}catch(e){h.attempts++;h.error=e.message;h.nextAt=Date.now()+Math.min(3600000,10000*2**h.attempts);if(h.attempts>=8)h.status='failed';}await store.set('hooks',h.id,h);}}finally{}}const work=()=>{if(stopped)return Promise.resolve();if(pending)return pending;pending=execute().finally(()=>{pending=null;});return pending;};work.stop=async()=>{stopped=true;await pending;};return work;}
+import { deliver } from "./webhooks.js";
+export function createWorker(store, enc, wa, content) {
+  let pending = null,
+    stopped = false;
+  async function execute() {
+    try {
+      await store.health();
+      for (const x of await store.query("instances", {
+        status: "connected",
+        limit: 1000,
+      })) {
+        for (const row of await store.query("messages", {
+          instanceId: x.id,
+          status: "queued",
+          dueBefore: Date.now(),
+          limit: 25,
+          ascending: true,
+        })) {
+          row.status = "sending";
+          if (!(await store.transition("messages", row.id, "queued", row)))
+            continue;
+          try {
+            const d = JSON.parse(enc.open(row.payload));
+            const sent = await wa.active(x.id).sendMessage(d.to, content(d));
+            row.status = "sent";
+            row.waId = sent?.key?.id;
+          } catch {
+            row.status = "failed";
+            row.error =
+              "Send failed; check connection before manually retrying";
+          }
+          await store.set("messages", row.id, row);
+        }
+      }
+      for (const h of await store.query("hooks", {
+        status: "pending",
+        dueBefore: Date.now(),
+        limit: 100,
+        ascending: true,
+      })) {
+        const x = await store.get("instances", h.instanceId);
+        if (!x?.webhookUrl) {
+          h.status = "cancelled";
+          await store.set("hooks", h.id, h);
+          continue;
+        }
+        try {
+          await deliver(
+            x.webhookUrl,
+            JSON.parse(enc.open(h.event)),
+            enc.open(x.webhookSecret),
+          );
+          h.status = "delivered";
+        } catch (e) {
+          h.attempts++;
+          h.error = e.message;
+          h.nextAt = Date.now() + Math.min(3600000, 10000 * 2 ** h.attempts);
+          if (h.attempts >= 8) h.status = "failed";
+        }
+        await store.set("hooks", h.id, h);
+      }
+    } finally {
+    }
+  }
+  const work = () => {
+    if (stopped) return Promise.resolve();
+    if (pending) return pending;
+    pending = execute().finally(() => {
+      pending = null;
+    });
+    return pending;
+  };
+  work.stop = async () => {
+    stopped = true;
+    await pending;
+  };
+  return work;
+}

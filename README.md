@@ -4,7 +4,7 @@ A private, self-hosted WhatsApp integration application. Responsive marketing we
 
 ## Status
 
-Implementation release 0.2.0. **Not yet production certified or deployed.** Automated checks cover authentication, instance authorization, API-key scoping, origin protection, encryption, unsafe webhook targets and local database persistence. Real WhatsApp linking, messaging, Hostinger runtime support and visual mobile/browser QA must be verified before production use. MySQL integration is exercised by a dedicated CI job; see its latest result before deploying. Local tests include interface DOM flows, but the cloud browser could not reach the internal preview. This is not a full GREEN-API clone. Status publishing, AI products, large media uploads, SDK packages, bulk campaigns, chat synchronization and billing are not implemented.
+Implementation release 0.2.0. **Not yet deployed or verified against a live WhatsApp account.** Automated checks cover authentication, instance authorization, API-key scoping, origin protection, encryption, unsafe webhook targets and local database persistence. Real WhatsApp linking, messaging, Hostinger runtime support and visual mobile/browser QA must be verified before production use. A dedicated CI job is configured to exercise MySQL integration; it has not run yet. Local tests include interface DOM flows, but the cloud browser could not reach the internal preview. This is not a full GREEN-API clone. Status publishing, AI products, large media uploads, SDK packages, bulk campaigns, chat synchronization and billing are not implemented.
 
 Uses Baileys, an unofficial WhatsApp Web integration, not Meta's official WhatsApp Business Platform. No guarantee of unlimited usage or uninterrupted WhatsApp connectivity. No Zelon plan limits; infrastructural and WhatsApp limits still apply.
 
@@ -48,16 +48,16 @@ GitHub CI has separate application and real MySQL 8.4 tests, covering database p
 
 All API key requests use `Authorization: Bearer KEY`. Each key is tied to one instance. Console-only operations require a secure session cookie and matching request origin. Keys are stored hashed and only shown once. WhatsApp authentication state, message payloads, events and webhook secrets are encrypted with AES-256-GCM.
 
-| Method | Endpoint | Purpose |
-| --- | --- | --- |
-| POST | /api/instances/:id/messages | Queue a message |
-| GET | /api/instances/:id/messages | Latest 100 outgoing records |
-| GET | /api/instances/:id/events | Latest 100 events |
-| POST | /api/instances/:id/check-number | Check `{ "phone": "+974…" }` |
-| GET | /api/instances/:id/groups | List groups |
-| POST | /api/instances/:id/groups | Create a group |
-| PUT | /api/instances/:id/groups/:group/participants | Add/remove/promote/demote members |
-| GET | /api/instances/:id/avatar?phone=NUMBER | Profile image URL |
+| Method | Endpoint                                      | Purpose                           |
+| ------ | --------------------------------------------- | --------------------------------- |
+| POST   | /api/instances/:id/messages                   | Queue a message                   |
+| GET    | /api/instances/:id/messages                   | Latest 100 outgoing records       |
+| GET    | /api/instances/:id/events                     | Latest 100 events                 |
+| POST   | /api/instances/:id/check-number               | Check `{ "phone": "+974…" }`      |
+| GET    | /api/instances/:id/groups                     | List groups                       |
+| POST   | /api/instances/:id/groups                     | Create a group                    |
+| PUT    | /api/instances/:id/groups/:group/participants | Add/remove/promote/demote members |
+| GET    | /api/instances/:id/avatar?phone=NUMBER        | Profile image URL                 |
 
 Text request: `{ "to": "+97450000000", "type": "text", "text": "Hello" }`. Optional `sendAt` is ISO 8601 UTC. Media types use `data` (base64), `mimetype`, `filename`, optional `text` caption. Location uses `latitude`/`longitude`. Contact uses `name`/`phone`. Poll uses `text` and `options` array.
 
