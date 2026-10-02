@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Zelon API reference</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="/">Zelon API</a>
+      <nav>
+        <a href="/console">Console</a><a href="/openapi.json">OpenAPI 3.1</a>
+      </nav>
+    </header>
+    <main class="section">
+      <div class="eyebrow">Developer resources</div>
+      <h1>Build your messaging workflow.</h1>
+      <p>
+        All paths below start with <code>/api/instances/INSTANCE_ID</code>.
+        Authenticate with <code>Authorization: Bearer YOUR_KEY</code>. Generate
+        a scoped key in your console. Keep credentials on the server.
+      </p>
+      <div class="actions">
+        <a class="btn" href="/sdk/zelon.mjs">Node SDK</a
+        ><a class="btn" href="/sdk/zelon.py">Python SDK</a
+        ><a class="btn" href="/sdk/zelon.php">PHP SDK</a
+        ><a class="btn primary" href="/openapi.json">OpenAPI specification</a>
+      </div>
+      <section class="card">
+        <h3>Send text, then check delivery</h3>
+        <pre class="doccode">
+POST /messages
+Idempotency-Key: order-confirmation-123
+{ "to": "+97450000000", "type": "text", "text": "Your order is ready" }
+
+202 { "id": "…", "status": "queued" }
+GET /messages/MESSAGE_ID</pre
+        >
+        <p>
+          Queued messages wait while disconnected. Delivery receipts update sent
+          → delivered → read → played when reported by WhatsApp. Read receipts
+          depend on recipient privacy settings. Failed or unknown sends are
+          never automatically resent.
+        </p>
+      </section>
+      <section class="card">
+        <h3>Large media</h3>
+        <p>
+          POST /media with filename, mimetype and size. The response gives id,
+          chunkSize and totalChunks. PUT raw application/octet-stream bytes to
+          /media/ID/chunks/INDEX, starting at zero. Each chunk must have exactly
+          the indicated size (last chunk uses the remaining bytes). POST
+          /media/ID/complete; send messages with mediaId. Identical chunk
+          retries are safe. The default maximum is 100 MB; your deployment may
+          change it. WhatsApp size and codec limits also apply.
+        </p>
+        <pre class="doccode">
+{ "to": "+97450000000", "type": "document", "mediaId": "UPLOAD_UUID" }</pre
+        >
+      </section>
+      <section class="card">
+        <h3>Message types and operations</h3>
+        <p>
+          Supported types: text, image, video, audio, document, sticker,
+          location, contact, poll, forward. Use quotedId for replies, mentions
+          for contact JIDs, ptt for voice messages, sendAt for ISO UTC
+          scheduling. Polls use text, options and selectableCount. Forward uses
+          forwardId from your inbox.
+        </p>
+        <p>
+          GET /chats and /chats/CHAT_JID/messages expose synchronized history.
+          POST /inbox/WA_MESSAGE_ID/read, /reaction with emoji, /delete, /star
+          with star boolean. PUT /inbox/WA_MESSAGE_ID/text edits your outgoing
+          text. GET /inbox/WA_MESSAGE_ID/media downloads available media; GET
+          /polls/WA_MESSAGE_ID/votes returns recorded votes.
+        </p>
+        <p>
+          History endpoints return newest first. Continue with
+          limit=50&amp;before=LAST_CREATED_AT&amp;beforeId=LAST_ID. URL-encode
+          JIDs and IDs in paths. History synchronization includes what WhatsApp
+          supplies; it is not a complete archive of the phone.
+        </p>
+      </section>
+      <section class="card">
+        <h3>Contacts, campaigns and automation</h3>
+        <p>
+          Contacts support manual save, CSV import in the console, JSON import
+          via /contacts/import, tags, consent and opt-outs. Existing opt-outs
+          survive imports. STOP, unsubscribe and cancel subscription in direct
+          incoming text create opt-outs.
+        </p>
+        <pre class="doccode">
+POST /campaigns
+Idempotency-Key: welcome-campaign-123
+{
+ "name": "Welcome", "recipients": [{"to":"+97450000000","name":"Sam"}],
+ "message": {"type":"text","text":"Hello {{name}}"},
+ "intervalSeconds": 5, "consentConfirmed": true
+}
+PUT /campaigns/CAMPAIGN_ID
+{ "status": "paused" }</pre
+        >
+        <p>
+          Campaign controls: paused, running, cancelled. Each request supports
+          up to 1,000 unique recipients; opted-out recipients are skipped.
+          Pause/cancel affects waiting jobs. Already submitted sends can finish.
+          Auto replies use /rules: name, match (any/exact/contains), keyword,
+          reply, cooldownSeconds and enabled. Templates use /templates: name and
+          text. Variables: {{name}}, {{phone}}, and {{message}} in rules.
+        </p>
+      </section>
+      <section class="card">
+        <h3>Groups, statuses and profile</h3>
+        <p>
+          Groups support creation, membership roles, metadata, subject,
+          description, announcement and editing restrictions, disappearing
+          messages, profile images, invite links, joining and leaving. Your
+          WhatsApp group permissions apply.
+        </p>
+        <pre class="doccode">
+POST /statuses
+{ "type":"text", "text":"We are open", "backgroundColor":"#087e75",
+  "statusAudience":["+97450000000"] }</pre
+        >
+        <p>
+          Statuses require an explicit audience. Image/video/audio statuses
+          accept mediaId. Existing status events appear under GET /statuses.
+          Profile, blocklist, presence and chat settings are exposed by the API.
+          QR linking, phone pairing, restart and archive are available in the
+          console.
+        </p>
+      </section>
+      <section class="card">
+        <h3>Signed webhooks</h3>
+        <p>
+          Configure a public HTTPS receiver in your console. Verify
+          X-Zelon-Signature against the raw body with HMAC SHA-256. Deduplicate
+          the event id. Delivery is at least once, with up to eight retry
+          attempts and manual replay for failed deliveries. Event filters and
+          signing-secret rotation are available. A rotated secret applies to
+          subsequent attempts.
+        </p>
+        <pre class="doccode">
+import { createHmac, timingSafeEqual } from 'node:crypto';
+const expected = createHmac('sha256', secret).update(rawBody).digest();
+const value = header.replace(/^sha256=/, '');
+const received = Buffer.from(value, 'hex');
+const valid = received.length === expected.length
+  &amp;&amp; timingSafeEqual(received, expected);</pre
+        >
+        <p>
+          Do not verify a reserialized JSON object. Connection, message,
+          receipt, history, presence, group, group-participants, call and error
+          events are supported. Call events report notifications; this service
+          does not handle calls.
+        </p>
+      </section>
+      <section class="card">
+        <h3>Runtime requirements</h3>
+        <p>
+          Node 22.13+ (24 recommended), persistent MySQL, one long-lived server
+          process and outbound WhatsApp WebSocket access. Preserve the database
+          and ENCRYPTION_KEY on redeploy. This uses Baileys WhatsApp Web
+          integration and is independent of Meta and GREEN-API. AI products,
+          Telegram, official WABA templates and paid SaaS billing are outside
+          this application.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

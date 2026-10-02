@@ -112,7 +112,7 @@ test("API authentication, origin protection, instance persistence and scoped key
           text: "Hello",
         })
       ).status,
-      409,
+      202,
     );
     assert.equal(
       (
@@ -140,6 +140,58 @@ test("API authentication, origin protection, instance persistence and scoped key
     assert.equal(
       (await call("/api/instances/" + id + "/messages?limit=1000")).status,
       400,
+    );
+    const upload = await (
+      await call("/api/instances/" + id + "/media", "POST", {
+        filename: "sample.bin",
+        size: 6,
+        mimetype: "application/octet-stream",
+      })
+    ).json();
+    const bytes = Buffer.from("sample");
+    const chunk = await fetch(
+      origin + "/api/instances/" + id + "/media/" + upload.id + "/chunks/0",
+      {
+        method: "PUT",
+        headers: {
+          Origin: origin,
+          Cookie: cookie,
+          "Content-Type": "application/octet-stream",
+        },
+        body: bytes,
+      },
+    );
+    assert.equal(chunk.status, 200);
+    assert.equal(
+      (
+        await call(
+          "/api/instances/" + id + "/media/" + upload.id + "/complete",
+          "POST",
+          {},
+        )
+      ).status,
+      200,
+    );
+    const download = await fetch(
+      origin + "/api/instances/" + id + "/media/" + upload.id + "/download",
+      { headers: { Authorization: "Bearer " + key.key } },
+    );
+    assert.equal(download.status, 200);
+    assert(download.headers.get("content-disposition").includes("attachment"));
+    assert.equal(
+      Buffer.from(await download.arrayBuffer()).toString(),
+      "sample",
+    );
+    assert.equal(
+      (
+        await call(
+          "/api/instances/" + id + "/archive",
+          "POST",
+          {},
+          { Authorization: "Bearer " + key.key },
+        )
+      ).status,
+      403,
     );
     const oldKey = key.key;
     await call("/api/instances/" + id + "/key", "POST", {});

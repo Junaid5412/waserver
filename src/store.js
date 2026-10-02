@@ -6,6 +6,8 @@ const columns = {
   created_at: "BIGINT NOT NULL DEFAULT 0",
   due_at: "BIGINT NOT NULL DEFAULT 0",
   lookup_key: "VARCHAR(254) NOT NULL DEFAULT ''",
+  chat_id: "VARCHAR(191) NOT NULL DEFAULT ''",
+  campaign_id: "VARCHAR(191) NOT NULL DEFAULT ''",
   metadata_version: "INT NOT NULL DEFAULT 0",
 };
 const indexes = {
@@ -13,6 +15,14 @@ const indexes = {
   zelon_instance: ["namespace", "instance_id", "created_at", "record_key"],
   zelon_due: ["namespace", "record_status", "due_at"],
   zelon_instance_due: ["namespace", "instance_id", "record_status", "due_at"],
+  zelon_chat: [
+    "namespace",
+    "instance_id",
+    "chat_id",
+    "created_at",
+    "record_key",
+  ],
+  zelon_campaign: ["namespace", "instance_id", "campaign_id", "record_status"],
   zelon_lookup: ["namespace", "lookup_key"],
 };
 const metadata = (v) => [
@@ -21,8 +31,10 @@ const metadata = (v) => [
   v.status || "",
   Date.parse(v.createdAt || "") || 0,
   v.sendAt ?? v.nextAt ?? v.expires ?? 0,
-  v.email?.toLowerCase() || "",
-  1,
+  v.lookupKey ?? v.email?.toLowerCase() ?? v.waId ?? "",
+  v.chatId || "",
+  v.campaignId || "",
+  2,
 ];
 export async function openStore() {
   let db,
@@ -95,7 +107,7 @@ export async function openStore() {
     let rows;
     do {
       rows = await execute(
-        "SELECT namespace,record_key,payload FROM zelon_records WHERE metadata_version=0 LIMIT 500",
+        "SELECT namespace,record_key,payload FROM zelon_records WHERE metadata_version<2 LIMIT 500",
       );
       for (const row of rows)
         await mutate(
@@ -139,6 +151,9 @@ export async function openStore() {
         instanceId,
         status,
         email,
+        lookupKey,
+        chatId,
+        campaignId,
         limit = 100,
         before,
         beforeKey = "",
@@ -155,7 +170,9 @@ export async function openStore() {
         ["user_id", userId],
         ["instance_id", instanceId],
         ["record_status", status],
-        ["lookup_key", email?.toLowerCase()],
+        ["lookup_key", lookupKey ?? email?.toLowerCase()],
+        ["chat_id", chatId],
+        ["campaign_id", campaignId],
       ])
         if (value !== undefined) {
           clauses.push(column + "=?");
@@ -176,6 +193,27 @@ export async function openStore() {
           args,
         )
       ).map((r) => JSON.parse(r.payload));
+    },
+    async stats(ns, { userId, instanceId } = {}) {
+      healthy();
+      const clauses = ["namespace=?"],
+        args = [ns];
+      if (userId !== undefined) {
+        clauses.push("user_id=?");
+        args.push(userId);
+      }
+      if (instanceId !== undefined) {
+        clauses.push("instance_id=?");
+        args.push(instanceId);
+      }
+      return Object.fromEntries(
+        (
+          await execute(
+            `SELECT record_status AS status,COUNT(*) AS total FROM zelon_records WHERE ${clauses.join(" AND ")} GROUP BY record_status`,
+            args,
+          )
+        ).map((r) => [r.status, Number(r.total)]),
+      );
     },
     async all(ns) {
       healthy();
@@ -231,7 +269,11 @@ export async function openStore() {
           else db.exec("COMMIT");
           return null;
         }
-        const value = { ...JSON.parse(rows[0].payload), ...changes };
+        const previous = JSON.parse(rows[0].payload);
+        const value =
+          typeof changes === "function"
+            ? changes(previous)
+            : { ...previous, ...changes };
         const fields = ["payload", ...Object.keys(columns)],
           args = [JSON.stringify(value), ...metadata(value), ns, key];
         const sql = `UPDATE zelon_records SET ${fields.map((c) => c + "=?").join(",")} WHERE namespace=? AND record_key=?`;

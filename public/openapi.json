@@ -1,0 +1,5293 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Zelon API",
+    "version": "0.3.0",
+    "description": "Self-hosted WhatsApp Web integration. Keys are scoped to one instance. Dashboard-only operations require a session and matching Origin. WhatsApp provider rules apply."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "instanceKey": {
+        "type": "http",
+        "scheme": "bearer"
+      },
+      "consoleSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "zelon_session"
+      }
+    },
+    "schemas": {
+      "Message": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "string"
+          },
+          "type": {
+            "default": "text",
+            "type": "string",
+            "enum": [
+              "text",
+              "image",
+              "video",
+              "audio",
+              "document",
+              "sticker",
+              "location",
+              "contact",
+              "poll",
+              "forward"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "data": {
+            "type": "string",
+            "maxLength": 750000
+          },
+          "mediaId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "mimetype": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "filename": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "ptt": {
+            "type": "boolean"
+          },
+          "latitude": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "phone": {
+            "type": "string",
+            "pattern": "^\\+?[1-9]\\d{6,14}$"
+          },
+          "options": {
+            "minItems": 2,
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          "selectableCount": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12
+          },
+          "mentions": {
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "quotedId": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "forwardId": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "sendAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "statusAudience": {
+            "minItems": 1,
+            "maxItems": 5000,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "backgroundColor": {
+            "type": "string",
+            "pattern": "^#[a-fA-F0-9]{6}$"
+          }
+        },
+        "required": [
+          "to",
+          "type",
+          "selectableCount"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "paths": {
+    "/api/login": {
+      "post": {
+        "operationId": "post__api_login",
+        "summary": "POST /api/login",
+        "security": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me": {
+      "get": {
+        "operationId": "get__api_me",
+        "summary": "GET /api/me",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/api/account/password": {
+      "put": {
+        "operationId": "put__api_account_password",
+        "summary": "PUT /api/account/password",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/logout": {
+      "post": {
+        "operationId": "post__api_logout",
+        "summary": "POST /api/logout",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/users": {
+      "get": {
+        "operationId": "get__api_admin_users",
+        "summary": "GET /api/admin/users",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post__api_admin_users",
+        "summary": "POST /api/admin/users",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/system": {
+      "get": {
+        "operationId": "get__api_admin_system",
+        "summary": "GET /api/admin/system",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/api/admin/users/{userId}": {
+      "put": {
+        "operationId": "put__api_admin_users__userId",
+        "summary": "PUT /api/admin/users/:userId",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/users/{userId}/reset-password": {
+      "post": {
+        "operationId": "post__api_admin_users__userId_reset_password",
+        "summary": "POST /api/admin/users/:userId/reset-password",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/restore": {
+      "post": {
+        "operationId": "post__api_instances__id_restore",
+        "summary": "POST /api/instances/:id/restore",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/archived-instances": {
+      "get": {
+        "operationId": "get__api_archived_instances",
+        "summary": "GET /api/archived-instances",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/name": {
+      "put": {
+        "operationId": "put__api_instances__id_name",
+        "summary": "PUT /api/instances/:id/name",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances": {
+      "get": {
+        "operationId": "get__api_instances",
+        "summary": "GET /api/instances",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post__api_instances",
+        "summary": "POST /api/instances",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/connect": {
+      "post": {
+        "operationId": "post__api_instances__id_connect",
+        "summary": "POST /api/instances/:id/connect",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/qr": {
+      "get": {
+        "operationId": "get__api_instances__id_qr",
+        "summary": "GET /api/instances/:id/qr",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/disconnect": {
+      "post": {
+        "operationId": "post__api_instances__id_disconnect",
+        "summary": "POST /api/instances/:id/disconnect",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/key": {
+      "post": {
+        "operationId": "post__api_instances__id_key",
+        "summary": "POST /api/instances/:id/key",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/webhook": {
+      "put": {
+        "operationId": "put__api_instances__id_webhook",
+        "summary": "PUT /api/instances/:id/webhook",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/messages": {
+      "post": {
+        "operationId": "post__api_instances__id_messages",
+        "summary": "POST /api/instances/:id/messages",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "202": {
+            "description": "Queued; does not mean delivered"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "get__api_instances__id_messages",
+        "summary": "GET /api/instances/:id/messages",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "beforeId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/messages/{messageId}/cancel": {
+      "post": {
+        "operationId": "post__api_instances__id_messages__messageId_cancel",
+        "summary": "POST /api/instances/:id/messages/:messageId/cancel",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/events": {
+      "get": {
+        "operationId": "get__api_instances__id_events",
+        "summary": "GET /api/instances/:id/events",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "beforeId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/webhooks": {
+      "get": {
+        "operationId": "get__api_instances__id_webhooks",
+        "summary": "GET /api/instances/:id/webhooks",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "beforeId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/check-number": {
+      "post": {
+        "operationId": "post__api_instances__id_check_number",
+        "summary": "POST /api/instances/:id/check-number",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/groups": {
+      "get": {
+        "operationId": "get__api_instances__id_groups",
+        "summary": "GET /api/instances/:id/groups",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post__api_instances__id_groups",
+        "summary": "POST /api/instances/:id/groups",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/groups/{group}/participants": {
+      "put": {
+        "operationId": "put__api_instances__id_groups__group_participants",
+        "summary": "PUT /api/instances/:id/groups/:group/participants",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/avatar": {
+      "get": {
+        "operationId": "get__api_instances__id_avatar",
+        "summary": "GET /api/instances/:id/avatar",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/analytics": {
+      "get": {
+        "operationId": "get__api_instances__id_analytics",
+        "summary": "GET /api/instances/:id/analytics",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/state": {
+      "get": {
+        "operationId": "get__api_instances__id_state",
+        "summary": "GET /api/instances/:id/state",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/settings": {
+      "get": {
+        "operationId": "get__api_instances__id_settings",
+        "summary": "GET /api/instances/:id/settings",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put__api_instances__id_settings",
+        "summary": "PUT /api/instances/:id/settings",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sendIntervalMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 60000
+                  },
+                  "webhookEvents": {
+                    "type": "array",
+                    "items": {
+                      "enum": [
+                        "message",
+                        "receipt",
+                        "connection",
+                        "group",
+                        "group-participants",
+                        "presence",
+                        "call",
+                        "history",
+                        "error"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/pairing-code": {
+      "post": {
+        "operationId": "post__api_instances__id_pairing_code",
+        "summary": "POST /api/instances/:id/pairing-code",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/restart": {
+      "post": {
+        "operationId": "post__api_instances__id_restart",
+        "summary": "POST /api/instances/:id/restart",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/archive": {
+      "post": {
+        "operationId": "post__api_instances__id_archive",
+        "summary": "POST /api/instances/:id/archive",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/media": {
+      "get": {
+        "operationId": "get__api_instances__id_media",
+        "summary": "GET /api/instances/:id/media",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "beforeId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post__api_instances__id_media",
+        "summary": "POST /api/instances/:id/media",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "filename",
+                  "size"
+                ],
+                "properties": {
+                  "filename": {
+                    "type": "string"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 104857600
+                  },
+                  "mimetype": {
+                    "type": "string",
+                    "default": "application/octet-stream"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/media/{mediaId}/chunks/{index}": {
+      "put": {
+        "operationId": "put__api_instances__id_media__mediaId_chunks__index",
+        "summary": "PUT /api/instances/:id/media/:mediaId/chunks/:index",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mediaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "index",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/media/{mediaId}/complete": {
+      "post": {
+        "operationId": "post__api_instances__id_media__mediaId_complete",
+        "summary": "POST /api/instances/:id/media/:mediaId/complete",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mediaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/media/{mediaId}/download": {
+      "get": {
+        "operationId": "get__api_instances__id_media__mediaId_download",
+        "summary": "GET /api/instances/:id/media/:mediaId/download",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mediaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Media stream",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/chats": {
+      "get": {
+        "operationId": "get__api_instances__id_chats",
+        "summary": "GET /api/instances/:id/chats",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "beforeId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/chats/{chat}/messages": {
+      "get": {
+        "operationId": "get__api_instances__id_chats__chat_messages",
+        "summary": "GET /api/instances/:id/chats/:chat/messages",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chat",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "beforeId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/chats/{chat}/settings": {
+      "put": {
+        "operationId": "put__api_instances__id_chats__chat_settings",
+        "summary": "PUT /api/instances/:id/chats/:chat/settings",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chat",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/chats/{chat}/presence": {
+      "post": {
+        "operationId": "post__api_instances__id_chats__chat_presence",
+        "summary": "POST /api/instances/:id/chats/:chat/presence",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chat",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/chats/{chat}/history": {
+      "post": {
+        "operationId": "post__api_instances__id_chats__chat_history",
+        "summary": "POST /api/instances/:id/chats/:chat/history",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chat",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/inbox/{message}/read": {
+      "post": {
+        "operationId": "post__api_instances__id_inbox__message_read",
+        "summary": "POST /api/instances/:id/inbox/:message/read",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "message",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/inbox/{message}/reaction": {
+      "post": {
+        "operationId": "post__api_instances__id_inbox__message_reaction",
+        "summary": "POST /api/instances/:id/inbox/:message/reaction",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "message",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/inbox/{message}/text": {
+      "put": {
+        "operationId": "put__api_instances__id_inbox__message_text",
+        "summary": "PUT /api/instances/:id/inbox/:message/text",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "message",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/inbox/{message}/delete": {
+      "post": {
+        "operationId": "post__api_instances__id_inbox__message_delete",
+        "summary": "POST /api/instances/:id/inbox/:message/delete",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "message",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/inbox/{message}/star": {
+      "post": {
+        "operationId": "post__api_instances__id_inbox__message_star",
+        "summary": "POST /api/instances/:id/inbox/:message/star",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "message",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/inbox/{message}/media": {
+      "get": {
+        "operationId": "get__api_instances__id_inbox__message_media",
+        "summary": "GET /api/instances/:id/inbox/:message/media",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "message",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "beforeId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Media stream",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/polls/{message}/votes": {
+      "get": {
+        "operationId": "get__api_instances__id_polls__message_votes",
+        "summary": "GET /api/instances/:id/polls/:message/votes",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "message",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/contacts": {
+      "get": {
+        "operationId": "get__api_instances__id_contacts",
+        "summary": "GET /api/instances/:id/contacts",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "beforeId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post__api_instances__id_contacts",
+        "summary": "POST /api/instances/:id/contacts",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "phone",
+                  "name"
+                ],
+                "properties": {
+                  "phone": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "consent": {
+                    "type": "boolean"
+                  },
+                  "optedOut": {
+                    "type": "boolean"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/contacts/import": {
+      "post": {
+        "operationId": "post__api_instances__id_contacts_import",
+        "summary": "POST /api/instances/:id/contacts/import",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/contacts/{contact}/opt-out": {
+      "post": {
+        "operationId": "post__api_instances__id_contacts__contact_opt_out",
+        "summary": "POST /api/instances/:id/contacts/:contact/opt-out",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "contact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/blocklist": {
+      "get": {
+        "operationId": "get__api_instances__id_blocklist",
+        "summary": "GET /api/instances/:id/blocklist",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/contacts/block": {
+      "put": {
+        "operationId": "put__api_instances__id_contacts_block",
+        "summary": "PUT /api/instances/:id/contacts/block",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/profile": {
+      "get": {
+        "operationId": "get__api_instances__id_profile",
+        "summary": "GET /api/instances/:id/profile",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put__api_instances__id_profile",
+        "summary": "PUT /api/instances/:id/profile",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/groups/{group}": {
+      "get": {
+        "operationId": "get__api_instances__id_groups__group",
+        "summary": "GET /api/instances/:id/groups/:group",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put__api_instances__id_groups__group",
+        "summary": "PUT /api/instances/:id/groups/:group",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/groups/{group}/invite": {
+      "get": {
+        "operationId": "get__api_instances__id_groups__group_invite",
+        "summary": "GET /api/instances/:id/groups/:group/invite",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/groups/{group}/invite/revoke": {
+      "post": {
+        "operationId": "post__api_instances__id_groups__group_invite_revoke",
+        "summary": "POST /api/instances/:id/groups/:group/invite/revoke",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/groups/{group}/leave": {
+      "post": {
+        "operationId": "post__api_instances__id_groups__group_leave",
+        "summary": "POST /api/instances/:id/groups/:group/leave",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/groups/join": {
+      "post": {
+        "operationId": "post__api_instances__id_groups_join",
+        "summary": "POST /api/instances/:id/groups/join",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/statuses": {
+      "get": {
+        "operationId": "get__api_instances__id_statuses",
+        "summary": "GET /api/instances/:id/statuses",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "beforeId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post__api_instances__id_statuses",
+        "summary": "POST /api/instances/:id/statuses",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 200
+            },
+            "description": "Reuse the same key and payload when retrying. Different payload returns 409."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "default": "text",
+                    "type": "string",
+                    "enum": [
+                      "text",
+                      "image",
+                      "video",
+                      "audio",
+                      "document",
+                      "sticker",
+                      "location",
+                      "contact",
+                      "poll",
+                      "forward"
+                    ]
+                  },
+                  "text": {
+                    "type": "string",
+                    "maxLength": 20000
+                  },
+                  "data": {
+                    "type": "string",
+                    "maxLength": 750000
+                  },
+                  "mediaId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "mimetype": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "filename": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "ptt": {
+                    "type": "boolean"
+                  },
+                  "latitude": {
+                    "type": "number",
+                    "minimum": -90,
+                    "maximum": 90
+                  },
+                  "longitude": {
+                    "type": "number",
+                    "minimum": -180,
+                    "maximum": 180
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "phone": {
+                    "type": "string",
+                    "pattern": "^\\+?[1-9]\\d{6,14}$"
+                  },
+                  "options": {
+                    "minItems": 2,
+                    "maxItems": 12,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    }
+                  },
+                  "selectableCount": {
+                    "default": 1,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 12
+                  },
+                  "mentions": {
+                    "maxItems": 100,
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "quotedId": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "forwardId": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "sendAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                  },
+                  "statusAudience": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "backgroundColor": {
+                    "type": "string",
+                    "pattern": "^#[a-fA-F0-9]{6}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "selectableCount",
+                  "statusAudience"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/rules": {
+      "get": {
+        "operationId": "get__api_instances__id_rules",
+        "summary": "GET /api/instances/:id/rules",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "beforeId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post__api_instances__id_rules",
+        "summary": "POST /api/instances/:id/rules",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "match",
+                  "reply"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "match": {
+                    "enum": [
+                      "any",
+                      "exact",
+                      "contains"
+                    ]
+                  },
+                  "keyword": {
+                    "type": "string"
+                  },
+                  "reply": {
+                    "type": "string"
+                  },
+                  "cooldownSeconds": {
+                    "type": "integer",
+                    "default": 60
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "stopAfterMatch": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/rules/{rule}": {
+      "put": {
+        "operationId": "put__api_instances__id_rules__rule",
+        "summary": "PUT /api/instances/:id/rules/:rule",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "rule",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete__api_instances__id_rules__rule",
+        "summary": "DELETE /api/instances/:id/rules/:rule",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "rule",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/templates": {
+      "get": {
+        "operationId": "get__api_instances__id_templates",
+        "summary": "GET /api/instances/:id/templates",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "beforeId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post__api_instances__id_templates",
+        "summary": "POST /api/instances/:id/templates",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "text"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/campaigns": {
+      "get": {
+        "operationId": "get__api_instances__id_campaigns",
+        "summary": "GET /api/instances/:id/campaigns",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "beforeId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post__api_instances__id_campaigns",
+        "summary": "POST /api/instances/:id/campaigns",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 200
+            },
+            "description": "Reuse the same key and payload when retrying. Different payload returns 409."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "recipients",
+                  "message",
+                  "consentConfirmed"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "recipients": {
+                    "type": "array",
+                    "maxItems": 1000,
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "to"
+                          ],
+                          "properties": {
+                            "to": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "message": {
+                    "type": "object",
+                    "description": "Message fields except to; personalized per recipient. See Message schema."
+                  },
+                  "intervalSeconds": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 3600,
+                    "default": 5
+                  },
+                  "startAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "consentConfirmed": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/campaigns/{campaign}": {
+      "put": {
+        "operationId": "put__api_instances__id_campaigns__campaign",
+        "summary": "PUT /api/instances/:id/campaigns/:campaign",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "campaign",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/webhooks/{delivery}/retry": {
+      "post": {
+        "operationId": "post__api_instances__id_webhooks__delivery_retry",
+        "summary": "POST /api/instances/:id/webhooks/:delivery/retry",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "delivery",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/webhook/rotate": {
+      "post": {
+        "operationId": "post__api_instances__id_webhook_rotate",
+        "summary": "POST /api/instances/:id/webhook/rotate",
+        "security": [
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/templates/{template}": {
+      "put": {
+        "operationId": "put__api_instances__id_templates__template",
+        "summary": "PUT /api/instances/:id/templates/:template",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "template",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete__api_instances__id_templates__template",
+        "summary": "DELETE /api/instances/:id/templates/:template",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "template",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/contacts/{contact}": {
+      "delete": {
+        "operationId": "delete__api_instances__id_contacts__contact",
+        "summary": "DELETE /api/instances/:id/contacts/:contact",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "contact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
+    "/api/instances/{id}/messages/{job}": {
+      "get": {
+        "operationId": "get__api_instances__id_messages__job",
+        "summary": "GET /api/instances/:id/messages/:job",
+        "security": [
+          {
+            "instanceKey": []
+          },
+          {
+            "consoleSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "job",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation failed"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "403": {
+            "description": "Operation requires dashboard/admin privileges"
+          },
+          "404": {
+            "description": "Record not found or outside your instance"
+          },
+          "409": {
+            "description": "Connection/state/idempotency conflict"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    }
+  }
+}

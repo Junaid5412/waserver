@@ -5,3 +5,5 @@ coverage/
 
 .sites-runtime/
 public/.vite/
+__pycache__/
+*.pyc

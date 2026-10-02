@@ -49,6 +49,7 @@ export function jid(value) {
   if (typeof value !== "string") throw Error("A recipient is required");
   if (/^\d{5,20}(-\d{5,20})?@g\.us$/.test(value)) return value;
   if (/^\d{7,15}@s\.whatsapp\.net$/.test(value)) return value;
+  if (/^\d{5,20}@lid$/.test(value)) return value;
   if (!/^\+?[1-9]\d{6,14}$/.test(value))
     throw Error("Use an international phone number or a group JID");
   return value.replace("+", "") + "@s.whatsapp.net";

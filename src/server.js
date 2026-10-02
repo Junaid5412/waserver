@@ -19,6 +19,11 @@ import { gateway } from "./whatsapp.js";
 import { webhookUrl } from "./webhooks.js";
 import { createWorker } from "./worker.js";
 import { enqueueMessage } from "./messages.js";
+import { createMediaStore } from "./media.js";
+import { createInbox } from "./inbox.js";
+import { createAutomation } from "./automation.js";
+import { createFeatures } from "./features.js";
+import { messageSchema, validateMessage, buildContent } from "./content.js";
 const production = process.env.NODE_ENV === "production";
 if (!process.env.APP_ORIGIN) throw Error("APP_ORIGIN is required");
 const origin = new URL(process.env.APP_ORIGIN).origin;
@@ -68,7 +73,7 @@ app.use(
   "/api",
   rateLimit({
     windowMs: 60000,
-    limit: 180,
+    limit: (req) => (/\/media\/[^/]+\/chunks\//.test(req.path) ? 1500 : 180),
     standardHeaders: "draft-8",
     legacyHeaders: false,
   }),
@@ -144,6 +149,7 @@ const auth = wrap(async (req, res, next) => {
       const instance = await store.get("instances", key.instanceId);
       if (
         instance &&
+        !instance.archived &&
         (!instance.activeKeyId || instance.activeKeyId === key.id)
       ) {
         req.user = await store.get("users", key.userId);
@@ -218,6 +224,22 @@ app.get(
   ),
 );
 let creatingUser = false;
+app.get(
+  "/api/admin/system",
+  adminOnly,
+  wrap(async (req, res) => {
+    await store.health();
+    const counts = {};
+    for (const ns of ["users", "instances", "messages", "hooks", "media"])
+      counts[ns] = await store.stats(ns);
+    res.json({
+      database: "healthy",
+      uptimeSeconds: Math.floor(process.uptime()),
+      nodeVersion: process.version,
+      counts,
+    });
+  }),
+);
 app.post(
   "/api/admin/users",
   adminOnly,
@@ -262,6 +284,45 @@ app.put(
     res.json({ ok: true });
   }),
 );
+app.post(
+  "/api/admin/users/:userId/reset-password",
+  adminOnly,
+  wrap(async (req, res) => {
+    const u = await store.get("users", req.params.userId);
+    if (!u) fail(404, "Account not found");
+    if (u.id === req.user.id) fail(400, "Use your account password form");
+    const password = token().slice(0, 24);
+    await store.patch("users", u.id, {
+      password: passwordHash(password),
+      sessionVersion: token(),
+    });
+    res.json({ password });
+  }),
+);
+app.post(
+  "/api/instances/:id/restore",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const x = await store.get("instances", req.params.id);
+    if (!x || x.userId !== req.user.id) fail(404, "Instance not found");
+    await store.patch("instances", x.id, {
+      archived: false,
+      status: "disconnected",
+    });
+    res.json({ ok: true });
+  }),
+);
+app.get(
+  "/api/archived-instances",
+  consoleOnly,
+  wrap(async (req, res) =>
+    res.json(
+      (await store.query("instances", { userId: req.user.id, limit: 1000 }))
+        .filter((x) => x.archived)
+        .map(({ webhookSecret, activeKeyId, ...x }) => x),
+    ),
+  ),
+);
 app.put(
   "/api/instances/:id/name",
   consoleOnly,
@@ -280,9 +341,9 @@ app.get(
   consoleOnly,
   wrap(async (req, res) =>
     res.json(
-      (
-        await store.query("instances", { userId: req.user.id, limit: 1000 })
-      ).map(({ webhookSecret, activeKeyId, ...x }) => x),
+      (await store.query("instances", { userId: req.user.id, limit: 1000 }))
+        .filter((x) => !x.archived)
+        .map(({ webhookSecret, activeKeyId, ...x }) => x),
     ),
   ),
 );
@@ -312,6 +373,7 @@ app.use(
     const x = await store.get("instances", req.params.id);
     if (
       !x ||
+      x.archived ||
       x.userId !== req.user.id ||
       (req.apiInstance && req.apiInstance !== x.id)
     )
@@ -320,33 +382,44 @@ app.use(
     next();
   }),
 );
-const wa = gateway(store, enc, async (instance, type, data) => {
-  const current = await store.get("instances", instance.id);
-  if (!current) return;
-  instance = { ...instance, webhookUrl: current.webhookUrl };
-  const event = {
-    id: randomUUID(),
-    instanceId: instance.id,
-    userId: instance.userId,
-    type,
-    data,
-    createdAt: new Date().toISOString(),
-  };
-  await store.set("events", event.id, {
-    ...event,
-    data: enc.seal(JSON.stringify(data)),
-  });
-  if (instance.webhookUrl)
-    await store.set("hooks", event.id, {
-      id: event.id,
+const media = createMediaStore(store, enc),
+  inbox = createInbox(store, enc),
+  automation = createAutomation(store, enc);
+const wa = gateway(
+  store,
+  enc,
+  async (instance, type, data) => {
+    const current = await store.get("instances", instance.id);
+    if (!current) return;
+    instance = { ...instance, webhookUrl: current.webhookUrl };
+    const event = {
+      id: randomUUID(),
       instanceId: instance.id,
-      event: enc.seal(JSON.stringify(event)),
-      createdAt: event.createdAt,
-      attempts: 0,
-      nextAt: Date.now(),
-      status: "pending",
+      userId: instance.userId,
+      type,
+      data,
+      createdAt: new Date().toISOString(),
+    };
+    await store.set("events", event.id, {
+      ...event,
+      data: enc.seal(JSON.stringify(data)),
     });
-});
+    if (
+      instance.webhookUrl &&
+      (!current.webhookEvents?.length || current.webhookEvents.includes(type))
+    )
+      await store.set("hooks", event.id, {
+        id: event.id,
+        instanceId: instance.id,
+        event: enc.seal(JSON.stringify(event)),
+        createdAt: event.createdAt,
+        attempts: 0,
+        nextAt: Date.now(),
+        status: "pending",
+      });
+  },
+  { inbox, automation },
+);
 app.post(
   "/api/instances/:id/connect",
   consoleOnly,
@@ -396,103 +469,19 @@ app.put(
     res.json({ url, secret: enc.open(req.instance.webhookSecret) });
   }),
 );
-const messageSchema = z.object({
-  to: z.string(),
-  type: z
-    .enum([
-      "text",
-      "image",
-      "video",
-      "audio",
-      "document",
-      "location",
-      "contact",
-      "poll",
-    ])
-    .default("text"),
-  text: z.string().max(10000).optional(),
-  data: z.string().max(750000).optional(),
-  mimetype: z.string().max(120).optional(),
-  filename: z.string().max(200).optional(),
-  latitude: z.number().min(-90).max(90).optional(),
-  longitude: z.number().min(-180).max(180).optional(),
-  name: z.string().max(100).optional(),
-  phone: z
-    .string()
-    .regex(/^\+?[1-9]\d{6,14}$/)
-    .optional(),
-  options: z.array(z.string().min(1).max(100)).min(2).max(12).optional(),
-  sendAt: z.iso.datetime().optional(),
-});
-function content(d) {
-  if (d.type === "text") {
-    if (!d.text?.trim()) fail(400, "Message text is required");
-    return { text: d.text };
-  }
-  if (["image", "video", "audio", "document"].includes(d.type)) {
-    if (
-      !d.data ||
-      !/^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
-        d.data,
-      )
-    )
-      fail(400, "Provide media as base64 data");
-    return {
-      [d.type]: Buffer.from(d.data, "base64"),
-      caption: d.text || "",
-      mimetype:
-        d.mimetype ||
-        {
-          image: "image/jpeg",
-          video: "video/mp4",
-          audio: "audio/mpeg",
-          document: "application/octet-stream",
-        }[d.type],
-      fileName: d.filename || "attachment",
-    };
-  }
-  if (d.type === "location") {
-    if (d.latitude === undefined || d.longitude === undefined)
-      fail(400, "Latitude and longitude are required");
-    return {
-      location: {
-        degreesLatitude: d.latitude,
-        degreesLongitude: d.longitude,
-        name: d.name,
-      },
-    };
-  }
-  if (d.type === "poll") {
-    if (!d.text || !d.options)
-      fail(400, "Poll question and options are required");
-    return { poll: { name: d.text, values: d.options, selectableCount: 1 } };
-  }
-  if (!d.name || !d.phone) fail(400, "Contact name and phone are required");
-  const name = d.name.replace(/[\r\n:;]/g, " ");
-  return {
-    contacts: {
-      displayName: name,
-      contacts: [
-        {
-          vcard: `BEGIN:VCARD\nVERSION:3.0\nFN:${name}\nTEL;type=CELL;waid=${d.phone.replace("+", "")}:${d.phone}\nEND:VCARD`,
-        },
-      ],
-    },
-  };
-}
+const content = buildContent(media, inbox.load);
 app.post(
   "/api/instances/:id/messages",
   wrap(async (req, res) => {
     const d = messageSchema.parse(req.body);
-    d.to = jid(d.to);
-    content(d);
+    await validateMessage(req.instance, d, media, inbox.load);
     const { httpStatus, ...result } = await enqueueMessage(
       store,
       enc,
       req.instance,
       d,
       req.headers["idempotency-key"],
-      () => wa.active(req.instance.id),
+      () => {},
     );
     res.status(httpStatus).json(result);
   }),
@@ -624,6 +613,24 @@ app.get(
   ),
 );
 app.use(
+  "/api/instances/:id",
+  createFeatures({ store, enc, wa, inbox, media, wrap, page }),
+);
+app.use("/api", (req, res) =>
+  res.status(404).json({ error: "API endpoint not found" }),
+);
+app.get("/sdk/:file", (req, res, next) => {
+  if (!["zelon.mjs", "zelon.py", "zelon.php"].includes(req.params.file))
+    return res.status(404).end();
+  res.download(
+    path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "../sdk",
+      req.params.file,
+    ),
+  );
+});
+app.use(
   express.static(
     path.join(path.dirname(fileURLToPath(import.meta.url)), "../public"),
   ),
@@ -637,6 +644,10 @@ app.get("/{*path}", (req, res) =>
   ),
 );
 app.use((err, req, res, next) => {
+  if (res.headersSent) {
+    res.destroy(err);
+    return;
+  }
   if (
     err.message === "Use an international phone number or a group JID" ||
     err.message === "A recipient is required" ||
@@ -644,20 +655,16 @@ app.use((err, req, res, next) => {
   )
     return res.status(400).json({ error: err.message });
   if (err instanceof z.ZodError)
-    return res
-      .status(400)
-      .json({
-        error: err.issues
-          .map((x) => `${x.path.join(".")}: ${x.message}`)
-          .join("; "),
-      });
-  res
-    .status(err.status || 500)
-    .json({
-      error: err.status
-        ? err.message
-        : "Operation failed. Check the connection and server logs.",
+    return res.status(400).json({
+      error: err.issues
+        .map((x) => `${x.path.join(".")}: ${x.message}`)
+        .join("; "),
     });
+  res.status(err.status || 500).json({
+    error: err.status
+      ? err.message
+      : "Operation failed. Check the connection and server logs.",
+  });
   if (!err.status) console.error(err.message);
 });
 const work = createWorker(store, enc, wa, content);
@@ -674,7 +681,8 @@ while (true) {
   }
 }
 for (const x of await store.all("instances"))
-  if (["connected", "reconnecting"].includes(x.status)) await wa.connect(x);
+  if (!x.archived && ["connected", "reconnecting"].includes(x.status))
+    await wa.connect(x);
 const timer = setInterval(
   () => work().catch((e) => console.error("Worker failed:", e.message)),
   2000,

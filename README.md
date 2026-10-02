@@ -1,64 +1,87 @@
 # Zelon API
 
-A private, self-hosted WhatsApp integration application. Responsive marketing website and authenticated developer console, with persistent MySQL storage, encrypted WhatsApp authentication, instance-scoped API keys, message queue, scheduling, media messages, polls, contacts, locations, groups, events and signed webhook delivery.
+Private, self-hosted WhatsApp integration platform, with its own Zelon branding, responsive marketing website and multi-user developer console. Uses Baileys WhatsApp Web integration, not the official Meta Business Platform.
 
-## Status
+## Included in 0.3.0
 
-Implementation release 0.2.0. **Not yet deployed or verified against a live WhatsApp account.** Automated checks cover authentication, instance authorization, API-key scoping, origin protection, encryption, unsafe webhook targets and local database persistence. Real WhatsApp linking, messaging, Hostinger runtime support and visual mobile/browser QA must be verified before production use. A dedicated CI job is configured to exercise MySQL integration; it has not run yet. Local tests include interface DOM flows, but the cloud browser could not reach the internal preview. This is not a full GREEN-API clone. Status publishing, AI products, large media uploads, SDK packages, bulk campaigns, chat synchronization and billing are not implemented.
+- Persistent MySQL production database; encrypted WhatsApp sessions, message bodies, inbox, media chunks, events and signing secrets. SQLite for local development.
+- Admin-provisioned accounts, password changes, admin password resets, account disablement, instance ownership and scoped API keys.
+- QR and phone-code linking, reconnect handling, connection restart, recoverable instance archiving and key revocation.
+- Text, images, video, audio/voice, documents, stickers, locations, contacts and polls. Scheduled sends, mentions, quotes, forwarding, reactions, editing, deleting, stars and media download.
+- Persistent shared inbox, WhatsApp history synchronization, contact synchronization, unread counts, read markers, archive/pin/mute/presence APIs and delivery/read receipts.
+- Encrypted chunk uploads, configurable 100 MB default maximum, integrity checks and persistent media library.
+- Address book, CSV/JSON import, tags, consent records, opt-outs, blocking and blocklist.
+- Personalized consent-based campaigns with scheduling, deduplication, pause/resume/cancel and delivery counts. Direct-message auto replies with keyword matching, templates and per-contact cooldown.
+- WhatsApp statuses with explicit audiences, group creation/membership/roles, metadata, subject/description, disappearing messages, invite management and profile settings.
+- Signed HTTPS webhooks, event filtering, bounded retries, manual replay and secret rotation.
+- Instance analytics, administrator system health, OpenAPI 3.1 reference and Node/Python/PHP clients.
 
-Uses Baileys, an unofficial WhatsApp Web integration, not Meta's official WhatsApp Business Platform. No guarantee of unlimited usage or uninterrupted WhatsApp connectivity. No Zelon plan limits; infrastructural and WhatsApp limits still apply.
+This is the main WhatsApp integration product. AI products, Telegram integration, paid SaaS billing and official WABA template messaging are outside the application. See [feature details](docs/FEATURES.md).
 
-## Hostinger deployment
+## Run locally
 
-1. In Hostinger Websites, add a Node.js Web App and select this private repository, branch `main`.
-2. Select Node.js 22.13+ (24 recommended), package manager npm, root `/`, build command `npm run build`, start command `npm start`, entry file `src/server.js`. This is an Express server; there is no `dist` output folder.
-3. Create a dedicated persistent MySQL database and user. The app creates its own table. Configure `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD` using Hostinger environment variables.
-4. Set `NODE_ENV=production`, `APP_ORIGIN` to the exact HTTPS application origin, and `ENCRYPTION_KEY` to a stable base64-encoded 32-byte random key. Generate locally with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
-5. Set `ADMIN_EMAIL` and a strong `ADMIN_PASSWORD` (12+ characters). These bootstrap the first account only. Never commit secrets. Remove the bootstrap password from deployment configuration after the account is created.
-6. Set `TRUST_PROXY=1` only if one trusted reverse proxy fronts the app. Restrict direct access appropriately; incorrect proxy trust can weaken rate limiting.
-7. Deploy, open `/health`, then `/console`. Create an instance and scan its QR code from your own WhatsApp phone. Verify actual sending, incoming events and webhook signatures.
+Requires Node.js 22.13+; Node 24 recommended.
 
-The deployment requires persistent outbound WhatsApp WebSocket connectivity and a long-lived server process. If the Web App plan suspends the process or blocks this connection, a VPS worker is needed; this has not been verified on the user's account.
+```sh
+npm ci
+cp .env.example .env
+```
 
-## Persistence and operations
+In `.env`, set `NODE_ENV=development`, `APP_ORIGIN=http://localhost:3000`, `TRUST_PROXY=0`, your admin email/password, and a generated encryption key. Remove `MYSQL_HOST` for SQLite development. Generate the key with:
 
-Production refuses to start without MySQL and an encryption key. SQLite is strictly a development fallback. Keep the **same database and ENCRYPTION_KEY** across redeploys. Back up the database and encryption key separately; losing the key makes encrypted messages and WhatsApp credentials unrecoverable.
+```sh
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+npm test
+npm run build
+node --env-file=.env src/server.js
+```
 
-Run **one process per database**. If the connection holding the worker lease is lost, processing stops rather than silently allowing two workers. A dedicated MySQL advisory lock prevents a second process from starting concurrently. There is no horizontal scaling design in this release. MySQL must use a trusted/private network, or set `MYSQL_SSL=true` for a public TLS-enabled database using a trusted certificate authority.
+Open `/console`. Account creation is administrator-controlled. `npm start` expects environment variables already set by your hosting platform. `/health` checks database access and worker lease.
 
-Messages interrupted while sending become `unknown` on restart instead of being automatically resent. Investigate before manually retrying. Scheduled messages wait while disconnected. Media is capped at 500 KB; requests are capped at 1 MB. Webhook delivery retries up to eight times, does not follow redirects, and resolves/pins public IPv4 destinations to reduce SSRF exposure. Verify HMAC SHA-256 signatures against the raw request bytes and deduplicate event IDs.
+## Deploy yourself
 
-Data is retained indefinitely in this release; arrange periodic archival/retention for production. The record table includes indexed user, instance, status, due-time and creation-time columns. Message/event reads use cursor pagination instead of loading entire histories. Worker scans select bounded due-job batches. Existing records are backfilled during schema migration.
+Follow [Hostinger deployment](docs/DEPLOYMENT.md). The application is an Express server with no `dist` directory. Use `npm run build` and `npm start`, root directory `/`, entry `src/server.js`. Production refuses to start without persistent MySQL, HTTPS APP_ORIGIN and a valid encryption key.
 
-## Local development
+An optional Dockerfile and Compose definition are included for local MySQL acceptance testing or a VPS. Do not run multiple application processes against the same database. Keep the same database and **ENCRYPTION_KEY** when redeploying. Back them up separately and test restores; losing the encryption key makes encrypted data unrecoverable.
 
-Copy `.env.example` values into your shell or use `node --env-file=.env src/server.js`. Set `NODE_ENV=development`, `APP_ORIGIN=http://localhost:3000`, ADMIN_EMAIL, ADMIN_PASSWORD and ENCRYPTION_KEY. Omit MYSQL_HOST for local SQLite. Run `npm ci`, `npm test`, `npm run build`, `npm start`.
+## API and clients
 
-## Accounts and reliability
+Open `/api-reference.html` and `/openapi.json`, or read [API guide](docs/API.md). SDKs are in [sdk](sdk). Every client supports arbitrary scoped endpoints through `request`.
 
-Administrators create user accounts from the console using the + button and a popup. Initial passwords are generated and shown once. Each user sees only their own instances. Disable an account to revoke both session and API access. Users can change their own passwords; that revokes their existing sessions.
+```js
+import { Zelon } from "./sdk/zelon.mjs";
+const client = new Zelon({
+  url: process.env.ZELON_URL,
+  instanceId: process.env.ZELON_INSTANCE_ID,
+  apiKey: process.env.ZELON_API_KEY,
+});
+const result = await client.send(
+  {
+    to: "+97450000000",
+    type: "text",
+    text: "Hello from Zelon",
+  },
+  { key: "your-unique-business-operation-id" },
+);
+console.log(await client.getMessage(result.id));
+```
 
-Send an `Idempotency-Key` header (8–200 characters) on every message creation request. Replaying the same key and content returns the original job; reusing a key for different content returns 409. Keys are scoped to an instance. Without this header, each POST creates a new message. Queue claim and cancellation transitions are atomic.
+Keys are shown once and stored hashed. Console operations require a secure session and matching Origin. Use a stable Idempotency-Key when retrying message, status and campaign requests. A replay returns the existing job; a changed payload returns 409. SDKs never automatically retry sends. Retain your chosen key when retrying a timed-out operation.
 
-`POST /api/instances/:id/messages/:messageId/cancel` cancels a queued message; messages already sending cannot be cancelled. History endpoints accept `limit` (1–100), and `before` (ISO creation time) together with `beforeId` (last record ID) to retrieve the next page.
+## Delivery and operational behavior
 
-GitHub CI has separate application and real MySQL 8.4 tests, covering database persistence, indexes, worker exclusivity, atomic state transitions and pagination. A skipped local MySQL test is not a successful MySQL verification.
+202 means **queued**, not delivered. Jobs wait while disconnected. A send interrupted during shutdown/restart becomes `unknown`; inspect WhatsApp delivery before manually retrying. Failed sends are not automatically retried. Read receipts depend on privacy settings and what WhatsApp reports; group user receipts represent reported participant activity, not a guarantee every participant read the message.
 
-## API
+Campaigns accept up to 1,000 recipients per request, skip known opt-outs and require consent confirmation. STOP/unsubscribe/cancel subscription text creates durable opt-outs. Imports preserve opt-outs. Pausing/cancelling affects waiting jobs; already submitted sends can finish. Auto replies only trigger for fresh incoming direct messages, not history, groups or outgoing messages.
 
-All API key requests use `Authorization: Bearer KEY`. Each key is tied to one instance. Console-only operations require a secure session cookie and matching request origin. Keys are stored hashed and only shown once. WhatsApp authentication state, message payloads, events and webhook secrets are encrypted with AES-256-GCM.
+History contains only what WhatsApp synchronizes. Expired media may no longer be retrievable. Your number/group permissions, WhatsApp codec and size limits still apply. There are no Zelon subscription tiers, but infrastructure and WhatsApp usage limits still exist.
 
-| Method | Endpoint                                      | Purpose                           |
-| ------ | --------------------------------------------- | --------------------------------- |
-| POST   | /api/instances/:id/messages                   | Queue a message                   |
-| GET    | /api/instances/:id/messages                   | Latest 100 outgoing records       |
-| GET    | /api/instances/:id/events                     | Latest 100 events                 |
-| POST   | /api/instances/:id/check-number               | Check `{ "phone": "+974…" }`      |
-| GET    | /api/instances/:id/groups                     | List groups                       |
-| POST   | /api/instances/:id/groups                     | Create a group                    |
-| PUT    | /api/instances/:id/groups/:group/participants | Add/remove/promote/demote members |
-| GET    | /api/instances/:id/avatar?phone=NUMBER        | Profile image URL                 |
+Media is uploaded in 512 KiB chunks and streamed to the WhatsApp transport. Encrypted/base64 database storage uses approximately 1.8 times the original media size, before database/backups overhead. Data is retained indefinitely; arrange an appropriate retention policy and monitor database size. Contact metadata and routing IDs are indexed in plaintext; message bodies, media and credentials are encrypted.
 
-Text request: `{ "to": "+97450000000", "type": "text", "text": "Hello" }`. Optional `sendAt` is ISO 8601 UTC. Media types use `data` (base64), `mimetype`, `filename`, optional `text` caption. Location uses `latitude`/`longitude`. Contact uses `name`/`phone`. Poll uses `text` and `options` array.
+Webhook receivers must verify HMAC SHA-256 against **raw request bytes** and deduplicate event IDs. URLs must use public HTTPS on port 443; redirects and private/reserved IPv4 destinations are blocked. Delivery retries up to eight attempts. Secret rotation takes effect for subsequent attempts.
 
-See the authenticated console documentation for examples. Use phone numbers you control and permitted recipients. No external messages have been sent during implementation.
+## Verification status
+
+24 local tests passed, with 0 failures and 1 MySQL test skipped. See [verification record](docs/VERIFICATION.md). Local automated checks cover authentication, CSRF/origin protection, account isolation, key revocation, queue/idempotency, persistence, upload integrity, inbox deduplication, receipts, campaign controls, opt-outs, UI DOM workflows and the Node SDK. `npm audit --omit=dev` reported no known vulnerabilities during this update.
+
+**Not live-deployed or tested with a linked WhatsApp account.** Real MySQL tests are configured but skipped locally because no MySQL server is available. GitHub Actions has been blocked by the account billing lock, so no successful CI/MySQL run is claimed. Browser preview was inaccessible; responsive CSS and DOM workflows were checked, but visual mobile/browser QA still requires deployment. The PHP client is supplied as source and has not been executed in a PHP runtime here. Complete the [deployment acceptance checks](docs/DEPLOYMENT.md#acceptance-checks) before production use.

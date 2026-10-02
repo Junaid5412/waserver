@@ -6,7 +6,7 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import pino from "pino";
 import QRCode from "qrcode";
-export function gateway(store, encryption, emit) {
+export function gateway(store, encryption, emit, { inbox, automation } = {}) {
   const sockets = new Map(),
     qrs = new Map(),
     reconnects = new Map(),
@@ -16,7 +16,12 @@ export function gateway(store, encryption, emit) {
   let shuttingDown = false;
   const reconnectTimers = new Map();
   async function connect(instance) {
-    if (sockets.has(instance.id) || connecting.has(instance.id)) return;
+    if (
+      instance.archived ||
+      sockets.has(instance.id) ||
+      connecting.has(instance.id)
+    )
+      return;
     connecting.add(instance.id);
     stopped.delete(instance.id);
     try {
@@ -64,22 +69,29 @@ export function gateway(store, encryption, emit) {
         },
         getMessage: async (key) => {
           const row = await store.get("wa-message:" + instance.id, key.id);
-          return row
-            ? JSON.parse(encryption.open(row.data), BufferJSON.reviver)
-            : undefined;
+          if (!row) return undefined;
+          const parsed = JSON.parse(
+            encryption.open(row.data),
+            BufferJSON.reviver,
+          );
+          return parsed.key ? parsed.message : parsed;
         },
         markOnlineOnConnect: false,
         syncFullHistory: false,
+        shouldSyncHistoryMessage: () => true,
       });
       sockets.set(instance.id, socket);
       socket.ev.on("creds.update", () =>
-        write("creds", creds).catch(() =>
+        (sockets.get(instance.id) === socket && !stopped.has(instance.id)
+          ? write("creds", creds)
+          : Promise.resolve()
+        ).catch(() =>
           emit(instance, "error", { message: "Session persistence failed" }),
         ),
       );
       socket.ev.on("connection.update", async (update) => {
         try {
-          if (shuttingDown) return;
+          if (shuttingDown || sockets.get(instance.id) !== socket) return;
           if (update.qr) {
             qrs.set(instance.id, await QRCode.toDataURL(update.qr));
             instance.status = "awaiting_qr";
@@ -142,11 +154,12 @@ export function gateway(store, encryption, emit) {
         for (const m of messages) {
           if (!m.message || !m.key.id) continue;
           try {
-            await store.set("wa-message:" + instance.id, m.key.id, {
-              data: encryption.seal(
-                JSON.stringify(m.message, BufferJSON.replacer),
-              ),
-            });
+            const fresh = inbox
+              ? await inbox.persist(instance, m, { notify: type === "notify" })
+              : true;
+            if (inbox && fresh && automation)
+              await automation(instance, m, { notify: type === "notify" });
+            if (!fresh) continue;
             await emit(instance, "message", {
               id: m.key.id,
               chatId: m.key.remoteJid,
@@ -165,7 +178,77 @@ export function gateway(store, encryption, emit) {
       });
       socket.ev.on("messages.update", async (updates) => {
         try {
+          if (inbox) await inbox.receipt(instance, updates);
           await emit(instance, "receipt", { updates });
+        } catch {}
+      });
+      socket.ev.on("message-receipt.update", async (updates) => {
+        try {
+          if (inbox)
+            await inbox.receipt(
+              instance,
+              updates.map(({ key, receipt }) => ({
+                key,
+                update: {
+                  status: receipt.playedTimestamp
+                    ? 5
+                    : receipt.readTimestamp
+                      ? 4
+                      : 3,
+                },
+              })),
+            );
+          await emit(instance, "receipt", { userReceipts: updates });
+        } catch (e) {
+          logger.error({ err: e }, "Receipt persistence failed");
+        }
+      });
+      if (inbox) {
+        socket.ev.on(
+          "messaging-history.set",
+          async ({ messages, contacts, chats }) => {
+            try {
+              for (const c of chats || []) await inbox.chat(instance, c);
+              for (const c of contacts || []) await inbox.contact(instance, c);
+              for (const m of messages || []) await inbox.persist(instance, m);
+              await emit(instance, "history", {
+                messages: messages?.length || 0,
+                contacts: contacts?.length || 0,
+                chats: chats?.length || 0,
+              });
+            } catch (e) {
+              logger.error({ err: e }, "History persistence failed");
+            }
+          },
+        );
+        for (const event of ["contacts.upsert", "contacts.update"])
+          socket.ev.on(event, async (contacts) => {
+            try {
+              for (const c of contacts)
+                if (c.id) await inbox.contact(instance, c);
+            } catch (e) {
+              logger.error({ err: e }, "Contact persistence failed");
+            }
+          });
+      }
+      socket.ev.on("presence.update", async (data) => {
+        try {
+          await emit(instance, "presence", data);
+        } catch {}
+      });
+      socket.ev.on("groups.update", async (data) => {
+        try {
+          await emit(instance, "group", data);
+        } catch {}
+      });
+      socket.ev.on("group-participants.update", async (data) => {
+        try {
+          await emit(instance, "group-participants", data);
+        } catch {}
+      });
+      socket.ev.on("call", async (data) => {
+        try {
+          await emit(instance, "call", data);
         } catch {}
       });
     } finally {
@@ -182,6 +265,21 @@ export function gateway(store, encryption, emit) {
   };
   return {
     connect,
+    async pairingCode(instance, phone) {
+      await connect(instance);
+      const s = sockets.get(instance.id);
+      if (!s)
+        throw Object.assign(Error("Connection is not ready"), { status: 409 });
+      if (s.authState.creds.registered)
+        throw Object.assign(Error("This instance is already linked"), {
+          status: 409,
+        });
+      await s.waitForSocketOpen();
+      return s.requestPairingCode(phone.replace("+", ""));
+    },
+    async recordSent(instance, message) {
+      if (inbox && message?.message) await inbox.persist(instance, message);
+    },
     qr: (id) => qrs.get(id),
     active,
     async disconnect(instance, logout = false) {

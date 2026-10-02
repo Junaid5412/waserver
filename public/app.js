@@ -117,7 +117,25 @@ async function load() {
 }
 function shell() {
   clearInterval(timer);
-  root.innerHTML = `<div class="shell"><aside class="sidebar">${brand}<nav>${[["overview", "Overview"], ["instances", "Instances"], ["docs", "API documentation"], ["account", "Account"], ...(user.role === "admin" ? [["users", "User accounts"]] : [])].map(([id, title]) => `<button data-view="${id}" class="${view === id ? "active" : ""}">${title}</button>`).join("")}<button id="logout">Sign out</button></nav><div class="account">${esc(user.email)}</div></aside><main class="workspace" id="workspace"></main></div>`;
+  root.innerHTML = `<div class="shell"><aside class="sidebar">${brand}<nav>${[
+    ["overview", "Overview"],
+    ["instances", "Instances"],
+    ["docs", "API documentation"],
+    ["account", "Account"],
+    ...(user.role === "admin"
+      ? [
+          ["users", "User accounts"],
+          ["system", "System health"],
+        ]
+      : []),
+  ]
+    .map(
+      ([id, title]) =>
+        `<button data-view="${id}" class="${view === id ? "active" : ""}">${title}</button>`,
+    )
+    .join(
+      "",
+    )}<button id="logout">Sign out</button></nav><div class="account">${esc(user.email)}</div></aside><main class="workspace" id="workspace"></main></div>`;
   document.querySelectorAll("[data-view]").forEach(
     (b) =>
       (b.onclick = () => {
@@ -151,6 +169,24 @@ function render() {
     docs();
     return;
   }
+  if (view === "system") {
+    w.innerHTML = '<div class="loading">Checking system…</div>';
+    api("/admin/system")
+      .then((d) => {
+        w.innerHTML =
+          '<h1>System health</h1><div class="card"><p>Database: ' +
+          esc(d.database) +
+          "</p><p>Uptime: " +
+          d.uptimeSeconds +
+          " seconds · Node " +
+          esc(d.nodeVersion) +
+          '</p><pre class="doccode">' +
+          esc(JSON.stringify(d.counts, null, 2)) +
+          "</pre></div>";
+      })
+      .catch((e) => (w.textContent = e.message));
+    return;
+  }
   if (view === "users") {
     usersPage();
     return;
@@ -160,6 +196,35 @@ function render() {
     return;
   }
   w.innerHTML = `<div class="top"><div><div class="eyebrow">Your messaging workspace</div><h1>${view === "overview" ? "Overview" : "WhatsApp instances"}</h1><p>Connect and manage your numbers.</p></div><button id="new" class="btn primary">+ New instance</button></div>${view === "overview" ? `<div class="metrics"><div class="card metric"><div class="hint">Instances</div><div class="value">${instances.length}</div></div><div class="card metric"><div class="hint">Connected</div><div class="value">${instances.filter((x) => x.status === "connected").length}</div></div><div class="card metric"><div class="hint">Needs setup</div><div class="value">${instances.filter((x) => x.status !== "connected").length}</div></div></div>` : ""}${cards()}`;
+  w.insertAdjacentHTML(
+    "beforeend",
+    '<div class="actions"><button class="btn" id="showArchived">Archived instances</button></div><div id="archivedRows"></div>',
+  );
+  on("showArchived", async () => {
+    const rows = await api("/archived-instances");
+    document.querySelector("#archivedRows").innerHTML =
+      rows
+        .map(
+          (x) =>
+            `<div class="record row"><strong>${esc(x.name)}</strong><button class="btn" data-restore="${x.id}">Restore</button></div>`,
+        )
+        .join("") || "<p>No archived instances.</p>";
+    document.querySelectorAll("[data-restore]").forEach(
+      (b) =>
+        (b.onclick = async () => {
+          try {
+            await api(
+              "/instances/" + b.dataset.restore + "/restore",
+              "POST",
+              {},
+            );
+            await load();
+          } catch (e) {
+            toast(e.message);
+          }
+        }),
+    );
+  });
   on("new", newInstance);
   on("first", newInstance);
   document.querySelectorAll("[data-instance]").forEach(
@@ -191,13 +256,14 @@ function instancePage() {
   const x = selected,
     base = "/instances/" + x.id,
     w = document.querySelector("#workspace");
-  w.innerHTML = `<div class="top"><div><button class="btn" id="back">All instances</button><h1>${esc(x.name)}</h1><button class="btn" id="rename">Rename</button><p><span class="status ${esc(x.status)}">${esc(x.status.replaceAll("_", " "))}</span> ${esc(x.phone || "")}</p></div></div><div class="tabs">${[
+  w.innerHTML = `<div class="top"><div><button class="btn" id="back">All instances</button><h1>${esc(x.name)}</h1><button class="btn" id="rename">Rename</button><button class="btn danger" id="archiveInstance">Archive</button><p><span class="status ${esc(x.status)}">${esc(x.status.replaceAll("_", " "))}</span> ${esc(x.phone || "")}</p></div></div><div class="tabs">${[
     ["connection", "Connection"],
     ["send", "Send message"],
     ["history", "Message history"],
     ["events", "Incoming events"],
     ["webhooks", "Webhooks"],
     ["groups", "Groups & numbers"],
+    ...(window.ZelonFeatures?.tabs || []),
   ]
     .map(
       ([id, title]) =>
@@ -209,6 +275,18 @@ function instancePage() {
     render();
   });
   on("rename", () => renameInstance(base, x));
+  on("archiveInstance", () => {
+    const m = modal(
+      '<h2>Archive instance?</h2><p>This stops its connection and revokes API access. Your records remain available after restoring the instance.</p><div class="actions"><button class="btn danger" id="confirmArchive">Archive instance</button><button class="btn" id="cancelArchive">Cancel</button></div>',
+    );
+    on("cancelArchive", m.close);
+    on("confirmArchive", async () => {
+      await api(base + "/archive", "POST", {});
+      selected = null;
+      m.close();
+      await load();
+    });
+  });
   document.querySelectorAll("[data-tab]").forEach(
     (b) =>
       (b.onclick = () => {
@@ -217,6 +295,21 @@ function instancePage() {
       }),
   );
   const p = document.querySelector("#panel");
+  if (window.ZelonFeatures?.tabs.some(([id]) => id === tab)) {
+    window.ZelonFeatures.render({
+      tab,
+      base,
+      p,
+      api,
+      esc,
+      form,
+      on,
+      toast,
+    }).catch((e) => {
+      p.textContent = e.message;
+    });
+    return;
+  }
   if (tab === "connection") {
     p.innerHTML = `<div class="split"><div class="card"><h3>Link your WhatsApp number</h3><p class="hint">Open WhatsApp → Linked devices → Link a device. Scan the QR code displayed here.</p><div id="qrbox"></div><div class="actions"><button id="connect" class="btn primary">Connect number</button><button id="disconnect" class="btn danger">Log out number</button></div></div><div class="card"><h3>API access</h3><p class="hint">Generate an API key scoped to this instance. It is shown once. Generating a new key revokes the previous one.</p><button id="key" class="btn">Generate API key</button><div id="keybox"></div><p class="hint">Instance ID</p><div class="key">${esc(x.id)}</div></div></div>`;
     on("connect", async () => {
@@ -254,11 +347,11 @@ function instancePage() {
     timer = setInterval(poll, 3000);
   }
   if (tab === "send") {
-    p.innerHTML = `<div class="card"><h3>Compose a message</h3><form id="send"><label for="to">Recipient</label><input id="to" name="to" placeholder="+97450000000 or group JID" required><label for="type">Message type</label><select id="type" name="type"><option value="text">Text</option><option value="image">Image</option><option value="video">Video</option><option value="audio">Audio</option><option value="document">Document</option><option value="location">Location</option><option value="contact">Contact</option><option value="poll">Poll</option></select><div id="fields"></div><label for="sendAt">Schedule (optional, local time)</label><input id="sendAt" name="sendAt" type="datetime-local"><div class="actions"><button type="submit" class="btn primary">Queue message</button></div><p class="hint">Queued messages send when the linked number is connected. Media uploads are limited to 500 KB in this release.</p></form></div>`;
+    p.innerHTML = `<div class="card"><h3>Compose a message</h3><form id="send"><label for="to">Recipient</label><input id="to" name="to" placeholder="+97450000000 or group JID" required><label for="type">Message type</label><select id="type" name="type"><option value="text">Text</option><option value="image">Image</option><option value="video">Video</option><option value="audio">Audio</option><option value="document">Document</option><option value="sticker">Sticker (WebP)</option><option value="location">Location</option><option value="contact">Contact</option><option value="poll">Poll</option></select><div id="fields"></div><label for="sendAt">Schedule (optional, local time)</label><input id="sendAt" name="sendAt" type="datetime-local"><div class="actions"><button type="submit" class="btn primary">Queue message</button></div><p class="hint">Queued messages send when the linked number is connected. Media files use encrypted chunk uploads; default maximum 100 MB.</p></form></div>`;
     function fields() {
       const t = document.querySelector("#type").value;
       document.querySelector("#fields").innerHTML =
-        `${["text", "image", "video", "document", "poll"].includes(t) ? `<label for="text">${t === "poll" ? "Question" : "Message or caption"}</label><textarea id="text" name="text" ${["text", "poll"].includes(t) ? "required" : ""}></textarea>` : ""}${["image", "video", "audio", "document"].includes(t) ? '<label for="file">Media file (maximum 500 KB)</label><input id="file" type="file" required>' : ""}${t === "location" ? '<label for="latitude">Latitude</label><input name="latitude" id="latitude" type="number" step="any" min="-90" max="90" required><label for="longitude">Longitude</label><input name="longitude" id="longitude" type="number" step="any" min="-180" max="180" required>' : ""}${t === "contact" ? '<label for="name">Contact name</label><input id="name" name="name" required><label for="phone">Contact phone</label><input id="phone" name="phone" required>' : ""}${t === "poll" ? '<label for="options">Options (one per line)</label><textarea id="options" name="options" required></textarea>' : ""}`;
+        `${["text", "image", "video", "document", "poll"].includes(t) ? `<label for="text">${t === "poll" ? "Question" : "Message or caption"}</label><textarea id="text" name="text" ${["text", "poll"].includes(t) ? "required" : ""}></textarea>` : ""}${["image", "video", "audio", "document", "sticker"].includes(t) ? '<label for="file">Media file (default maximum 100 MB)</label><input id="file" type="file" required>' : ""}${t === "location" ? '<label for="latitude">Latitude</label><input name="latitude" id="latitude" type="number" step="any" min="-90" max="90" required><label for="longitude">Longitude</label><input name="longitude" id="longitude" type="number" step="any" min="-180" max="180" required>' : ""}${t === "contact" ? '<label for="name">Contact name</label><input id="name" name="name" required><label for="phone">Contact phone</label><input id="phone" name="phone" required>' : ""}${t === "poll" ? '<label for="options">Options (one per line)</label><textarea id="options" name="options" required></textarea>' : ""}`;
     }
     fields();
     const sendForm = document.querySelector("#send");
@@ -279,15 +372,7 @@ function instancePage() {
           .filter(Boolean);
       const f = document.querySelector("#file")?.files[0];
       if (f) {
-        if (f.size > 500000) throw Error("File must be 500 KB or smaller");
-        d.filename = f.name;
-        d.mimetype = f.type || "application/octet-stream";
-        d.data = await new Promise((resolve, reject) => {
-          const r = new FileReader();
-          r.onload = () => resolve(String(r.result).split(",")[1]);
-          r.onerror = reject;
-          r.readAsDataURL(f);
-        });
+        d.mediaId = await window.ZelonFeatures.upload(base, f, api, toast);
       }
       const result = await api(base + "/messages", "POST", d, {
         "Idempotency-Key": sendForm.dataset.requestKey,
@@ -340,13 +425,18 @@ function instancePage() {
   }
 
   if (tab === "webhooks") {
-    p.innerHTML = `<div class="card"><h3>Receive events in your application</h3><p class="hint">Zelon sends HTTPS POST requests. Verify X-Zelon-Signature with HMAC SHA-256 over the raw request body. Deduplicate using the event ID.</p><form id="webhook"><label for="url">Webhook URL</label><input type="url" id="url" name="url" value="${esc(x.webhookUrl)}" placeholder="https://your-app.example/webhooks/zelon"><div class="actions"><button class="btn primary" type="submit">Save webhook</button></div></form><div id="secret"></div><p class="hint">Leave the URL empty to disable delivery. Failed requests retry up to eight times.</p><div id="deliveries"></div></div>`;
+    p.innerHTML = `<div class="card"><h3>Receive events in your application</h3><p class="hint">Zelon sends HTTPS POST requests. Verify X-Zelon-Signature with HMAC SHA-256 over the raw request body. Deduplicate using the event ID.</p><form id="webhook"><label for="url">Webhook URL</label><input type="url" id="url" name="url" value="${esc(x.webhookUrl)}" placeholder="https://your-app.example/webhooks/zelon"><div class="actions"><button class="btn primary" type="submit">Save webhook</button></div></form><div id="secret"></div><p class="hint">Leave the URL empty to disable delivery. Failed requests retry up to eight times.</p><button class="btn" id="rotateHook">Rotate signing secret</button><div id="deliveries"></div></div>`;
     form("webhook", async (d) => {
       const r = await api(base + "/webhook", "PUT", d);
       selected.webhookUrl = r.url;
       document.querySelector("#secret").innerHTML =
         `<p class="hint">Webhook signing secret</p><div class="key">${esc(r.secret)}</div>`;
       toast("Webhook saved");
+    });
+    on("rotateHook", async () => {
+      const r = await api(base + "/webhook/rotate", "POST", {});
+      document.querySelector("#secret").textContent = r.secret;
+      toast("Signing secret rotated. Update your receiver.");
     });
     api(base + "/webhooks")
       .then((rows) => {
@@ -355,9 +445,24 @@ function instancePage() {
           rows
             .map(
               (r) =>
-                `<p><span class="status ${esc(r.status)}">${esc(r.status)}</span> ${r.attempts} retries · ${esc(r.error || r.id)}</p>`,
+                `<p><span class="status ${esc(r.status)}">${esc(r.status)}</span> ${r.attempts} retries · ${esc(r.error || r.id)} ${r.status === "failed" ? `<button class="btn" data-hook="${r.id}">Retry</button>` : ""}</p>`,
             )
             .join("");
+        document.querySelectorAll("[data-hook]").forEach(
+          (b) =>
+            (b.onclick = async () => {
+              try {
+                await api(
+                  base + "/webhooks/" + b.dataset.hook + "/retry",
+                  "POST",
+                  {},
+                );
+                toast("Webhook requeued");
+              } catch (e) {
+                toast(e.message);
+              }
+            }),
+        );
       })
       .catch((e) => toast(e.message));
   }
@@ -405,7 +510,7 @@ function instancePage() {
 }
 function docs() {
   document.querySelector("#workspace").innerHTML =
-    `<div class="top"><div><div class="eyebrow">Developer resources</div><h1>API documentation</h1><p>Connect your applications with scoped Bearer authentication.</p></div></div><div class="panel card"><h3>Authentication</h3><p>Generate a key in your instance’s Connection tab. Include it in the Authorization header. Keys work only for their assigned instance. Send a unique Idempotency-Key header when queuing each message; retries with that same key reuse the existing job, preventing duplicate queue entries.</p><pre class="doccode">Authorization: Bearer YOUR_API_KEY</pre><h3>Send a message</h3><pre class="doccode">POST /api/instances/INSTANCE_ID/messages\nContent-Type: application/json\n\n{\n  "to": "+97450000000",\n  "type": "text",\n  "text": "Hello from Zelon API"\n}</pre><p class="hint">Response: 202 with a message ID and queued status. Scheduling uses sendAt in ISO 8601 UTC. Media uses base64 data, mimetype and filename. Maximum media size: 500 KB.</p><h3>Available operations</h3><div class="tablewrap"><table><tr><th>Method</th><th>Instance endpoint</th><th>Purpose</th></tr>${[
+    `<div class="top"><div><div class="eyebrow">Developer resources</div><h1>API documentation</h1><p>Connect your applications with scoped Bearer authentication.</p></div></div><div class="panel card"><h3>Authentication</h3><p>Generate a key in your instance’s Connection tab. Include it in the Authorization header. Keys work only for their assigned instance. Send a unique Idempotency-Key header when queuing each message; retries with that same key reuse the existing job, preventing duplicate queue entries.</p><pre class="doccode">Authorization: Bearer YOUR_API_KEY</pre><h3>Send a message</h3><pre class="doccode">POST /api/instances/INSTANCE_ID/messages\nContent-Type: application/json\n\n{\n  "to": "+97450000000",\n  "type": "text",\n  "text": "Hello from Zelon API"\n}</pre><p class="hint">Response: 202 with a message ID and queued status. Scheduling uses sendAt in ISO 8601 UTC. Media uses base64 data, mimetype and filename. Use mediaId from a finalized chunk upload (100 MB default).</p><p><a class="btn" href="/api-reference.html" target="_blank" rel="noopener">Complete API reference & SDKs</a></p><h3>Available operations</h3><div class="tablewrap"><table><tr><th>Method</th><th>Instance endpoint</th><th>Purpose</th></tr>${[
       ["POST", "/messages", "Queue text, media, contacts, location or polls"],
       ["GET", "/messages", "Read outgoing history"],
       ["GET", "/events", "Read incoming messages and receipts"],
@@ -426,7 +531,7 @@ function docs() {
       .map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`)
       .join(
         "",
-      )}</table></div><h3>Webhooks</h3><p>Configure your public HTTPS endpoint in the Webhooks tab. Verify the raw body signature using the displayed secret. Delivery is at least once; deduplicate by event ID. Event types: connection, message, receipt.</p><h3>Failure handling</h3><p>400: invalid input. 401: invalid credentials. 404: inaccessible instance. 409: number is disconnected. 429: request rate exceeded. Messages interrupted during a send are marked unknown; check delivery before retrying to prevent duplicates.</p><h3>Deployment contract</h3><p>Run one server process per database. Message and event history use indexed database queries and cursor pagination. MySQL stores records and encrypted WhatsApp credentials. Preserve ENCRYPTION_KEY across deployments. AI chatbots, status publishing, large media transfers and SDK packages are not yet available.</p></div>`;
+      )}</table></div><h3>Webhooks</h3><p>Configure your public HTTPS endpoint in the Webhooks tab. Verify the raw body signature using the displayed secret. Delivery is at least once; deduplicate by event ID. Event types: connection, message, receipt.</p><h3>Failure handling</h3><p>400: invalid input. 401: invalid credentials. 404: inaccessible instance. 409: conflicting state or idempotency key. 429: request rate exceeded. Messages interrupted during a send are marked unknown; check delivery before retrying to prevent duplicates.</p><h3>Deployment contract</h3><p>Run one server process per database. Message and event history use indexed database queries and cursor pagination. MySQL stores records and encrypted WhatsApp credentials. Preserve ENCRYPTION_KEY across deployments. Shared inbox, status publishing, contacts, auto replies, consent-based campaigns, encrypted large media and SDK examples are included. Read the complete API reference and deployment guide in GitHub.</p></div>`;
 }
 async function boot() {
   if (location.pathname === "/") {
@@ -487,7 +592,28 @@ async function usersPage() {
   try {
     const users = await api("/admin/users");
     if (view !== "users") return;
-    w.innerHTML = `<div class="top"><div><div class="eyebrow">Administration</div><h1>User accounts</h1><p>Provision access to each user’s own messaging workspace.</p></div><button class="btn primary" id="addUser" aria-label="Add user">+ Add user</button></div><div class="instancegrid">${users.map((u) => `<article class="card"><div class="row"><h3>${esc(u.email)}</h3><span class="status ${u.disabled ? "failed" : "connected"}">${u.disabled ? "Disabled" : "Active"}</span></div><p class="hint">${esc(u.role)}${u.id === user.id ? " · Your account" : ""}</p>${u.id !== user.id ? `<button class="btn" data-user="${u.id}" data-disabled="${!u.disabled}">${u.disabled ? "Enable account" : "Disable account"}</button>` : ""}</article>`).join("")}</div>`;
+    w.innerHTML = `<div class="top"><div><div class="eyebrow">Administration</div><h1>User accounts</h1><p>Provision access to each user’s own messaging workspace.</p></div><button class="btn primary" id="addUser" aria-label="Add user">+ Add user</button></div><div class="instancegrid">${users.map((u) => `<article class="card"><div class="row"><h3>${esc(u.email)}</h3><span class="status ${u.disabled ? "failed" : "connected"}">${u.disabled ? "Disabled" : "Active"}</span></div><p class="hint">${esc(u.role)}${u.id === user.id ? " · Your account" : ""}</p>${u.id !== user.id ? `<button class="btn" data-user="${u.id}" data-disabled="${!u.disabled}">${u.disabled ? "Enable account" : "Disable account"}</button><button class="btn" data-reset-user="${u.id}">Reset password</button>` : ""}</article>`).join("")}</div>`;
+    document.querySelectorAll("[data-reset-user]").forEach(
+      (b) =>
+        (b.onclick = () => {
+          const m = modal(
+            '<h2>Reset user password?</h2><p>The account will receive a new initial password and existing sessions will be revoked.</p><div class="actions"><button class="btn primary" id="confirmReset">Reset password</button><button class="btn" id="cancelReset">Cancel</button></div>',
+          );
+          on("cancelReset", m.close);
+          on("confirmReset", async () => {
+            const r = await api(
+              "/admin/users/" + b.dataset.resetUser + "/reset-password",
+              "POST",
+              {},
+            );
+            m.overlay.innerHTML =
+              '<section class="card"><h2>New password</h2><p>Save this securely. Shown once.</p><div class="key">' +
+              esc(r.password) +
+              '</div><button class="btn" id="closeReset">Done</button></section>';
+            on("closeReset", m.close);
+          });
+        }),
+    );
     on("addUser", () => {
       const m = modal(
         '<h2>Add user</h2><form id="addUserForm"><label for="userEmail">Email address</label><input id="userEmail" name="email" type="email" maxlength="254" required><label for="userRole">Access role</label><select id="userRole" name="role"><option value="user">User</option><option value="admin">Administrator</option></select><p class="hint">A secure initial password will be generated and shown once.</p><div class="actions"><button type="submit" class="btn primary">Create account</button><button type="button" class="btn" id="closeUser">Cancel</button></div></form>',

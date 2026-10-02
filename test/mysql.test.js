@@ -65,6 +65,36 @@ test(
         beforeKey: page[0].id,
       });
       assert.equal(next[0].id, "first");
+      await store.set("mysql-test", "chat-job", {
+        id: "chat-job",
+        instanceId: "number",
+        userId: "owner",
+        chatId: "97450000000@s.whatsapp.net",
+        campaignId: "campaign",
+        lookupKey: "wa-id",
+        status: "queued",
+        createdAt: "2026-10-02T00:00:00Z",
+      });
+      assert.equal(
+        (
+          await store.query("mysql-test", {
+            instanceId: "number",
+            chatId: "97450000000@s.whatsapp.net",
+            campaignId: "campaign",
+            lookupKey: "wa-id",
+          })
+        ).length,
+        1,
+      );
+      await store.patch("mysql-test", "chat-job", (r) => ({
+        ...r,
+        counter: (r.counter || 0) + 1,
+      }));
+      assert.equal((await store.get("mysql-test", "chat-job")).counter, 1);
+      assert.equal(
+        (await store.stats("mysql-test", { instanceId: "number" })).queued,
+        2,
+      );
       await store.health();
       await store.clearNamespace("mysql-test");
       assert.equal((await store.all("mysql-test")).length, 0);

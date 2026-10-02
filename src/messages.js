@@ -10,6 +10,7 @@ export async function enqueueMessage(
   data,
   requestKey,
   ensureConnected,
+  extra = {},
 ) {
   if (
     requestKey &&
@@ -33,6 +34,7 @@ export async function enqueueMessage(
   const sendAt = data.sendAt ? Date.parse(data.sendAt) : Date.now();
   if (sendAt < Date.now() - 60000) fail(400, "Scheduled time is in the past");
   const row = {
+    ...extra,
     id,
     fingerprint,
     instanceId: instance.id,
