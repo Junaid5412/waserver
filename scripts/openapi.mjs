@@ -5,7 +5,7 @@ const spec = {
   openapi: "3.1.0",
   info: {
     title: "Zelon API",
-    version: "0.3.0",
+    version: "0.3.1",
     description:
       "Self-hosted WhatsApp Web integration. Keys are scoped to one instance. Dashboard-only operations require a session and matching Origin. WhatsApp provider rules apply.",
   },

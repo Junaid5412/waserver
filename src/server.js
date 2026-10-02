@@ -234,6 +234,7 @@ app.get(
       counts[ns] = await store.stats(ns);
     res.json({
       database: "healthy",
+      storage: store.storage,
       uptimeSeconds: Math.floor(process.uptime()),
       nodeVersion: process.version,
       counts,

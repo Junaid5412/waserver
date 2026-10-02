@@ -91,3 +91,7 @@ Webhook headers include X-Zelon-Signature (`sha256=HEX`) and X-Zelon-Event-ID. V
 ## SDKs
 
 Clients are source files in `sdk/`; they are also downloadable through the application API reference page. Node needs Node 22+; Python uses the standard library; PHP needs PHP 8+ and curl. No SDK sends automatically on import. Every send accepts your stable idempotency key; automatic transport retries are disabled. Node uploads read the file into memory, while the Python/PHP examples read chunks. For very large Node client files, call request on the chunk endpoints using your own file stream.
+
+## Local storage configuration
+
+DATABASE_DRIVER=sqlite uses a private SQLite file and does not require a database provider. DATA_DIR chooses an absolute persistent directory outside the deployment. The Hostinger domain layout is detected when available. DATABASE_DRIVER=mysql keeps the external database option. Preserve your existing ENCRYPTION_KEY. No automatic MySQL-to-SQLite data migration occurs. See STORAGE.md before switching an existing database.

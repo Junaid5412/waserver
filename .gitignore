@@ -7,3 +7,6 @@ coverage/
 public/.vite/
 __pycache__/
 *.pyc
+
+zelon-data/
+*.lock/

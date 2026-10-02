@@ -24,7 +24,7 @@ This release implements Zelon's core WhatsApp integration workflows. External Wh
 | Webhooks         | HMAC signing, event filtering, eight-attempt retry, manual replay, secret rotation                                     | Both                                         |
 | Monitoring       | Per-instance message/webhook/inbox/campaign counts, admin database health/uptime                                       | Both                                         |
 | Developers       | OpenAPI 3.1, detailed reference, Node/Python/PHP clients                                                               | Docs + SDK                                   |
-| Persistence      | MySQL production, SQLite development, indexed pagination and exclusive worker lease                                    | Backend                                      |
+| Persistence      | Private SQLite file storage in production/development or optional MySQL, indexed pagination and exclusive worker lease | Backend                                      |
 
 ## Transport and runtime limits
 

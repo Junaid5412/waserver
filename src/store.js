@@ -1,4 +1,14 @@
 import { DatabaseSync } from "node:sqlite";
+import {
+  mkdirSync,
+  realpathSync,
+  openSync,
+  closeSync,
+  chmodSync,
+} from "node:fs";
+import path from "node:path";
+import lockfile from "proper-lockfile";
+import { storageConfig, assertPrivateDirectory } from "./storage-config.js";
 const columns = {
   user_id: "VARCHAR(191) NOT NULL DEFAULT ''",
   instance_id: "VARCHAR(191) NOT NULL DEFAULT ''",
@@ -37,6 +47,8 @@ const metadata = (v) => [
   2,
 ];
 export async function openStore() {
+  const config = storageConfig();
+  let releaseFileLock;
   let db,
     pool,
     lease,
@@ -46,7 +58,7 @@ export async function openStore() {
   const mutate = async (sql, args = []) =>
     pool ? (await pool.query(sql, args))[0] : db.prepare(sql).run(...args);
   try {
-    if (process.env.MYSQL_HOST) {
+    if (config.driver === "mysql") {
       const mysql = await import("mysql2/promise");
       pool = mysql.createPool({
         host: process.env.MYSQL_HOST,
@@ -75,14 +87,40 @@ export async function openStore() {
         "CREATE TABLE IF NOT EXISTS zelon_records(namespace VARCHAR(64) NOT NULL,record_key VARCHAR(191) NOT NULL,payload LONGTEXT NOT NULL,PRIMARY KEY(namespace,record_key))",
       );
     } else {
-      if (process.env.NODE_ENV === "production")
-        throw Error(
-          "Production requires MYSQL_HOST and persistent MySQL database",
-        );
-      db = new DatabaseSync(process.env.SQLITE_PATH || "zelon.sqlite");
+      if (config.filename !== ":memory:") {
+        const directory = path.dirname(path.resolve(config.filename));
+        mkdirSync(directory, { recursive: true, mode: 0o700 });
+        if (config.directory) {
+          assertPrivateDirectory(realpathSync(directory));
+          chmodSync(directory, 0o700);
+        }
+        closeSync(openSync(config.filename, "a", 0o600));
+        if (config.directory)
+          assertPrivateDirectory(path.dirname(realpathSync(config.filename)));
+        chmodSync(config.filename, 0o600);
+        try {
+          releaseFileLock = await lockfile.lock(config.filename, {
+            stale: 30000,
+            update: 10000,
+            retries: 0,
+            onCompromised: () => {
+              leaseLost = true;
+            },
+          });
+        } catch (error) {
+          if (error.code === "ELOCKED")
+            throw Error(
+              "Another Zelon server is using this SQLite database; run one process",
+            );
+          throw error;
+        }
+      }
+      db = new DatabaseSync(config.filename);
       db.exec(
-        "PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS zelon_records(namespace TEXT NOT NULL,record_key TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(namespace,record_key))",
+        "PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; CREATE TABLE IF NOT EXISTS zelon_records(namespace TEXT NOT NULL,record_key TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(namespace,record_key))",
       );
+      if (config.directory)
+        console.log("Zelon SQLite data directory:", config.directory);
     }
     const existing = pool
       ? await execute(
@@ -121,6 +159,7 @@ export async function openStore() {
     if (lease) lease.release();
     if (pool) await pool.end();
     if (db) db.close();
+    if (releaseFileLock) await releaseFileLock().catch(() => {});
     throw error;
   }
   function healthy() {
@@ -136,6 +175,10 @@ export async function openStore() {
     ...Object.keys(columns),
   ];
   const store = {
+    storage: {
+      driver: config.driver,
+      ...(config.directory ? { directory: config.directory } : {}),
+    },
     async get(ns, key) {
       healthy();
       const rows = await execute(
@@ -323,7 +366,13 @@ export async function openStore() {
           leaseLost = true;
           throw Error("Database lease is not held");
         }
-      } else db.prepare("SELECT 1").get();
+      } else {
+        if (releaseFileLock && !(await lockfile.check(config.filename))) {
+          leaseLost = true;
+          throw Error("SQLite worker lease is not held");
+        }
+        db.prepare("SELECT 1").get();
+      }
     },
     async close() {
       if (pool) {
@@ -334,7 +383,10 @@ export async function openStore() {
         } catch {}
         lease.release();
         await pool.end();
-      } else db.close();
+      } else {
+        db.close();
+        if (releaseFileLock) await releaseFileLock().catch(() => {});
+      }
     },
   };
   return store;

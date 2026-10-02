@@ -2,9 +2,9 @@
 
 Private, self-hosted WhatsApp integration platform, with its own Zelon branding, responsive marketing website and multi-user developer console. Uses Baileys WhatsApp Web integration, not the official Meta Business Platform.
 
-## Included in 0.3.0
+## Included in 0.3.1
 
-- Persistent MySQL production database; encrypted WhatsApp sessions, message bodies, inbox, media chunks, events and signing secrets. SQLite for local development.
+- Private SQLite file storage or optional MySQL database; encrypted WhatsApp sessions, message bodies, inbox, media chunks, events and signing secrets. SQLite works in production with a private persistent directory.
 - Admin-provisioned accounts, password changes, admin password resets, account disablement, instance ownership and scoped API keys.
 - QR and phone-code linking, reconnect handling, connection restart, recoverable instance archiving and key revocation.
 - Text, images, video, audio/voice, documents, stickers, locations, contacts and polls. Scheduled sends, mentions, quotes, forwarding, reactions, editing, deleting, stars and media download.
@@ -40,7 +40,7 @@ Open `/console`. Account creation is administrator-controlled. `npm start` expec
 
 ## Deploy yourself
 
-Follow [Hostinger deployment](docs/DEPLOYMENT.md). The application is an Express server with no `dist` directory. Use `npm run build` and `npm start`, root directory `/`, entry `src/server.js`. Production refuses to start without persistent MySQL, HTTPS APP_ORIGIN and a valid encryption key.
+Follow [Hostinger deployment](docs/DEPLOYMENT.md). The application is an Express server with no `dist` directory. Use `npm run build` and `npm start`, root directory `/`, entry `src/server.js`. Use DATABASE_DRIVER=sqlite for local file storage. Hostinger layouts are detected automatically; otherwise set DATA_DIR to an absolute persistent private directory. HTTPS APP_ORIGIN and a valid encryption key remain required. Read [local storage setup](docs/STORAGE.md).
 
 An optional Dockerfile and Compose definition are included for local MySQL acceptance testing or a VPS. Do not run multiple application processes against the same database. Keep the same database and **ENCRYPTION_KEY** when redeploying. Back them up separately and test restores; losing the encryption key makes encrypted data unrecoverable.
 
@@ -82,6 +82,6 @@ Webhook receivers must verify HMAC SHA-256 against **raw request bytes** and ded
 
 ## Verification status
 
-24 local tests passed, with 0 failures and 1 MySQL test skipped. See [verification record](docs/VERIFICATION.md). Local automated checks cover authentication, CSRF/origin protection, account isolation, key revocation, queue/idempotency, persistence, upload integrity, inbox deduplication, receipts, campaign controls, opt-outs, UI DOM workflows and the Node SDK. `npm audit --omit=dev` reported no known vulnerabilities during this update.
+27 local tests passed, with 0 failures and 1 MySQL test skipped. See [verification record](docs/VERIFICATION.md). Local automated checks cover authentication, CSRF/origin protection, account isolation, key revocation, queue/idempotency, persistence, upload integrity, inbox deduplication, receipts, campaign controls, opt-outs, UI DOM workflows and the Node SDK. `npm audit --omit=dev` reported no known vulnerabilities during this update.
 
 **Not live-deployed or tested with a linked WhatsApp account.** Real MySQL tests are configured but skipped locally because no MySQL server is available. GitHub Actions has been blocked by the account billing lock, so no successful CI/MySQL run is claimed. Browser preview was inaccessible; responsive CSS and DOM workflows were checked, but visual mobile/browser QA still requires deployment. The PHP client is supplied as source and has not been executed in a PHP runtime here. Complete the [deployment acceptance checks](docs/DEPLOYMENT.md#acceptance-checks) before production use.
