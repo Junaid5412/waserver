@@ -116,3 +116,11 @@ Compose stores MySQL in a named volume. `docker compose down -v` destroys that d
 - **Unknown send:** delivery may already have occurred; investigate before sending again with a new idempotency key.
 
 Back up your SQLite/MySQL database and the encryption key separately, test restores, monitor system health/database size and apply an explicit data-retention policy. Do not rotate ENCRYPTION_KEY without an encrypted-data migration. Zelon has no horizontal scaling or background billing service.
+
+### LiteSpeed startup compatibility
+
+Keep the entry file set to `src/server.js`. This synchronous bootstrap loads
+`src/application.js` through dynamic import, allowing LiteSpeed's CommonJS
+`require()` loader to start the ESM application with asynchronous initialization.
+Do not set the entry to `src/application.js`. No environment change is needed
+for `ERR_REQUIRE_ASYNC_MODULE`; redeploy the updated code.

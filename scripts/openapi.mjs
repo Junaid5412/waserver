@@ -130,7 +130,7 @@ const schemas = {
   },
 };
 for (const [file, prefix] of [
-  ["src/server.js", ""],
+  ["src/application.js", ""],
   ["src/features.js", "/api/instances/:id"],
 ]) {
   const source = await readFile(file, "utf8"),

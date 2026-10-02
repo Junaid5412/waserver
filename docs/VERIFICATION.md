@@ -23,3 +23,9 @@ Tests exercise the running Express application for login, origin protection, sco
 Provider methods are wired to the installed Baileys APIs, but local mocks do not establish WhatsApp compatibility. Follow the deployment acceptance checklist before relying on this application for production messaging.
 
 SQLite update: production-mode child processes reopened the same private database from different release working directories, rejected a second worker, validated 0700/0600 filesystem permissions, and rejected public-directory symlinks. Production Express startup and /health were checked with DATABASE_DRIVER=sqlite and an unused legacy MYSQL_HOST value. Hostinger persistence itself remains unverified; run the create-instance/redeploy check on the live account.
+
+LiteSpeed startup fix: `npm run build` passed; `npm test` passed 28 tests
+with one optional MySQL test skipped. A CommonJS child process required
+`src/server.js` with production SQLite settings, returned synchronously,
+served `/health` and `/`, and shut down cleanly. This reproduces the loader
+mechanism from the supplied Hostinger error; live redeployment remains pending.
