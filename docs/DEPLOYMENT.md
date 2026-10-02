@@ -37,7 +37,7 @@ Hostinger documents deployment folders as overwritten. Its public guide does not
 | Entry            | `src/server.js`                       |
 | Output directory | None; Express serves `public` itself  |
 
-Hostinger field names can vary. Do not configure this as a static Vite build. Let the platform supply PORT if it does; the server binds 0.0.0.0. Run exactly one process/replica per database, with no overlapping old/new workers. Both SQLite file locking and the MySQL worker lease intentionally reject a second process.
+Hostinger field names can vary. Do not configure this as a static Vite build. Let the platform supply PORT if it does; the server binds 0.0.0.0. SQLite supports multiple LiteSpeed HTTP processes on the same machine: one owns the database and WhatsApp worker lease, and the others stream requests to its authenticated loopback endpoint. MySQL still requires exactly one process/replica.
 
 ## Environment
 
@@ -107,7 +107,7 @@ Compose stores MySQL in a named volume. `docker compose down -v` destroys that d
 ## Operations and troubleshooting
 
 - **Set DATA_DIR:** runtime path was not recognized; provide an absolute private persistent storage path. For mysql mode, MYSQL_HOST is required.
-- **Another Zelon server is using this database:** stop the previous process/replica before starting the replacement.
+- **Another Zelon server is using this database:** MySQL requires one worker. SQLite entries automatically share the active worker. When upgrading from the older exclusive-process build, stop the Web App completely before redeploy/start so the old worker cannot keep its lease. Allow 30 seconds after a forced stop for the heartbeat lock to expire; do not delete database or lock files while a worker is alive.
 - **Incorrect email/password after env change:** bootstrap variables don't reset existing users; another administrator can reset a user password in the console.
 - **Request origin is not allowed:** correct APP_ORIGIN and redeploy; use the final domain consistently.
 - **Connect this WhatsApp instance first:** link/reconnect the number. The offline queue remains persistent.

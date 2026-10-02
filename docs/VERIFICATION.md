@@ -29,3 +29,15 @@ with one optional MySQL test skipped. A CommonJS child process required
 `src/server.js` with production SQLite settings, returned synchronously,
 served `/health` and `/`, and shut down cleanly. This reproduces the loader
 mechanism from the supplied Hostinger error; live redeployment remains pending.
+
+Hostinger multi-process update: production CommonJS loader tests launched two
+processes with one SQLite database. Both served health requests; the follower
+logged in, created an instance, and the leader read the same instance using
+the forwarded session. Twenty concurrent follower health requests passed.
+Unauthenticated access to the loopback worker returned 403, and endpoint
+credentials had 0600 permissions. Both processes shut down cleanly.
+The worker lease remains exclusive; follower supervision relies on LiteSpeed
+restarting it after a sustained worker outage. Live Hostinger behavior and
+forced-crash recovery have not been validated.
+
+The startup test also overrides HTTP listen to permit only one external listener, and HTTP address to return no TCP port. The internal listener uses the underlying net.Server methods and still passes.

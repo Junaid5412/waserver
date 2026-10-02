@@ -1,4 +1,8 @@
 import express from "express";
+import { createServer } from "node:http";
+import { Server as NetServer } from "node:net";
+import { writeFileSync } from "node:fs";
+import { workerEndpoint } from "./follower.js";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import cookieParser from "cookie-parser";
@@ -689,6 +693,28 @@ const timer = setInterval(
   2000,
 );
 timer.unref();
+// Only the process holding the SQLite lease publishes this authenticated loopback endpoint.
+// Other LiteSpeed processes forward here instead of opening WhatsApp sessions.
+let internalServer;
+if (store.storage.driver === "sqlite" && store.storage.directory) {
+  const secret = randomUUID() + randomUUID();
+  internalServer = createServer((req, res) => {
+    if (req.headers["x-zelon-worker-token"] !== secret) {
+      res.writeHead(403); res.end(); return;
+    }
+    delete req.headers["x-zelon-worker-token"];
+    app(req, res);
+  });
+  await new Promise((resolve, reject) => {
+    internalServer.once("error", reject);
+    // LiteSpeed overrides http.Server.listen/address for its external socket.
+    // Use the underlying TCP implementation for this private listener.
+    NetServer.prototype.listen.call(internalServer, 0, "127.0.0.1", resolve);
+  });
+  writeFileSync(workerEndpoint(), JSON.stringify({
+    port: NetServer.prototype.address.call(internalServer).port, secret,
+  }), { mode: 0o600 });
+}
 const server = app.listen(Number(process.env.PORT || 3000), "0.0.0.0", () =>
   console.log("Zelon API listening"),
 );
@@ -699,7 +725,10 @@ async function shutdown() {
   clearInterval(timer);
   setTimeout(() => process.exit(1), 15000).unref();
   try {
-    await new Promise((resolve) => server.close(resolve));
+    await Promise.all([
+      new Promise((resolve) => server.close(resolve)),
+      internalServer && new Promise((resolve) => internalServer.close(resolve)),
+    ]);
     await work.stop();
     await wa.shutdown();
     await store.close();

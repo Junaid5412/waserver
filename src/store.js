@@ -109,9 +109,9 @@ export async function openStore() {
           });
         } catch (error) {
           if (error.code === "ELOCKED")
-            throw Error(
-              "Another Zelon server is using this SQLite database; run one process",
-            );
+            throw Object.assign(Error(
+              "Another Zelon server owns the SQLite worker lease",
+            ), { code: "ZELON_WORKER_BUSY" });
           throw error;
         }
       }

@@ -23,7 +23,7 @@ Hostinger says managed deployment folders are overwritten. A sibling data direct
 
 - Private directories use mode 0700; the database file uses 0600. Deployment code does not include user data.
 - WAL mode, full synchronous commits and a 5-second busy timeout are enabled.
-- One server process per database. An atomic heartbeat file lock prevents two active app workers sharing the same file. A lost/compromised lock stops database operations.
+- One database/WhatsApp worker per database. Additional LiteSpeed HTTP processes forward streamed requests to the lease owner through an authenticated loopback endpoint. Endpoint credentials stay in private `worker.json` (0600). The atomic heartbeat file lock still prevents duplicate messaging workers. A lost/compromised lock stops database operations.
 - A crashed process's lock can remain briefly; allow about 30 seconds before restarting. Do not delete a lock directory while another process is alive.
 - SQLite requires local filesystem locking; do not place this database on an incompatible network filesystem.
 - An inaccessible directory, missing persistent path or permission failure prevents startup and is reported in runtime logs. The app does not silently fall back to a disposable database.
