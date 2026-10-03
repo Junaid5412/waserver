@@ -38,6 +38,14 @@ export function describeMessage(message) {
     mimetype: value.mimetype || "",
     filename: value.fileName || "",
     pollOptions: value.options?.map((x) => x.optionName) || [],
+    durationSeconds: Number(value.seconds) || 0,
+    location: ["locationMessage", "liveLocationMessage"].includes(kind)
+      ? { latitude: value.degreesLatitude, longitude: value.degreesLongitude,
+          name: value.name || "", address: value.address || "" } : null,
+    contacts: kind === "contactMessage" ? [{ name: value.displayName || "Contact", vcard: value.vcard || "" }]
+      : kind === "contactsArrayMessage" ? (value.contacts || []).map(c => ({ name: c.displayName || "Contact", vcard: c.vcard || "" })) : [],
+    quotedText: value.contextInfo?.quotedMessage
+      ? (value.contextInfo.quotedMessage.conversation || value.contextInfo.quotedMessage.extendedTextMessage?.text || value.contextInfo.quotedMessage.imageMessage?.caption || "Quoted message").slice(0, 500) : "",
   };
 }
 export function createInbox(store, enc) {
@@ -177,6 +185,9 @@ export function createInbox(store, enc) {
       consent: previous?.consent || false,
       optedOut: previous?.optedOut || false,
     });
+    const existingChat = await store.get("chats", id);
+    if (existingChat && (c.name || c.notify))
+      await store.patch("chats", id, { name: c.name || c.notify });
   }
   async function chat(instance, c) {
     if (!c.id) return;

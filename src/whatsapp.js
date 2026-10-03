@@ -228,6 +228,11 @@ export function gateway(store, encryption, emit, {
         }
       });
       if (inbox) {
+        for (const event of ["chats.upsert", "chats.update"])
+          socket.ev.on(event, async (rows) => {
+            try { for (const row of rows) await inbox.chat(instance, row); }
+            catch (error) { logger.error({ err: error }, "Chat persistence failed"); }
+          });
         socket.ev.on(
           "messaging-history.set",
           async ({ messages, contacts, chats }) => {

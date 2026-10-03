@@ -394,14 +394,14 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
     "/inbox/:message/media",
     wrap(async (req, res) => {
       const m = await message(req),
-        s = wa.active(req.instance.id);
+        s = (() => { try { return wa.active(req.instance.id); } catch { return null; } })();
       const stream = await downloadMediaMessage(
         m,
         "stream",
         {},
         {
           logger: pino({ level: "silent" }),
-          reuploadRequest: s.updateMediaMessage,
+          reuploadRequest: s ? s.updateMediaMessage.bind(s) : async () => { fail(409, "Reconnect WhatsApp to recover expired media"); },
         },
       );
       const info = describeMessage(m.message),

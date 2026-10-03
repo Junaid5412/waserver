@@ -15,13 +15,15 @@ const wait = async (fn) => {
   }
   assert.fail("UI did not reach state");
 };
-function fixture(t) {
+function fixture(t, { rich = false } = {}) {
   const dom = new JSDOM('<div id="root"></div><div id="toast"></div>', {
     url: "https://zelon.example/console",
     runScripts: "outside-only",
   });
   t.after(() => dom.window.close());
   const calls = [];
+  dom.window.URL.createObjectURL = () => "blob:https://zelon.example/attachment";
+  dom.window.URL.revokeObjectURL = () => {};
   dom.window.fetch = async (url, opts = {}) => {
     const body = opts.body ? JSON.parse(opts.body) : undefined;
     calls.push({
@@ -31,6 +33,8 @@ function fixture(t) {
       headers: opts.headers,
     });
     let data = { ok: true };
+    if (url.endsWith("/media") && url.includes("/inbox/"))
+      return new Response(new Uint8Array([1, 2, 3]), { headers: { "Content-Type": "image/png" } });
     if (url === "/api/me")
       data = { id: "user-a", role: "admin", email: "owner@example.com" };
     else if (url === "/api/instances")
@@ -68,6 +72,13 @@ function fixture(t) {
       data = { id: "campaign", status: "running" };
     else if (/\/(contacts|media|campaigns|templates|rules|statuses)$/.test(url))
       data = [];
+    if (rich && url.includes("/chats/") && url.includes("/messages"))
+      data.push(
+        { id: "media", waId: "image-id", type: "image", hasMedia: true, text: "Photo caption", createdAt: "2026-10-02T01:00:00Z" },
+        { id: "location", waId: "location-id", type: "location", location: { latitude: 25.2854, longitude: 51.531 }, createdAt: "2026-10-02T01:00:00Z" },
+        { id: "poll", waId: "poll-id", type: "pollCreation", pollOptions: ["Yes <script>", "No"], text: "Are you available?", createdAt: "2026-10-02T01:00:00Z" },
+        { id: "contact", waId: "contact-id", type: "contact", contacts: [{ name: "Sam", vcard: "TEL:+97450000001" }], createdAt: "2026-10-02T01:00:00Z" },
+      );
     return new Response(JSON.stringify(data), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -143,4 +154,45 @@ test("CSV parser handles quoted commas/newlines and rejects invalid headers", as
   assert.equal(rows[1].name, "Line\nTwo");
   assert.throws(() => csv("email,other\nx,y"));
   assert.throws(() => csv('phone,name\n123,"unclosed'));
+});
+
+
+test("Console drawer and grouped instance submenus support keyboard and mobile back navigation", async (t) => {
+  const { dom, d } = fixture(t);
+  await wait(() => d.querySelector("#menuToggle"));
+  d.querySelector("#menuToggle").click();
+  assert.equal(d.querySelector("#menuToggle").getAttribute("aria-expanded"), "true");
+  assert(d.querySelector(".shell").classList.contains("menu-open"));
+  d.querySelector("#root").dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.equal(d.querySelector("#menuToggle").getAttribute("aria-expanded"), "false");
+  d.querySelector("[data-instance]").click();
+  assert.equal(d.querySelectorAll(".tool-menu").length, 5);
+  assert.equal(d.querySelectorAll("[data-tab]").length, 15);
+  d.querySelector('[data-tab="inbox"]').click();
+  await wait(() => d.querySelector("[data-chat]"));
+  d.querySelector("[data-chat]").click();
+  await wait(() => d.querySelector("#chatBack"));
+  assert(d.querySelector(".inboxlayout").classList.contains("chat-open"));
+  d.querySelector("#chatBack").click();
+  assert(!d.querySelector(".inboxlayout").classList.contains("chat-open"));
+});
+
+test("Chat shows rich data and securely fetches an inline media preview", async (t) => {
+  const { d, calls } = fixture(t, { rich: true });
+  await wait(() => d.querySelector("[data-instance]"));
+  d.querySelector("[data-instance]").click();
+  d.querySelector('[data-tab="inbox"]').click();
+  await wait(() => d.querySelector("[data-chat]"));
+  d.querySelector("[data-chat]").click();
+  await wait(() => d.querySelector("[data-preview]"));
+  assert.match(d.querySelector(".messages").textContent, /Photo caption/);
+  assert.match(d.querySelector(".messages").textContent, /TEL:\+97450000001/);
+  assert.match(d.querySelector(".messages").textContent, /Yes <script>/);
+  assert(d.querySelector('a[href^="https://www.google.com/maps?q="]'));
+  assert.equal(d.querySelectorAll("script").length, 0);
+  assert(d.querySelector("#replyAttachment"));
+  d.querySelector("[data-preview]").click();
+  await wait(() => d.querySelector(".chat-media img"));
+  assert.match(d.querySelector(".chat-media img").src, /^blob:/);
+  assert(calls.some(call => call.url.endsWith("/inbox/image-id/media")));
 });

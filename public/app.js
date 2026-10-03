@@ -103,6 +103,7 @@ function landing() {
     )}</div></section><section id="developers" class="section"><div class="strip"><div><h3>From your first request to your daily workflow.</h3><p>Use any language that speaks HTTP. API examples are available inside your console.</p></div><a href="/console" class="btn primary">Go to developer console</a></div></section><section id="faq" class="section"><h2>A few things to know.</h2><details><summary>Do I need a WhatsApp number?</summary><p>Yes. Connect your number using WhatsApp’s Linked devices screen and the QR code in your console.</p></details><details><summary>Is Zelon API free?</summary><p>This self-hosted application has no subscription tiers. Hosting, database and any external services have their own costs. WhatsApp still applies its own limits.</p></details><details><summary>Is this the official WhatsApp Business API?</summary><p>No. This connection uses the open-source Baileys WhatsApp Web integration. It is independent of Meta and GREEN-API. Connect numbers you control and follow WhatsApp’s terms.</p></details><details><summary>Does my data survive redeployment?</summary><p>Production data and encrypted connection credentials are stored in your configured private SQLite directory or MySQL database. Keep your database and encryption key when redeploying.</p></details></section></main><footer><span>© ${new Date().getFullYear()} Zelon API</span><span>Independent WhatsApp integration platform</span></footer>`;
 }
 function login() {
+  root.onkeydown = null;
   root.innerHTML = `<header>${brand}<nav><a href="/">Back to website</a></nav></header><main class="auth"><section class="card"><div class="eyebrow">Developer console</div><h1>Welcome back.</h1><p class="hint">Sign in to manage your WhatsApp connections.</p><form id="login"><label for="email">Email address</label><input id="email" name="email" type="email" autocomplete="username" required><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required><div class="actions"><button type="submit" class="btn primary">Sign in</button></div><p class="hint">Access is provisioned by your platform administrator.</p></form></section></main>`;
   form("login", async (d) => {
     await api("/login", "POST", d);
@@ -117,28 +118,30 @@ async function load() {
 }
 function shell() {
   clearInterval(timer);
-  root.innerHTML = `<div class="shell"><aside class="sidebar">${brand}<nav>${[
-    ["overview", "Overview"],
-    ["instances", "Instances"],
-    ["docs", "API documentation"],
-    ["account", "Account"],
-    ...(user.role === "admin"
-      ? [
-          ["users", "User accounts"],
-          ["system", "System health"],
-        ]
-      : []),
-  ]
-    .map(
-      ([id, title]) =>
-        `<button data-view="${id}" class="${view === id ? "active" : ""}">${title}</button>`,
-    )
-    .join(
-      "",
-    )}<button id="logout">Sign out</button></nav><div class="account">${esc(user.email)}</div></aside><main class="workspace" id="workspace"></main></div>`;
+  const menuButton = (id, title) => `<button data-view="${id}" class="${view === id ? "active" : ""}">${title}</button>`;
+  root.innerHTML = `<div class="shell"><div class="mobilebar"><button id="menuToggle" aria-label="Open navigation" aria-expanded="false" aria-controls="consoleSidebar">☰</button>${brand}<span class="mobile-account">${esc(user.email.split("@")[0])}</span></div><button class="menu-scrim" id="menuScrim" aria-label="Close navigation" hidden></button><aside class="sidebar" id="consoleSidebar">${brand}<div class="sidebar-caption">YOUR WORKSPACE</div><nav aria-label="Console navigation"><details open><summary>Workspace</summary>${menuButton("overview", "Overview")}${menuButton("instances", "WhatsApp instances")}</details><details open><summary>Developer tools</summary>${menuButton("docs", "API documentation")}</details>${user.role === "admin" ? `<details open><summary>Administration</summary>${menuButton("users", "User accounts")}${menuButton("system", "System health")}</details>` : ""}<details open><summary>Preferences</summary>${menuButton("account", "Account & security")}</details><button id="logout">Sign out</button></nav><div class="account"><span class="avatar">${esc(user.email[0].toUpperCase())}</span><div><strong>${esc(user.role === "admin" ? "Administrator" : "Workspace member")}</strong><small>${esc(user.email)}</small></div></div></aside><main class="workspace" id="workspace"></main></div>`;
+  const toggleMenu = (open) => {
+    document.querySelector(".shell").classList.toggle("menu-open", open);
+    document.querySelector("#menuToggle").setAttribute("aria-expanded", String(open));
+    document.querySelector("#menuScrim").hidden = !open;
+    if (open) document.querySelector(".sidebar [data-view]").focus();
+    else document.querySelector("#menuToggle").focus();
+  };
+  on("menuToggle", () => toggleMenu(!document.querySelector(".shell").classList.contains("menu-open")));
+  on("menuScrim", () => toggleMenu(false));
+  root.onkeydown = (event) => {
+    if (event.key === "Escape" && document.querySelector(".shell").classList.contains("menu-open")) toggleMenu(false);
+    if (event.key === "Tab" && document.querySelector(".shell").classList.contains("menu-open")) {
+      const controls = [...document.querySelectorAll(".sidebar summary,.sidebar button")].filter(el => !el.closest("details:not([open])") || el.tagName === "SUMMARY");
+      const first = controls[0], last = controls.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+  };
   document.querySelectorAll("[data-view]").forEach(
     (b) =>
       (b.onclick = () => {
+        toggleMenu(false);
         view = b.dataset.view;
         selected = null;
         render();
@@ -256,20 +259,13 @@ function instancePage() {
   const x = selected,
     base = "/instances/" + x.id,
     w = document.querySelector("#workspace");
-  w.innerHTML = `<div class="top"><div><button class="btn" id="back">All instances</button><h1>${esc(x.name)}</h1><button class="btn" id="rename">Rename</button><button class="btn danger" id="archiveInstance">Archive</button><p><span class="status ${esc(x.status)}">${esc(x.status.replaceAll("_", " "))}</span> ${esc(x.phone || "")}</p></div></div><div class="tabs">${[
-    ["connection", "Connection"],
-    ["send", "Send message"],
-    ["history", "Message history"],
-    ["events", "Incoming events"],
-    ["webhooks", "Webhooks"],
-    ["groups", "Groups & numbers"],
-    ...(window.ZelonFeatures?.tabs || []),
-  ]
-    .map(
-      ([id, title]) =>
-        `<button class="btn ${tab === id ? "active" : ""}" data-tab="${id}">${title}</button>`,
-    )
-    .join("")}</div><section id="panel" class="panel"></section>`;
+  w.innerHTML = `<div class="top"><div><button class="btn" id="back">All instances</button><h1>${esc(x.name)}</h1><button class="btn" id="rename">Rename</button><button class="btn danger" id="archiveInstance">Archive</button><p><span class="status ${esc(x.status)}">${esc(x.status.replaceAll("_", " "))}</span> ${esc(x.phone || "")}</p></div></div><nav class="tabs" aria-label="Instance tools">${[
+    ["Connect", [["connection", "Connection"], ["tools", "Profile & settings"]]],
+    ["Messaging", [["inbox", "Chats"], ["send", "Compose message"], ["history", "Message history"], ["contacts", "Contacts"], ["media", "Media library"], ["statuses", "Statuses"]]],
+    ["Automation", [["campaigns", "Campaigns"], ["automation", "Auto replies"], ["analytics", "Analytics"]]],
+    ["Integration", [["webhooks", "Webhooks"], ["events", "Incoming events"]]],
+    ["Groups", [["groups", "Groups & numbers"], ["group-tools", "Group settings"]]],
+  ].map(([title, items]) => `<details class="tool-menu" ${items.some(([id]) => id === tab) ? "open" : ""}><summary>${title}</summary><div>${items.map(([id, label]) => `<button class="btn ${tab === id ? "active" : ""}" data-tab="${id}" ${tab === id ? 'aria-current="page"' : ""}>${label}</button>`).join("")}</div></details>`).join("")}</nav><section id="panel" class="panel"></section>`;
   on("back", () => {
     selected = null;
     render();
@@ -305,6 +301,7 @@ function instancePage() {
       form,
       on,
       toast,
+      startPolling: (fn, ms) => { clearInterval(timer); timer = setInterval(fn, ms); },
     }).catch((e) => {
       p.textContent = e.message;
     });
@@ -531,7 +528,7 @@ function docs() {
       .map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`)
       .join(
         "",
-      )}</table></div><h3>Webhooks</h3><p>Configure your public HTTPS endpoint in the Webhooks tab. Verify the raw body signature using the displayed secret. Delivery is at least once; deduplicate by event ID. Event types: connection, message, receipt.</p><h3>Failure handling</h3><p>400: invalid input. 401: invalid credentials. 404: inaccessible instance. 409: conflicting state or idempotency key. 429: request rate exceeded. Messages interrupted during a send are marked unknown; check delivery before retrying to prevent duplicates.</p><h3>Deployment contract</h3><p>Run one server process per database. Message and event history use indexed database queries and cursor pagination. Your configured SQLite/MySQL database stores records and encrypted WhatsApp credentials. Preserve ENCRYPTION_KEY across deployments. Shared inbox, status publishing, contacts, auto replies, consent-based campaigns, encrypted large media and SDK examples are included. Read the complete API reference and deployment guide in GitHub.</p></div>`;
+      )}</table></div><h3>Webhooks</h3><p>Configure your public HTTPS endpoint in the Webhooks tab. Verify the raw body signature using the displayed secret. Delivery is at least once; deduplicate by event ID. Event types: connection, message, receipt.</p><h3>Failure handling</h3><p>400: invalid input. 401: invalid credentials. 404: inaccessible instance. 409: conflicting state or idempotency key. 429: request rate exceeded. Messages interrupted during a send are marked unknown; check delivery before retrying to prevent duplicates.</p><h3>Deployment contract</h3><p>One worker owns the database and WhatsApp sessions; additional local HTTP processes forward to it. Message and event history use indexed database queries and cursor pagination. Your configured SQLite/MySQL database stores records and encrypted WhatsApp credentials. Preserve ENCRYPTION_KEY across deployments. Shared inbox, status publishing, contacts, auto replies, consent-based campaigns, encrypted large media and SDK examples are included. Read the complete API reference and deployment guide in GitHub.</p></div>`;
 }
 async function boot() {
   if (location.pathname === "/") {

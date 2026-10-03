@@ -63,3 +63,18 @@ No arbitrary forwarding header is trusted by this fallback. The integration
 test forces HTTP sockets to expose undefined remoteAddress, then verifies
 follower login and shared instance creation succeed without undefined-IP or
 hash-input errors. Build passed; 31 tests passed, one MySQL test skipped.
+
+Console redesign: grouped sidebar and instance submenus, keyboard/mobile
+drawer controls, fluid page grids/forms/tables, and a WhatsApp-style two-pane
+inbox with mobile conversation/back navigation. Rich message DTOs and UI
+include captions, locations, contact cards, polls and quoted text. Authenticated
+blob previews support images/stickers, audio/video and media-library uploads;
+chat attachment replies use existing encrypted uploads. Conversation polling
+preserves active drafts, and chat/message pagination exposes older local data.
+Contact/chat update events persist display names. Media can download while
+offline when provider files are still valid; expired files need reconnection.
+The existing full suite passed 34 tests with one MySQL skip; focused drawer,
+rich-media and DTO tests passed again after final UI changes. Real browser
+visual QA remains unverified: Chromium download failed in this environment.
+Live WhatsApp media availability and provider history completeness are not
+guaranteed by mocked interface tests.

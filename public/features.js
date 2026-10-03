@@ -135,9 +135,10 @@ window.ZelonFeatures = (() => {
           list(
             rows,
             (m) =>
-              `<div class="record row"><div><strong>${esc(m.filename)}</strong><p class="hint">${Math.ceil(m.size / 1024)} KB · ${esc(m.status)}</p><div class="key">${esc(m.id)}</div></div>${m.status === "ready" ? `<a class="btn" href="/api${base}/media/${m.id}/download">Download</a>` : ""}</div>`,
+              `<div class="record row"><div><strong>${esc(m.filename)}</strong><p class="hint">${Math.ceil(m.size / 1024)} KB · ${esc(m.status)}</p><div class="key">${esc(m.id)}</div></div>${m.status === "ready" ? `<div><a class="btn" href="/api${base}/media/${m.id}/download">Download</a>${/^(image|video|audio)\//.test(m.mimetype) ? `<div class="chat-media"><button class="btn" data-preview="/api${base}/media/${m.id}/download" data-kind="${esc(m.mimetype.split("/")[0])}">Preview</button></div>` : ""}</div>` : ""}</div>`,
           ),
         );
+      bindPreviews(p);
       form("mediaUpload", async () => {
         await upload(
           base,
@@ -218,19 +219,68 @@ window.ZelonFeatures = (() => {
         await refresh();
       });
     }
+    function bindPreviews(container) {
+      container.querySelectorAll("[data-preview]").forEach(button => {
+          button.onclick = async () => {
+            button.disabled = true;
+            button.textContent = "Loading media…";
+            try {
+              const response = await fetch(button.dataset.preview);
+              if (!response.ok) {
+                const error = await response.json();
+                throw Error(error.error || "This media is unavailable. Reconnect WhatsApp or retry.");
+              }
+              const blob = await response.blob();
+              const objectUrl = URL.createObjectURL(blob);
+              const type = button.dataset.kind;
+              const element = document.createElement(type === "audio" ? "audio" : type === "video" ? "video" : "img");
+              if (type === "audio" || type === "video") element.controls = true;
+              else element.alt = "WhatsApp attachment";
+              element.src = objectUrl;
+              button.parentElement.replaceChildren(element);
+              const observer = new MutationObserver(() => {
+                if (!element.isConnected) { URL.revokeObjectURL(objectUrl); observer.disconnect(); }
+              });
+              observer.observe(document.querySelector("#workspace"), { childList: true, subtree: true });
+              element.onerror = () => { element.replaceWith(document.createTextNode("Preview unsupported. Use Download to open this file.")); };
+            } catch (error) {
+              button.disabled = false;
+              button.textContent = "Retry preview";
+              toast(error.message);
+            }
+          };
+        });
+    }
+    function messageBody(m) {
+      let body = m.quotedText ? `<div class="message-detail">Replying to: ${esc(m.quotedText)}</div>` : "";
+      if (m.hasMedia) {
+        const url = `/api${base}/inbox/${encodeURIComponent(m.waId)}/media`;
+        body += ["image", "sticker", "video", "audio"].includes(m.type)
+          ? `<div class="chat-media"><button class="btn" data-preview="${esc(url)}" data-kind="${esc(m.type)}">${m.type === "audio" ? "Play audio" : "View " + esc(m.type)}${m.durationSeconds ? " · " + m.durationSeconds + "s" : ""}</button></div>`
+          : `<div class="message-detail">Document: ${esc(m.filename || "Attachment")}<br><a class="btn mini" href="${esc(url)}">Download file</a></div>`;
+      }
+      if (m.location && Number.isFinite(m.location.latitude) && Number.isFinite(m.location.longitude))
+        body += `<div class="message-detail"><strong>${esc(m.location.name || "Shared location")}</strong><br>${esc(m.location.address)}<br><a href="https://www.google.com/maps?q=${encodeURIComponent(m.location.latitude + "," + m.location.longitude)}" target="_blank" rel="noopener noreferrer">View location ↗</a></div>`;
+      for (const contact of m.contacts || []) body += `<details class="message-detail"><summary>${esc(contact.name)}</summary><pre>${esc(contact.vcard)}</pre></details>`;
+      if (m.pollOptions?.length) body += `<div class="message-detail"><strong>Poll</strong>${m.pollOptions.map(option => `<div>○ ${esc(option)}</div>`).join("")}</div>`;
+      body += esc(m.text || (!m.hasMedia && !m.location && !m.contacts?.length && !m.pollOptions?.length ? "[" + (m.type || "Message") + "]" : ""));
+      return body;
+    }
     if (tab === "inbox") {
       let chats = await api(base + "/chats?limit=100"),
         chat = null,
         messages = [],
         quotedId;
-      p.innerHTML = `<div class="inboxlayout"><section class="card chatlist"><div class="row"><h3>Conversations</h3><button class="btn" id="reloadInbox">Refresh</button></div><input id="chatSearch" aria-label="Search conversations" placeholder="Search conversations"><div id="chatRows"></div><form id="openChat">${field("newChat", "New conversation", "tel", 'placeholder="+97450000000" required')}${submit("Open chat")}</form></section><section class="card conversation" id="conversation"><div class="empty"><h3>Your shared inbox</h3><p>Select a conversation to read messages and reply.</p></div></section></div>`;
+      let hasMoreChats = chats.length === 100;
+      let chatCursor = chats.at(-1);
+      p.innerHTML = `<div class="inboxlayout"><section class="card chatlist"><div class="row"><h3>Conversations</h3><button class="btn" id="reloadInbox">Refresh</button></div><input id="chatSearch" aria-label="Search conversations" placeholder="Search conversations"><div id="chatRows"></div><button class="btn" id="moreChats">Load more conversations</button><form id="openChat">${field("newChat", "New conversation", "tel", 'placeholder="+97450000000" required')}${submit("Open chat")}</form></section><section class="card conversation" id="conversation"><div class="empty"><h3>Your shared inbox</h3><p>Select a conversation to read messages and reply.</p></div></section></div>`;
       const drawChats = (q) => {
         document.querySelector("#chatRows").innerHTML = list(
           chats.filter((c) =>
             (c.name + " " + c.chatId).toLowerCase().includes(q),
           ),
           (c) =>
-            `<button class="chatentry" data-chat="${esc(c.chatId)}"><strong>${esc(c.name)}</strong><span>${esc(c.lastPreview)}</span><small>${c.unread || 0} unread · ${c.archived ? "Archived" : c.pinned ? "Pinned" : ""}</small></button>`,
+            `<button class="chatentry ${chat === c.chatId ? "active" : ""}" data-chat="${esc(c.chatId)}"><span class="avatar">${esc((c.name || c.chatId || "C").slice(0, 1).toUpperCase())}</span><div class="chat-copy"><strong>${esc(c.name || c.chatId)}</strong><span>${esc(c.lastPreview || "Start a conversation")}</span><small>${c.unread ? c.unread + " unread · " : ""}${c.archived ? "Archived" : c.pinned ? "Pinned" : "WhatsApp"}</small></div></button>`,
           "Conversations appear after WhatsApp syncs.",
         );
         document
@@ -241,9 +291,46 @@ window.ZelonFeatures = (() => {
                 open(b.dataset.chat).catch((e) => toast(e.message))),
           );
       };
+      const moreButton = document.querySelector("#moreChats");
+      moreButton.hidden = !hasMoreChats;
+      moreButton.onclick = async () => {
+        moreButton.disabled = true;
+        try {
+          const next = await api(base + "/chats?limit=100&before=" + encodeURIComponent(chatCursor.createdAt) + "&beforeId=" + encodeURIComponent(chatCursor.id));
+          const known = new Set(chats.map(row => row.id));
+          chats.push(...next.filter(row => !known.has(row.id)));
+          chatCursor = next.at(-1) || chatCursor;
+          hasMoreChats = next.length === 100;
+          moreButton.hidden = !hasMoreChats;
+          drawChats(document.querySelector("#chatSearch").value.toLowerCase());
+        } catch (error) { toast(error.message); }
+        finally { moreButton.disabled = false; }
+      };
       drawChats("");
       document.querySelector("#chatSearch").oninput = (e) =>
         drawChats(e.target.value.toLowerCase());
+      let polling = false;
+      ctx.startPolling?.(async () => {
+        if (polling || !p.isConnected || document.hidden) return;
+        polling = true;
+        try {
+          const freshChats = await api(base + "/chats?limit=100");
+          const freshIds = new Set(freshChats.map(row => row.id));
+          chats = [...freshChats, ...chats.filter(row => !freshIds.has(row.id))];
+          if (!p.isConnected) return;
+          drawChats(document.querySelector("#chatSearch").value.toLowerCase());
+          if (chat && messages.length <= 50) {
+            const recent = await api(base + "/chats/" + encodeURIComponent(chat) + "/messages?limit=50");
+            if (!p.isConnected || JSON.stringify(recent) === JSON.stringify(messages)) return;
+            const draft = document.querySelector("#replyText")?.value || "";
+            const attachment = document.querySelector("#replyAttachment")?.files.length;
+            const actionOpen = document.querySelector("#inboxAction")?.textContent;
+            if (!draft && !attachment && !quotedId && !actionOpen) await open(chat);
+            else document.querySelector("#refreshChat").textContent = "New updates · Refresh";
+          }
+        } catch { /* Keep the current conversation and draft during outages. */ }
+        finally { polling = false; }
+      }, 5000);
       on("reloadInbox", refresh);
       form("openChat", async (d) => open(d.newChat));
       async function open(id, older = false) {
@@ -266,7 +353,12 @@ window.ZelonFeatures = (() => {
         messages = older ? [...messages, ...rows] : rows;
         quotedId = undefined;
         const c = document.querySelector("#conversation");
-        c.innerHTML = `<div class="row"><h3>${esc(chats.find((x) => x.chatId === id)?.name || id)}</h3><button class="btn" id="refreshChat">Refresh</button></div><div class="actions"><button class="btn" id="readChat">Mark read</button><button class="btn" id="archiveChat">Archive</button><button class="btn" id="pinChat">Pin</button></div><div class="messages">${list([...messages].reverse(), (m) => `<article class="bubble ${m.fromMe ? "outgoing" : ""}"><div class="hint">${esc(m.name || m.participant || (m.fromMe ? "You" : "Contact"))}</div><div class="messagebody">${esc(m.text || "[" + m.type + "]")}</div><small>${esc(new Date(m.createdAt).toLocaleString())} · ${esc(m.status)}</small><div class="actions"><button class="btn mini" data-quote="${esc(m.waId)}">Reply</button><button class="btn mini" data-react="${esc(m.waId)}">React</button><button class="btn mini" data-forward="${esc(m.waId)}">Forward</button>${m.fromMe ? `<button class="btn mini" data-edit="${esc(m.waId)}">Edit</button><button class="btn mini" data-delete="${esc(m.waId)}">Delete</button>` : ""}${m.hasMedia ? `<a class="btn mini" href="/api${base}/inbox/${encodeURIComponent(m.waId)}/media">Download</a>` : ""}${m.pollOptions?.length ? `<button class="btn mini" data-votes="${esc(m.waId)}">Poll votes</button>` : ""}</div></article>`, "No local messages in this conversation yet.")}</div>${rows.length === 50 ? '<button class="btn" id="olderMessages">Load older messages</button>' : ""}<div id="quoteHint" class="hint"></div><form id="replyForm">${text("replyText", "Reply", 'required maxlength="20000"')}${submit("Send reply")}</form><div id="inboxAction"></div>`;
+        c.innerHTML = `<div class="row"><button class="btn" id="chatBack" aria-label="Back to conversations">←</button><span class="avatar">${esc((chats.find(x => x.chatId === id)?.name || "C").slice(0, 1).toUpperCase())}</span><h3>${esc(chats.find((x) => x.chatId === id)?.name || id)}</h3><button class="btn" id="refreshChat">Refresh</button></div><div class="actions"><button class="btn" id="readChat">Mark read</button><button class="btn" id="archiveChat">Archive</button><button class="btn" id="pinChat">Pin</button></div><div class="messages">${list([...messages].reverse(), (m) => `<article class="bubble ${m.fromMe ? "outgoing" : ""}"><div class="hint">${esc(m.name || m.participant || (m.fromMe ? "You" : "Contact"))}</div><div class="messagebody">${messageBody(m)}</div><small>${esc(new Date(m.createdAt).toLocaleString())} · ${esc(m.status)}</small><div class="actions"><button class="btn mini" data-quote="${esc(m.waId)}">Reply</button><button class="btn mini" data-react="${esc(m.waId)}">React</button><button class="btn mini" data-forward="${esc(m.waId)}">Forward</button>${m.fromMe ? `<button class="btn mini" data-edit="${esc(m.waId)}">Edit</button><button class="btn mini" data-delete="${esc(m.waId)}">Delete</button>` : ""}${m.hasMedia ? `<a class="btn mini" href="/api${base}/inbox/${encodeURIComponent(m.waId)}/media">Download</a>` : ""}${m.pollOptions?.length ? `<button class="btn mini" data-votes="${esc(m.waId)}">Poll votes</button>` : ""}</div></article>`, "No local messages in this conversation yet.")}</div>${rows.length === 50 ? '<button class="btn" id="olderMessages">Load older messages</button>' : ""}<div id="quoteHint" class="hint"></div><form id="replyForm">${text("replyText", "Reply", 'maxlength="20000" placeholder="Type a message…"')}${submit("Send")}${field("replyAttachment", "Attach file", "file", 'aria-label="Attach an image, video, audio or document"')}</form><div id="inboxAction"></div>`;
+        document.querySelector(".inboxlayout").classList.add("chat-open");
+        document.querySelectorAll("[data-chat]").forEach(button => button.classList.toggle("active", button.dataset.chat === id));
+        on("chatBack", () => document.querySelector(".inboxlayout").classList.remove("chat-open"));
+        bindPreviews(c);
+        if (!older) { const timeline = c.querySelector(".messages"); timeline.scrollTop = timeline.scrollHeight; }
         on("refreshChat", () => open(id));
         on("olderMessages", () => open(id, true));
         on("readChat", async () => {
@@ -297,10 +389,19 @@ window.ZelonFeatures = (() => {
         replyForm.dataset.key = crypto.randomUUID();
         replyForm.oninput = () => (replyForm.dataset.key = crypto.randomUUID());
         form("replyForm", async (d) => {
+          const file = document.querySelector("#replyAttachment").files[0];
+          if (!file && !d.replyText?.trim()) throw Error("Write a message or attach a file");
+          const payload = { to: chat, type: "text", text: d.replyText, quotedId };
+          if (file) {
+            payload.type = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : file.type.startsWith("audio/") ? "audio" : "document";
+            payload.mediaId = await upload(base, file, api, toast);
+            payload.caption = d.replyText || undefined;
+            delete payload.text;
+          }
           await api(
             base + "/messages",
             "POST",
-            { to: chat, type: "text", text: d.replyText, quotedId },
+            payload,
             { "Idempotency-Key": replyForm.dataset.key },
           );
           toast("Reply queued");
@@ -554,9 +655,10 @@ window.ZelonFeatures = (() => {
           list(
             rows,
             (m) =>
-              `<div class="record"><strong>${esc(m.name || m.chatId)}</strong><p>${esc(m.text || "[" + m.type + "]")}</p><small>${esc(m.createdAt)} · ${esc(m.status)}</small></div>`,
+              `<div class="record"><strong>${esc(m.name || m.chatId)}</strong><div class="messagebody">${messageBody(m)}</div><small>${esc(m.createdAt)} · ${esc(m.status)}</small></div>`,
           ),
         );
+      bindPreviews(p);
       const f = document.querySelector("#statusForm");
       f.dataset.key = crypto.randomUUID();
       f.oninput = () => (f.dataset.key = crypto.randomUUID());
