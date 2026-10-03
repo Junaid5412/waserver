@@ -56,3 +56,10 @@ logged without QR contents or credentials and exposed as instance errors.
 Build passed; 30 tests passed, one optional MySQL test skipped. Mocked gateway
 tests verify version selection, QR image publication/removal and fetch errors.
 Live WhatsApp pairing on Hostinger remains unverified.
+
+Unix/LiteSpeed IP regression fix: both API and login limiters use IPv6-aware
+keys with a conservative shared fallback when Express has no client address.
+No arbitrary forwarding header is trusted by this fallback. The integration
+test forces HTTP sockets to expose undefined remoteAddress, then verifies
+follower login and shared instance creation succeed without undefined-IP or
+hash-input errors. Build passed; 31 tests passed, one MySQL test skipped.

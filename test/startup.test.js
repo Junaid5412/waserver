@@ -12,7 +12,7 @@ test("LiteSpeed CommonJS require starts the production ESM application", async (
   let logs = "";
   let follower, followerClosed;
   const child = spawn(process.execPath, ["--input-type=commonjs", "-e",
-    'const http = require("node:http"); const originalListen = http.Server.prototype.listen; let calls = 0; http.Server.prototype.listen = function(...args) { if (++calls > 1) throw Error("LiteSpeed listener called twice"); return originalListen.apply(this, args); }; http.Server.prototype.address = () => null; require("./src/server.js"); console.log("REQUIRE_RETURNED");'], {
+    'const http = require("node:http"); const originalListen = http.Server.prototype.listen; let calls = 0; http.Server.prototype.listen = function(...args) { if (++calls > 1) throw Error("LiteSpeed listener called twice"); return originalListen.apply(this, args); }; http.Server.prototype.address = () => null; const originalEmit = http.Server.prototype.emit; http.Server.prototype.emit = function(event, ...args) { if (event === "request") Object.defineProperty(args[0].socket, "remoteAddress", { value: undefined, configurable: true }); return originalEmit.call(this, event, ...args); }; require("./src/server.js"); console.log("REQUIRE_RETURNED");'], {
     env: { ...process.env, WORKER_TRANSPORT: "tcp", NODE_ENV: "production", PORT: "3141",
       APP_ORIGIN: "https://wa.example.com", DATABASE_DRIVER: "sqlite",
       DATA_DIR: dir, ADMIN_EMAIL: "admin@example.com",
@@ -63,6 +63,7 @@ test("LiteSpeed CommonJS require starts the production ESM application", async (
       body: JSON.stringify({ email: "admin@example.com", password: "loader test password 12345" }),
     });
     assert.equal(login.status, 200);
+    assert.doesNotMatch(logs, /ERR_ERL_UNDEFINED_IP_ADDRESS|The "data" argument/);
     const cookie = login.headers.get("set-cookie").split(";")[0];
     const created = await fetch("http://127.0.0.1:3142/api/instances", {
       method: "POST", headers: { Origin: "https://wa.example.com", Cookie: cookie, "Content-Type": "application/json" },

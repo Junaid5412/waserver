@@ -5,6 +5,7 @@ import { writeFileSync, chmodSync, rmSync } from "node:fs";
 import { workerEndpoint } from "./follower.js";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import { requestKey } from "./request-key.js";
 import cookieParser from "cookie-parser";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
@@ -76,6 +77,7 @@ app.use(cookieParser());
 app.use(
   "/api",
   rateLimit({
+    keyGenerator: requestKey,
     windowMs: 60000,
     limit: (req) => (/\/media\/[^/]+\/chunks\//.test(req.path) ? 1500 : 180),
     standardHeaders: "draft-8",
@@ -108,6 +110,7 @@ app.get(
 app.post(
   "/api/login",
   rateLimit({
+    keyGenerator: requestKey,
     windowMs: 15 * 60000,
     limit: 15,
     standardHeaders: "draft-8",
