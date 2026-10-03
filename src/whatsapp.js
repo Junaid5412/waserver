@@ -3,10 +3,14 @@ import makeWASocket, {
   BufferJSON,
   proto,
   DisconnectReason,
+  fetchLatestWaWebVersion,
 } from "@whiskeysockets/baileys";
 import pino from "pino";
 import QRCode from "qrcode";
-export function gateway(store, encryption, emit, { inbox, automation } = {}) {
+export function gateway(store, encryption, emit, {
+  inbox, automation, socketFactory = makeWASocket,
+  versionFetcher = fetchLatestWaWebVersion,
+} = {}) {
   const sockets = new Map(),
     qrs = new Map(),
     reconnects = new Map(),
@@ -14,6 +18,7 @@ export function gateway(store, encryption, emit, { inbox, automation } = {}) {
     stopped = new Set();
   const logger = pino({ level: "error" });
   let shuttingDown = false;
+  let protocol, protocolFetchedAt = 0;
   const reconnectTimers = new Map();
   async function connect(instance) {
     if (
@@ -38,11 +43,23 @@ export function gateway(store, encryption, emit, { inbox, automation } = {}) {
       const creds = (await read("creds")) || initAuthCreds();
       await write("creds", creds);
       instance.status = "connecting";
+      instance.connectionError = null;
       await store.patch("instances", instance.id, {
         status: instance.status,
         phone: instance.phone,
+        connectionError: null,
       });
-      const socket = makeWASocket({
+      if (!protocol || Date.now() - protocolFetchedAt > 600000) {
+        const latest = await versionFetcher({ timeout: 15000 });
+        if (!latest.isLatest || !Array.isArray(latest.version) ||
+            latest.version.length !== 3 || !latest.version.every(Number.isInteger))
+          throw Object.assign(Error("Cannot fetch the current WhatsApp Web version. Check hosting outbound HTTPS access and retry."), { status: 502 });
+        protocol = latest.version;
+        protocolFetchedAt = Date.now();
+      }
+      const socket = socketFactory({
+        version: protocol,
+        connectTimeoutMs: 30000,
         logger,
         auth: {
           creds,
@@ -95,9 +112,11 @@ export function gateway(store, encryption, emit, { inbox, automation } = {}) {
           if (update.qr) {
             qrs.set(instance.id, await QRCode.toDataURL(update.qr));
             instance.status = "awaiting_qr";
+            instance.connectionError = null;
           }
           if (update.connection === "open") {
             instance.status = "connected";
+            instance.connectionError = null;
             instance.phone = socket.user?.id?.split(":")[0];
             qrs.delete(instance.id);
             reconnects.set(instance.id, 0);
@@ -106,6 +125,9 @@ export function gateway(store, encryption, emit, { inbox, automation } = {}) {
             sockets.delete(instance.id);
             qrs.delete(instance.id);
             const code = update.lastDisconnect?.error?.output?.statusCode;
+            if (code === 405) protocol = undefined;
+            instance.connectionError = "WhatsApp connection closed" + (code ? " (code " + code + ")" : "") + ". Retry the connection; if it persists, check server outbound WebSocket access.";
+            logger.error({ instanceId: instance.id, disconnectCode: code }, "WhatsApp connection closed");
             const terminal = [
               DisconnectReason.loggedOut,
               DisconnectReason.badSession,
@@ -139,10 +161,12 @@ export function gateway(store, encryption, emit, { inbox, automation } = {}) {
               ...current,
               status: instance.status,
               phone: instance.phone,
+              connectionError: instance.connectionError,
             };
             await store.patch("instances", instance.id, {
               status: instance.status,
               phone: instance.phone,
+              connectionError: instance.connectionError,
             });
           }
           await emit(instance, "connection", { status: instance.status });
@@ -251,6 +275,16 @@ export function gateway(store, encryption, emit, { inbox, automation } = {}) {
           await emit(instance, "call", data);
         } catch {}
       });
+    } catch (error) {
+      if (!sockets.has(instance.id)) {
+        instance.status = "disconnected";
+        await store.patch("instances", instance.id, {
+          status: instance.status,
+          connectionError: error.status === 502 ? error.message : "WhatsApp startup failed. Check server logs and retry.",
+        });
+      }
+      logger.error({ instanceId: instance.id, code: error.code }, "WhatsApp startup failed");
+      throw error;
     } finally {
       connecting.delete(instance.id);
     }

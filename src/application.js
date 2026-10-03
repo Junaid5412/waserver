@@ -434,7 +434,7 @@ app.post(
   }),
 );
 app.get("/api/instances/:id/qr", consoleOnly, (req, res) =>
-  res.json({ qr: wa.qr(req.instance.id) || null, status: req.instance.status }),
+  res.json({ qr: wa.qr(req.instance.id) || null, status: req.instance.status, error: req.instance.connectionError || null }),
 );
 app.post(
   "/api/instances/:id/disconnect",

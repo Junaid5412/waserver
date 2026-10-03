@@ -48,3 +48,11 @@ network isolation or worker termination; the logs do not establish which.
 Production now defaults to a private Unix socket. The local execution
 environment rejects Unix listener creation with EPERM, so the integration
 test explicitly uses the TCP fallback; live Unix transport remains unverified.
+
+WhatsApp QR update: sockets now fetch the current WhatsApp Web protocol
+version rather than using the bundled version. Fetch failure is shown to the
+user instead of silently using stale defaults. Connection-close codes are
+logged without QR contents or credentials and exposed as instance errors.
+Build passed; 30 tests passed, one optional MySQL test skipped. Mocked gateway
+tests verify version selection, QR image publication/removal and fetch errors.
+Live WhatsApp pairing on Hostinger remains unverified.

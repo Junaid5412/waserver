@@ -333,7 +333,7 @@ function instancePage() {
         const box = document.querySelector("#qrbox");
         box.innerHTML = d.qr
           ? `<img class="qr" src="${esc(d.qr)}" alt="WhatsApp linking QR code">`
-          : `<p class="hint">${d.status === "connected" ? "Your number is connected." : "QR code will appear after starting the connection."}</p>`;
+          : `<p class="hint">${esc(d.error || (d.status === "connected" ? "Your number is connected." : ["connecting", "reconnecting"].includes(d.status) ? "Connecting to WhatsApp. Waiting for QR code…" : "Select Connect number to generate a QR code."))}</p>`;
         if (d.status !== x.status) {
           instances = await api("/instances");
           selected = instances.find((i) => i.id === x.id);
