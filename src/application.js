@@ -712,8 +712,9 @@ if (store.storage.driver === "sqlite" && store.storage.directory) {
     NetServer.prototype.listen.call(internalServer, 0, "127.0.0.1", resolve);
   });
   writeFileSync(workerEndpoint(), JSON.stringify({
-    port: NetServer.prototype.address.call(internalServer).port, secret,
+    port: NetServer.prototype.address.call(internalServer).port, secret, pid: process.pid,
   }), { mode: 0o600 });
+  console.log("Zelon private worker listening:", JSON.stringify({ pid: process.pid, address: NetServer.prototype.address.call(internalServer) }));
 }
 const server = app.listen(Number(process.env.PORT || 3000), "0.0.0.0", () =>
   console.log("Zelon API listening"),
