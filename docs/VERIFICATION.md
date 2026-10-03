@@ -41,3 +41,10 @@ restarting it after a sustained worker outage. Live Hostinger behavior and
 forced-crash recovery have not been validated.
 
 The startup test also overrides HTTP listen to permit only one external listener, and HTTP address to return no TCP port. The internal listener uses the underlying net.Server methods and still passes.
+
+Unix-socket transport update: supplied Hostinger logs showed repeated
+ECONNREFUSED to a freshly published loopback port. This is consistent with
+network isolation or worker termination; the logs do not establish which.
+Production now defaults to a private Unix socket. The local execution
+environment rejects Unix listener creation with EPERM, so the integration
+test explicitly uses the TCP fallback; live Unix transport remains unverified.

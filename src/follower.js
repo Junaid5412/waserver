@@ -13,10 +13,18 @@ export function workerEndpoint() {
 export async function startFollower() {
   const endpointFile = workerEndpoint();
   function endpoint() {
-    const { port, secret } = JSON.parse(readFileSync(endpointFile, "utf8"));
-    if (!Number.isInteger(port) || port < 1 || port > 65535 || typeof secret !== "string")
+    const { port, secret, socketPath } = JSON.parse(readFileSync(endpointFile, "utf8"));
+    if (typeof secret !== "string" || secret.length < 32)
       throw Error("Invalid shared worker endpoint");
-    return { hostname: "127.0.0.1", port, headers: { "x-zelon-worker-token": secret } };
+    const headers = { "x-zelon-worker-token": secret };
+    if (socketPath) {
+      if (socketPath !== path.join(path.dirname(endpointFile), "worker.sock"))
+        throw Error("Invalid shared worker socket path");
+      return { socketPath, headers };
+    }
+    if (!Number.isInteger(port) || port < 1 || port > 65535)
+      throw Error("Invalid shared worker endpoint");
+    return { hostname: "127.0.0.1", port, headers };
   }
   let unavailableSince;
   let lastDiagnostic = 0;
@@ -26,7 +34,7 @@ export async function startFollower() {
     // Never log request headers, cookies or the private endpoint credential.
     console.error("Zelon worker connection failed:", JSON.stringify({
       process: process.pid, code: error.code || "ENDPOINT_ERROR",
-      syscall: error.syscall, address: target?.hostname, port: target?.port,
+      syscall: error.syscall, address: target?.hostname, port: target?.port, socketPath: target?.socketPath,
     }));
   }
   const server = createServer((incoming, outgoing) => {

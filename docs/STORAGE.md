@@ -23,7 +23,7 @@ Hostinger says managed deployment folders are overwritten. A sibling data direct
 
 - Private directories use mode 0700; the database file uses 0600. Deployment code does not include user data.
 - WAL mode, full synchronous commits and a 5-second busy timeout are enabled.
-- One database/WhatsApp worker per database. Additional LiteSpeed HTTP processes forward streamed requests to the lease owner through an authenticated loopback endpoint. Endpoint credentials stay in private `worker.json` (0600). The atomic heartbeat file lock still prevents duplicate messaging workers. A lost/compromised lock stops database operations.
+- One database/WhatsApp worker per database. Additional LiteSpeed HTTP processes forward streamed requests to the lease owner through an authenticated Unix socket in the private data directory. Endpoint credentials stay in private `worker.json` (0600). The atomic heartbeat file lock still prevents duplicate messaging workers. A lost/compromised lock stops database operations.
 - A crashed process's lock can remain briefly; allow about 30 seconds before restarting. Do not delete a lock directory while another process is alive.
 - SQLite requires local filesystem locking; do not place this database on an incompatible network filesystem.
 - An inaccessible directory, missing persistent path or permission failure prevents startup and is reported in runtime logs. The app does not silently fall back to a disposable database.
@@ -35,3 +35,5 @@ Preserve the database and ENCRYPTION_KEY separately. For a manual file backup, s
 Switching DATABASE_DRIVER from MySQL to SQLite selects a different database; it does not migrate existing data. An empty database bootstraps a fresh administrator using ADMIN_EMAIL/ADMIN_PASSWORD. Keep the old database intact until any migration has been separately completed and verified. Changing DATA_DIR similarly selects a different SQLite file; do not treat an empty console as evidence records were safely moved.
 
 On a VPS/Docker deployment, mount the private data directory as a persistent host volume and set DATA_DIR to the mounted container path. The included MySQL Compose definition remains a MySQL alternative. Hostinger-managed runtime access/persistence must be checked on the actual account.
+
+The default shared-worker transport is a Unix socket (`worker.sock`, mode 0600). It avoids relying on loopback networking between Hostinger processes. `WORKER_TRANSPORT=tcp` is an optional fallback for hosts with shared loopback networking. Never use that override on a host where loopback access fails.

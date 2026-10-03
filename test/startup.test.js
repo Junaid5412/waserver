@@ -13,7 +13,7 @@ test("LiteSpeed CommonJS require starts the production ESM application", async (
   let follower, followerClosed;
   const child = spawn(process.execPath, ["--input-type=commonjs", "-e",
     'const http = require("node:http"); const originalListen = http.Server.prototype.listen; let calls = 0; http.Server.prototype.listen = function(...args) { if (++calls > 1) throw Error("LiteSpeed listener called twice"); return originalListen.apply(this, args); }; http.Server.prototype.address = () => null; require("./src/server.js"); console.log("REQUIRE_RETURNED");'], {
-    env: { ...process.env, NODE_ENV: "production", PORT: "3141",
+    env: { ...process.env, WORKER_TRANSPORT: "tcp", NODE_ENV: "production", PORT: "3141",
       APP_ORIGIN: "https://wa.example.com", DATABASE_DRIVER: "sqlite",
       DATA_DIR: dir, ADMIN_EMAIL: "admin@example.com",
       ADMIN_PASSWORD: "loader test password 12345",
@@ -36,7 +36,7 @@ test("LiteSpeed CommonJS require starts the production ESM application", async (
     assert.equal((await fetch("http://127.0.0.1:3141/")).status, 200);
     follower = spawn(process.execPath, ["--input-type=commonjs", "-e",
       'require("./src/server.js")'], { env: { ...process.env,
-        NODE_ENV: "production", PORT: "3142", APP_ORIGIN: "https://wa.example.com",
+        WORKER_TRANSPORT: "tcp", NODE_ENV: "production", PORT: "3142", APP_ORIGIN: "https://wa.example.com",
         DATABASE_DRIVER: "sqlite", DATA_DIR: dir, ADMIN_EMAIL: "admin@example.com",
         ADMIN_PASSWORD: "loader test password 12345",
         ENCRYPTION_KEY: randomBytes(32).toString("base64") } });

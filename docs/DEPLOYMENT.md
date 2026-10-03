@@ -37,7 +37,7 @@ Hostinger documents deployment folders as overwritten. Its public guide does not
 | Entry            | `src/server.js`                       |
 | Output directory | None; Express serves `public` itself  |
 
-Hostinger field names can vary. Do not configure this as a static Vite build. Let the platform supply PORT if it does; the server binds 0.0.0.0. SQLite supports multiple LiteSpeed HTTP processes on the same machine: one owns the database and WhatsApp worker lease, and the others stream requests to its authenticated loopback endpoint. MySQL still requires exactly one process/replica.
+Hostinger field names can vary. Do not configure this as a static Vite build. Let the platform supply PORT if it does; the server binds 0.0.0.0. SQLite supports multiple LiteSpeed HTTP processes on the same machine: one owns the database and WhatsApp worker lease, and the others stream requests to its authenticated private Unix socket. MySQL still requires exactly one process/replica.
 
 ## Environment
 

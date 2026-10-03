@@ -1,7 +1,7 @@
 import express from "express";
 import { createServer } from "node:http";
 import { Server as NetServer } from "node:net";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, chmodSync, rmSync } from "node:fs";
 import { workerEndpoint } from "./follower.js";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
@@ -705,16 +705,25 @@ if (store.storage.driver === "sqlite" && store.storage.directory) {
     delete req.headers["x-zelon-worker-token"];
     app(req, res);
   });
+  const tcp = process.env.WORKER_TRANSPORT === "tcp";
+  const socketPath = path.join(store.storage.directory, "worker.sock");
+  // The database lease is already held, so an abandoned socket is safe to unlink.
+  if (!tcp) rmSync(socketPath, { force: true });
   await new Promise((resolve, reject) => {
     internalServer.once("error", reject);
-    // LiteSpeed overrides http.Server.listen/address for its external socket.
-    // Use the underlying TCP implementation for this private listener.
-    NetServer.prototype.listen.call(internalServer, 0, "127.0.0.1", resolve);
+    // Bypass LiteSpeed's HTTP listen override for this private listener.
+    if (tcp)
+      NetServer.prototype.listen.call(internalServer, 0, "127.0.0.1", resolve);
+    else NetServer.prototype.listen.call(internalServer, socketPath, resolve);
   });
+  if (!tcp) chmodSync(socketPath, 0o600);
+  const endpoint = tcp
+    ? { port: NetServer.prototype.address.call(internalServer).port }
+    : { socketPath };
   writeFileSync(workerEndpoint(), JSON.stringify({
-    port: NetServer.prototype.address.call(internalServer).port, secret, pid: process.pid,
+    ...endpoint, secret, pid: process.pid,
   }), { mode: 0o600 });
-  console.log("Zelon private worker listening:", JSON.stringify({ pid: process.pid, address: NetServer.prototype.address.call(internalServer) }));
+  console.log("Zelon private worker listening:", JSON.stringify({ pid: process.pid, ...endpoint }));
 }
 const server = app.listen(Number(process.env.PORT || 3000), "0.0.0.0", () =>
   console.log("Zelon API listening"),
