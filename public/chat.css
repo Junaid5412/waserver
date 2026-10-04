@@ -89,6 +89,32 @@
 .wa-text{display:inline;white-space:pre-wrap}
 .wa-text.deleted{display:flex;align-items:center;gap:6px;color:#7b8b95;font-style:italic;white-space:normal;padding-right:50px}
 .wa-text.muted{color:#8696a0;font-style:italic}
+.wa-del-hint{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:#dc2626;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:3px 8px;margin-bottom:6px;user-select:none}
+.wa-del-hint svg{width:13px;height:13px;stroke:#dc2626;flex-shrink:0}
+.wa-del-time{color:#991b1b;font-weight:400;font-size:10.5px;margin-left:2px}
+.wa-del-fallback{font-style:italic;color:#9ca3af;font-size:12px;padding:2px 0}
+.wa-b.is-del{border:1px solid rgba(220,38,38,0.22);box-shadow:0 1px 3px rgba(220,38,38,0.06)}
+.wa-meta-edited{background:none;border:0;padding:0;margin-right:2px;font-size:11px;font-style:italic;color:var(--wa-sub);cursor:pointer;text-decoration:underline;text-decoration-style:dotted}
+.wa-meta-edited:hover{color:#027eb5}
+.wa-edit-history{margin-top:6px;font-size:12px}
+.wa-edit-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:6px;border:1px solid rgba(0,0,0,0.1);background:rgba(0,0,0,0.04);color:#4b5563;font-size:11px;font-weight:500;cursor:pointer;transition:background .15s,border-color .15s}
+.wa-edit-chip:hover{background:rgba(0,0,0,0.08)}
+.wa-edit-chip.open{background:rgba(2,126,181,0.1);border-color:rgba(2,126,181,0.3);color:#027eb5}
+.wa-edit-chip.open .wa-edit-arrow{transform:rotate(180deg)}
+.wa-edit-arrow{display:inline-block;font-size:8px;transition:transform .2s ease}
+.wa-diff-panel{margin-top:6px;padding:8px 10px;border-radius:8px;background:rgba(0,0,0,0.04);border:1px solid rgba(0,0,0,0.08);display:flex;flex-direction:column;gap:6px}
+.wa-diff-item{padding:6px 8px;border-radius:6px;background:#fff;border-left:3px solid #94a3b8}
+.wa-row.out .wa-diff-item{background:rgba(255,255,255,0.92)}
+.wa-diff-item.old{border-left-color:#ef4444;background:rgba(239,68,68,0.04)}
+.wa-diff-item.current{border-left-color:#10b981;background:rgba(16,185,129,0.04)}
+.wa-diff-head{display:flex;align-items:center;gap:6px;margin-bottom:3px}
+.wa-diff-tag{font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;text-transform:uppercase;letter-spacing:0.5px}
+.wa-diff-tag.old{background:#fee2e2;color:#b91c1c}
+.wa-diff-tag.step{background:#fef3c7;color:#b45309}
+.wa-diff-tag.new{background:#d1fae5;color:#047857}
+.wa-diff-sub{font-size:10.5px;color:#6b7280}
+.wa-diff-body{font-size:12px;color:#1f2937;white-space:pre-wrap;word-break:break-word}
+.wa-diff-divider{display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:500;color:#9ca3af;user-select:none}
 .wa-text a{color:#027eb5;text-decoration:underline}
 .wa-text code{font-family:var(--mono,monospace);background:#0000000d;padding:1px 4px;border-radius:4px;font-size:13px}
 .wa-meta{float:right;display:inline-flex;align-items:center;gap:3px;margin:6px 0 -3px 12px;font-size:11px;color:var(--wa-sub);line-height:1;user-select:none}
@@ -340,9 +366,15 @@ button.wa-avbtn{padding:0;border:0;cursor:pointer;position:relative}
 .wa-sthead b{color:#111b21;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wa-sthead small{color:#667781;font-size:12.5px}
 .wa-sthead em{font-style:normal;font-size:12.5px;color:#667781}
+.wa-st-badge-del{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:700;color:#dc2626;background:#fee2e2;padding:1px 5px;border-radius:4px;margin-left:4px}
+.wa-st-del-banner{display:flex;align-items:center;gap:8px;padding:8px 12px;margin-bottom:8px;background:rgba(220,38,38,0.1);border:1px solid rgba(220,38,38,0.25);border-radius:8px;color:#ef4444;font-size:12px;line-height:1.3}
+.wa-st-del-banner strong{display:block;color:#dc2626}
+.wa-st-del-banner small{color:#991b1b}
 .wa-stbars{display:flex;gap:4px;margin-bottom:10px}
 .wa-stbars i{flex:1;height:3px;border-radius:2px;background:#d1d7db}
 .wa-stbars i.on{background:#00a884}
+.wa-stbars i.is-del{background:rgba(239,68,68,0.4)}
+.wa-stbars i.on.is-del{background:#ef4444}
 .wa-stage{display:grid;place-items:center;min-height:240px;background:#0b141a;border-radius:12px;overflow:hidden}
 .wa-stimg{display:block;max-width:100%;max-height:60vh;object-fit:contain}
 .wa-sttext{width:100%;min-height:240px;display:grid;place-items:center;padding:24px;background:linear-gradient(135deg,#128c7e,#075e54);color:#fff;text-align:center;font-size:20px;line-height:1.4}

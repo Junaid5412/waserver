@@ -489,6 +489,7 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
       await wa
         .active(req.instance.id)
         .sendMessage(m.key.remoteJid, { delete: m.key }, options);
+      await inbox.markDeleted(req.instance, m.key.id);
       res.json({ ok: true, scope });
     }),
   );
@@ -917,7 +918,7 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
       const rows = await store.query("inbox", { instanceId: req.instance.id, chatId: "status@broadcast", ...page(req.query) });
       res.json(
         rows
-          .filter((r) => !r.hidden && !r.deleted && !isJunkType(r.type))
+          .filter((r) => !r.hidden && !isJunkType(r.type))
           .map((row) => {
             const m = inbox.dto(row),
               who = m.participant || m.participantAlt || "",

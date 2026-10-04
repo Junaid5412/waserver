@@ -68,23 +68,53 @@ export function createInbox(store, enc, notify = () => {}) {
   }
   async function markDeleted(instance, waId) {
     const rows = await rowsFor(instance, waId);
-    for (const row of rows) await store.patch("inbox", row.id, { deleted: true });
-    if (rows[0]) tell(instance, { type: "update", chatId: rows[0].chatId, waId });
+    const nowIso = new Date().toISOString();
+    for (const row of rows) await store.patch("inbox", row.id, { deleted: true, deletedAt: nowIso });
+    if (rows[0]) {
+      const chat = await store.get("chats", hash(instance.id + ":" + rows[0].chatId));
+      if (chat?.lastMessageId === waId) {
+        const stored = await load(instance.id, waId);
+        let previewText = "🚫 This message was deleted";
+        if (stored?.message) {
+          const info = describeMessage(stored.message);
+          const orig = previewOf(info);
+          if (orig) previewText = "🚫 " + orig;
+        }
+        await store.patch("chats", chat.id, { lastPreview: enc.seal(previewText) });
+      }
+      tell(instance, { type: "update", chatId: rows[0].chatId, waId });
+    }
   }
   async function applyEdit(instance, waId, edited) {
     if (!edited) return;
+    if (edited.message) edited = edited.message;
     const rows = await rowsFor(instance, waId);
     if (!rows.length) return;
     const stored = await load(instance.id, waId);
     if (stored) {
+      const prevInfo = describeMessage(stored.message);
+      const prevText = prevInfo.text || "";
+      const nowIso = new Date().toISOString();
+
       stored.message = edited;
       await store.set("wa-message:" + instance.id, waId, {
         id: waId, chatId: rows[0].chatId, fromMe: !!stored.key?.fromMe, data: pack(enc, stored),
       });
-      for (const row of rows) await store.patch("inbox", row.id, { data: pack(enc, stored), edited: true });
-      const info = describeMessage(edited);
+      for (const row of rows) {
+        const existingEdits = Array.isArray(row.edits) ? row.edits : [];
+        const originalText = row.originalText || prevText;
+        const edits = [...existingEdits, { text: prevText, at: nowIso }];
+        await store.patch("inbox", row.id, {
+          data: pack(enc, stored),
+          edited: true,
+          editedAt: nowIso,
+          originalText,
+          edits,
+        });
+      }
+      const newInfo = describeMessage(edited);
       const chat = await store.get("chats", hash(instance.id + ":" + rows[0].chatId));
-      if (chat?.lastMessageId === waId) await store.patch("chats", chat.id, { lastPreview: enc.seal(previewOf(info)) });
+      if (chat?.lastMessageId === waId) await store.patch("chats", chat.id, { lastPreview: enc.seal(previewOf(newInfo)) });
     }
     tell(instance, { type: "update", chatId: rows[0].chatId, waId });
   }
@@ -358,15 +388,8 @@ export function createInbox(store, enc, notify = () => {}) {
     });
   }
   const dto = (row) => {
-    const m = unpack(enc, row.data);
-    if (row.deleted)
-      return {
-        id: row.id, waId: row.waId, chatId: row.chatId, fromMe: row.fromMe, status: row.status,
-        createdAt: row.createdAt, type: "deleted", text: "", hasMedia: false, mimetype: "", filename: "",
-        pollOptions: [], durationSeconds: 0, location: null, contacts: [], quotedText: "",
-        participant: m.key?.participant || "", name: m.pushName || "", deleted: true, edited: false,
-        starred: false, reactions: {},
-      };
+    const m = unpack(enc, row.data) || {};
+    const desc = describeMessage(m.message);
     return {
       id: row.id,
       waId: row.waId,
@@ -374,12 +397,16 @@ export function createInbox(store, enc, notify = () => {}) {
       fromMe: row.fromMe,
       status: row.status,
       createdAt: row.createdAt,
-      ...describeMessage(m.message),
+      ...desc,
       participant: m.key?.participant || "",
       participantAlt: m.key?.participantAlt || m.key?.participantPn || m.key?.senderPn || "",
       name: m.pushName || "",
       deleted: !!row.deleted,
+      deletedAt: row.deletedAt || null,
       edited: !!row.edited,
+      editedAt: row.editedAt || null,
+      originalText: row.originalText || null,
+      edits: Array.isArray(row.edits) ? row.edits : [],
       starred: !!row.starred,
       reactions: row.reactions || {},
     };

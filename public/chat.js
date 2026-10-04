@@ -42,6 +42,7 @@ window.ZelonChat = (() => {
     stopSq: S('<rect x="6" y="6" width="12" height="12" rx="2"/>', 20),
     status: S('<circle cx="12" cy="12" r="9" stroke-dasharray="3.2 2.6"/><circle cx="12" cy="12" r="4"/>', 20),
     locate: S('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8"/>', 18),
+    history: S('<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>', 15),
   };
   const tickPaths = {
     one: '<path d="M11.1.7 4.6 7.1 1.9 4.5 1 5.4l3.6 3.5L12 1.6z"/>',
@@ -319,7 +320,7 @@ window.ZelonChat = (() => {
       }
       return false;
     };
-    const sigOf = (list) => JSON.stringify(list.map((m) => [m.waId, m.status, m.text, m.edited, m.deleted, m.starred, m.reactions, m.pending, m.late]));
+    const sigOf = (list) => JSON.stringify(list.map((m) => [m.waId, m.status, m.text, m.edited, m.originalText, (m.edits || []).length, m.deleted, m.starred, m.reactions, m.pending, m.late]));
     const allMsgs = () => [...pending.map((m) => ({ ...m })), ...msgs].filter((m) => !isJunk(m.type)).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
     const canEdit = (m) => m.fromMe && !m.pending && !m.deleted && !m.location && !(m.contacts || []).length && !m.pollOptions?.length && !["audio", "sticker", "poll", "location", "contact", "deleted"].includes(m.type) && (m.hasMedia ? ["image", "video", "document"].includes(m.type) : !!m.text) && Date.now() - Date.parse(m.createdAt) < 15 * 60000;
     const senderPhone = (m) => m.participantPhone ? fmtPhone(m.participantPhone) : isPnJid(m.participant) ? fmtPhone(m.participant) : "";
@@ -345,24 +346,77 @@ window.ZelonChat = (() => {
         ? `<button type="button" class="wa-doc pdf" data-pdf="${esc(m.waId)}"><span class="wa-dico pdf">${I.file}<i>PDF</i></span><span><b>${esc(m.filename || "Document.pdf")}</b><small>PDF document · tap to view</small></span></button>`
         : `<a class="wa-doc" href="${esc(mediaUrl(m, false))}"><span class="wa-dico">${I.file}<i>${esc(ext)}</i></span><span><b>${esc(m.filename || "Document")}</b><small>${esc(ext)} file · tap to download</small></span></a>`;
     }
+    function editHistoryHtml(m) {
+      if (!m.edited || (!m.originalText && (!m.edits || !m.edits.length))) return "";
+      const orig = m.originalText || m.edits[0]?.text || "";
+      const intermediate = (m.edits || []).slice(1);
+      let versions = `
+        <div class="wa-diff-item old">
+          <div class="wa-diff-head">
+            <span class="wa-diff-tag old">Old</span>
+            <span class="wa-diff-sub">Original version</span>
+          </div>
+          <div class="wa-diff-body">${fmt(orig)}</div>
+        </div>`;
+      for (let idx = 0; idx < intermediate.length; idx++) {
+        const it = intermediate[idx];
+        versions += `
+          <div class="wa-diff-divider"><span>↓ Edit ${idx + 1}</span></div>
+          <div class="wa-diff-item step">
+            <div class="wa-diff-head">
+              <span class="wa-diff-tag step">Edit ${idx + 1}</span>
+              ${it.at ? `<span class="wa-diff-sub">${esc(hhmm(it.at))}</span>` : ""}
+            </div>
+            <div class="wa-diff-body">${fmt(it.text)}</div>
+          </div>`;
+      }
+      versions += `
+        <div class="wa-diff-divider"><span>↓ Was edited to</span></div>
+        <div class="wa-diff-item current">
+          <div class="wa-diff-head">
+            <span class="wa-diff-tag new">Current</span>
+            <span class="wa-diff-sub">Latest version</span>
+          </div>
+          <div class="wa-diff-body">${fmt(m.text || "")}</div>
+        </div>`;
+
+      return `<div class="wa-edit-history">
+        <button type="button" class="wa-edit-chip" data-togglediff="${esc(m.waId)}" title="Click to view edit history">
+          ${I.history}
+          <span>Edited · View history</span>
+          <span class="wa-edit-arrow">▼</span>
+        </button>
+        <div class="wa-diff-panel" id="diff-${esc(m.waId)}" hidden>
+          ${versions}
+        </div>
+      </div>`;
+    }
     function bodyHtml(m) {
-      if (m.deleted) return `<div class="wa-text deleted">${I.ban} <span>This message was deleted</span></div>`;
-      let h = m.quotedText ? `<div class="wa-quote">${esc(m.quotedText)}</div>` : "";
+      let h = "";
+      if (m.deleted) {
+        const delTime = m.deletedAt ? ` <small class="wa-del-time">(${esc(hhmm(m.deletedAt))})</small>` : "";
+        h += `<div class="wa-del-hint">${I.ban} <span>This message was deleted${delTime}</span></div>`;
+      }
+      if (m.quotedText) h += `<div class="wa-quote">${esc(m.quotedText)}</div>`;
       h += mediaHtml(m);
       if (m.location && Number.isFinite(m.location.latitude))
         h += `<a class="wa-loc" target="_blank" rel="noopener noreferrer" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(m.location.latitude + "," + m.location.longitude)}"><span class="wa-locmap">${I.pin2}</span><span><b>Location</b><small>${Number(m.location.latitude).toFixed(6)}, ${Number(m.location.longitude).toFixed(6)}</small><em>Open in Maps</em></span></a>`;
       for (const c of m.contacts || []) h += `<div class="wa-contact">${I.user}<span><b>${esc(c.name)}</b><small>${esc(c.phone ? fmtPhone(c.phone) : "Contact card")}</small></span></div>`;
       if (m.pollOptions?.length)
         h += `<div class="wa-poll"><b>${I.poll} ${esc(m.text || "Poll")}</b>${m.pollOptions.map((o) => `<div>○ ${esc(o)}</div>`).join("")}</div>`;
-      else if (m.text) h += `<div class="wa-text">${fmt(m.text)}</div>`;
+      else if (m.text) {
+        h += `<div class="wa-text">${fmt(m.text)}</div>`;
+        h += editHistoryHtml(m);
+      }
       else if (!m.hasMedia && !m.location && !(m.contacts || []).length) {
-        if (["ciphertext", "placeholder", "unknown"].includes(m.type) || !m.text) {
+        if (m.deleted) {
+          h += `<div class="wa-text muted wa-del-fallback"><i>(Content was deleted before retrieval)</i></div>`;
+        } else if (["ciphertext", "placeholder", "unknown"].includes(m.type) || !m.text) {
           h += `<div class="wa-text wa-waiting"><span class="wa-wait-ico">⏳</span><span><strong>Waiting for this message</strong><p>This may take a while. Your phone was asked to sync this message.</p><button type="button" class="wa-resend-btn" data-resend="${esc(m.waId)}">Request from phone</button></span></div>`;
         } else {
           h += `<div class="wa-text muted">${esc(cleanPreview("[" + (m.type || "message") + "]") || "Unsupported message")}</div>`;
         }
       }
-      else if (m.hasMedia && m.text) h += "";
       return h;
     }
     function reactionsHtml(m) {
@@ -397,9 +451,9 @@ window.ZelonChat = (() => {
             ? `<button type="button" class="wa-av xs wa-avbtn" data-sender="${esc(m.waId)}" style="--h:${hueOf(sj)}"><i>${esc(initialOf(senderName(m)))}</i>${sj ? `<img class="pic" loading="lazy" alt="" src="${esc(picUrl(sj))}">` : ""}</button>`
             : '<span class="wa-av xs ghost"></span>'
           : "";
-        const meta = `<span class="wa-meta">${m.starred ? `<span class="wa-star">${I.star}</span>` : ""}${m.edited && !m.deleted ? "<em>edited</em>" : ""}<time>${esc(hhmm(m.createdAt))}</time>${m.fromMe && !m.deleted ? statusIcon(m) : ""}</span>`;
+        const meta = `<span class="wa-meta">${m.starred ? `<span class="wa-star">${I.star}</span>` : ""}${m.edited && !m.deleted ? `<button type="button" class="wa-meta-edited" data-togglediff="${esc(m.waId)}" title="Click to view edit history">edited</button>` : ""}<time>${esc(hhmm(m.createdAt))}</time>${m.fromMe && !m.deleted ? statusIcon(m) : ""}</span>`;
         const media = m.hasMedia && ["image", "video", "sticker"].includes(m.type) && !m.text;
-        html += `<div class="wa-row ${m.fromMe ? "out" : "in"} ${head ? "head" : ""} ${isGroup ? "grp" : ""} ${m.pending ? "is-pending" : ""}" data-id="${esc(m.waId)}">${av}<div class="wa-b ${head ? "tail" : ""} ${media ? "mediaonly" : ""} ${m.type === "sticker" ? "stk" : ""}"><button class="wa-chev" data-menu="${esc(m.waId)}" aria-label="Message options" title="Options">${I.chev}</button>${who}${bodyHtml(m)}${meta}${reactionsHtml(m)}</div></div>`;
+        html += `<div class="wa-row ${m.fromMe ? "out" : "in"} ${head ? "head" : ""} ${isGroup ? "grp" : ""} ${m.pending ? "is-pending" : ""}" data-id="${esc(m.waId)}">${av}<div class="wa-b ${head ? "tail" : ""} ${media ? "mediaonly" : ""} ${m.type === "sticker" ? "stk" : ""} ${m.deleted ? "is-del" : ""} ${m.edited ? "is-edited" : ""}"><button class="wa-chev" data-menu="${esc(m.waId)}" aria-label="Message options" title="Options">${I.chev}</button>${who}${bodyHtml(m)}${meta}${reactionsHtml(m)}</div></div>`;
       });
       const wasBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 90;
       const keepOffset = box.scrollHeight - box.scrollTop;
@@ -774,7 +828,7 @@ window.ZelonChat = (() => {
       const body = el.querySelector(".wa-dbody");
       let rows;
       try { rows = await api(base + "/statuses?limit=100"); } catch (err) { body.innerHTML = `<p class="muted">Could not load statuses (${esc(err.message)}).</p>`; return; }
-      rows = (Array.isArray(rows) ? rows : []).filter((m) => !isJunk(m.type) && !m.deleted);
+      rows = (Array.isArray(rows) ? rows : []).filter((m) => !isJunk(m.type));
       const groups = new Map();
       for (const m of rows.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))) {
         const key = m.fromMe ? "me" : senderJid(m) || m.name || "unknown";
@@ -786,12 +840,19 @@ window.ZelonChat = (() => {
       const av = (g) => (g.jid === "me" ? avatar({ chatId: "me", name: "Me" }, "md", true) : avatar({ chatId: g.jid || g.key, name: g.name }, "md"));
       const drawList = () => {
         body.innerHTML = list.length
-          ? `<p class="muted wa-stnote">Status updates from your contacts. WhatsApp removes them after 24 hours, so only updates this server received are listed.</p><div class="wa-stlist">${list.map((g, i) => `<button class="wa-stitem" data-sg="${i}">${av(g)}<span><b>${esc(g.name)}</b><small>${g.phone && g.phone !== g.name ? esc(g.phone) + " · " : ""}${g.items.length} update${g.items.length === 1 ? "" : "s"} · ${esc(ago(g.items.at(-1).createdAt))}</small></span></button>`).join("")}</div>`
+          ? `<p class="muted wa-stnote">Status updates from your contacts. WhatsApp removes them after 24 hours, so only updates this server received are listed.</p><div class="wa-stlist">${list.map((g, i) => {
+              const hasDel = g.items.some((x) => x.deleted);
+              const delBadge = hasDel ? ' <span class="wa-st-badge-del">🚫 Deleted</span>' : "";
+              return `<button class="wa-stitem" data-sg="${i}">${av(g)}<span><b>${esc(g.name)}</b><small>${g.phone && g.phone !== g.name ? esc(g.phone) + " · " : ""}${g.items.length} update${g.items.length === 1 ? "" : "s"} · ${esc(ago(g.items.at(-1).createdAt))}${delBadge}</small></span></button>`;
+            }).join("")}</div>`
           : `<div class="wa-stempty">${I.status}<b>No status updates yet</b><p class="muted">When your contacts post a status, it will appear here while this number is connected.</p></div>`;
         body.querySelectorAll("[data-sg]").forEach((b) => (b.onclick = () => story(list[Number(b.dataset.sg)], 0)));
       };
       const story = (g, i) => {
         const m = g.items[i];
+        const delBanner = m.deleted
+          ? `<div class="wa-st-del-banner"><span>🚫</span><div><strong>Deleted Status</strong><small>Sender deleted this status update, but it was preserved for you.</small></div></div>`
+          : "";
         const url = esc(mediaUrl(m, true)), dl = esc(mediaUrl(m, false));
         let media = "";
         if (m.type === "image") media = `<img class="wa-stimg" src="${url}" alt="Status photo">`;
@@ -799,8 +860,9 @@ window.ZelonChat = (() => {
         else if (m.type === "audio") media = `<div class="wa-stimg wa-sttext"><audio controls src="${url}"></audio></div>`;
         else media = `<div class="wa-stimg wa-sttext"><p>${fmt(m.text || "")}</p></div>`;
         const caption = m.hasMedia && m.text ? `<p class="wa-stcap">${fmt(m.text)}</p>` : "";
-        body.innerHTML = `<div class="wa-sthead"><button class="wa-ib" data-stback aria-label="Back">${I.back}</button>${av(g)}<span><b>${esc(g.name)}</b><small>${esc(ago(m.createdAt))} · ${esc(hhmm(m.createdAt))}</small></span><em>${i + 1} / ${g.items.length}</em></div>
-          <div class="wa-stbars">${g.items.map((_, k) => `<i class="${k <= i ? "on" : ""}"></i>`).join("")}</div>
+        body.innerHTML = `<div class="wa-sthead"><button class="wa-ib" data-stback aria-label="Back">${I.back}</button>${av(g)}<span><b>${esc(g.name)}</b><small>${esc(ago(m.createdAt))} · ${esc(hhmm(m.createdAt))}${m.deleted ? ' · <span style="color:#ef4444;font-weight:600;">Deleted</span>' : ""}</small></span><em>${i + 1} / ${g.items.length}</em></div>
+          <div class="wa-stbars">${g.items.map((it, k) => `<i class="${k <= i ? "on" : ""} ${it.deleted ? "is-del" : ""}"></i>`).join("")}</div>
+          ${delBanner}
           <div class="wa-stage">${media}</div>${caption}
           <div class="wa-dactions wa-stact"><button class="btn" data-stprev ${i === 0 ? "disabled" : ""}>Previous</button><button class="btn" data-stnext ${i === g.items.length - 1 ? "disabled" : ""}>Next</button>
           ${m.hasMedia ? `<a class="btn primary" href="${dl}">${I.download}<span>Download</span></a>` : `<button class="btn primary" data-stcopy>${I.copy}<span>Copy text</span></button>`}
@@ -1010,6 +1072,10 @@ window.ZelonChat = (() => {
         if (!m.fromMe && (current?.kind === "group" || /@g\.us$/.test(current?.chatId || "")) && senderJid(m)) { items.push(["private", I.reply, "Reply privately"]); items.push(["chat", I.msg, "Message " + senderName(m)]); }
         if (!m.fromMe) items.push(["seen", I.doubleCheck, "Mark as seen"]);
         items.push(["info", I.info, "Message info"]);
+      } else {
+        if (m.text) items.push(["copy", I.copy, "Copy preserved text"]);
+        if (m.hasMedia) items.push(["download", I.download, "Download preserved media"]);
+        items.push(["info", I.info, "Message info"]);
       }
       items.push(["delete", I.trash, "Delete", "danger"]);
       menu.innerHTML = (m.deleted ? "" : `<div class="wa-quick">${QUICK.map((e) => `<button data-react="${e}" class="${m.reactions?.me === e ? "on" : ""}">${e}</button>`).join("")}</div>`) +
@@ -1073,7 +1139,7 @@ window.ZelonChat = (() => {
         try {
           await api(base + "/inbox/" + encodeURIComponent(m.waId) + "/delete", "POST", { scope: b.dataset.del });
           if (b.dataset.del === "me") msgs = msgs.filter((x) => x.waId !== m.waId);
-          else { const live = msgs.find((x) => x.waId === m.waId); if (live) { live.deleted = true; live.text = ""; live.hasMedia = false; } }
+          else { const live = msgs.find((x) => x.waId === m.waId); if (live) { live.deleted = true; live.deletedAt = new Date().toISOString(); } }
           el.remove(); msgSig = ""; drawMessages({ stick: false });
           toast(b.dataset.del === "me" ? "Deleted for you" : "Deleted for everyone");
         } catch (err) { toast(err.message); b.disabled = false; }
@@ -1114,7 +1180,13 @@ window.ZelonChat = (() => {
     }
     function infoDialog(m) {
       const t = new Date(m.createdAt);
-      modal("Message info", `<div class="wa-line"><b>Type</b><span>${esc(m.type || "text")}</span></div><div class="wa-line"><b>From</b><span>${esc(senderName(m))}</span></div><div class="wa-line"><b>Time</b><span>${esc(t.toLocaleString())}</span></div>${m.fromMe ? `<div class="wa-line"><b>Status</b><span class="wa-st ${esc(m.status)}">${esc(m.status)}</span></div>` : ""}<div class="wa-line"><b>Message ID</b><span class="mono">${esc(m.waId)}</span></div>`);
+      modal("Message info", `<div class="wa-line"><b>Type</b><span>${esc(m.type || "text")}</span></div>
+        <div class="wa-line"><b>From</b><span>${esc(senderName(m))}</span></div>
+        <div class="wa-line"><b>Time</b><span>${esc(t.toLocaleString())}</span></div>
+        ${m.deleted ? `<div class="wa-line"><b>Deleted</b><span style="color:#dc2626;font-weight:600;">Yes${m.deletedAt ? ` (${new Date(m.deletedAt).toLocaleString()})` : ""}</span></div>` : ""}
+        ${m.edited ? `<div class="wa-line"><b>Edited</b><span style="color:#027eb5;font-weight:600;">Yes${m.editedAt ? ` (${new Date(m.editedAt).toLocaleString()})` : ""}</span></div>` : ""}
+        ${m.fromMe ? `<div class="wa-line"><b>Status</b><span class="wa-st ${esc(m.status)}">${esc(m.status)}</span></div>` : ""}
+        <div class="wa-line"><b>Message ID</b><span class="mono">${esc(m.waId)}</span></div>`);
     }
     async function chatSetting(c, body, done) {
       try {
@@ -1241,6 +1313,18 @@ window.ZelonChat = (() => {
       if (zoom) {
         const m = allMsgs().find((x) => x.waId === zoom.dataset.zoom);
         if (m) modal("Photo", `<img class="wa-zoom" src="${esc(mediaUrl(m, true))}" alt="Photo"><div class="wa-dactions"><a class="btn" href="${esc(mediaUrl(m, false))}">Download</a></div>`, { wide: true });
+        return;
+      }
+      const diffBtn = t.closest("[data-togglediff]");
+      if (diffBtn) {
+        e.stopPropagation();
+        const id = diffBtn.dataset.togglediff;
+        const panel = p.querySelector("#diff-" + CSS.escape(id));
+        if (panel) {
+          panel.hidden = !panel.hidden;
+          const chip = p.querySelector(`.wa-edit-chip[data-togglediff="${CSS.escape(id)}"]`);
+          if (chip) chip.classList.toggle("open", !panel.hidden);
+        }
         return;
       }
       const rsb = t.closest("[data-resend]");
