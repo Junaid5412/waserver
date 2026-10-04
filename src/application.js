@@ -696,13 +696,16 @@ app.post(
   "/api/instances/:id/connect",
   consoleOnly,
   wrap(async (req, res) => {
+    if (req.instance.status !== "connected") await wa.reset(req.instance);
     await wa.connect(req.instance);
     res.json({ ok: true });
   }),
 );
-app.get("/api/instances/:id/qr", consoleOnly, (req, res) =>
-  res.json({ qr: wa.qr(req.instance.id) || null, status: req.instance.status, error: req.instance.connectionError || null }),
-);
+app.get("/api/instances/:id/qr", consoleOnly, (req, res) => {
+  const i = req.instance;
+  if (["connecting", "awaiting_qr", "reconnecting"].includes(i.status) && !wa.has(i.id)) wa.connect(i).catch(() => {});
+  res.json({ qr: wa.qr(req.instance.id) || null, status: req.instance.status, error: req.instance.connectionError || null });
+});
 app.post(
   "/api/instances/:id/disconnect",
   consoleOnly,

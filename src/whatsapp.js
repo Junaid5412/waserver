@@ -320,20 +320,51 @@ export function gateway(store, encryption, emit, {
       });
     return s;
   };
+  async function reset(instance) {
+    stopped.add(instance.id);
+    clearTimeout(reconnectTimers.get(instance.id));
+    reconnectTimers.delete(instance.id);
+    const s = sockets.get(instance.id);
+    sockets.delete(instance.id);
+    qrs.delete(instance.id);
+    reconnects.set(instance.id, 0);
+    if (s) { try { s.end(undefined); } catch {} }
+    await new Promise((r) => setTimeout(r, 300));
+    let registered = !!s?.authState?.creds?.registered;
+    if (!s) {
+      try {
+        const r = await store.get("auth:" + instance.id, "creds");
+        registered = !!(r && JSON.parse(encryption.open(r.data), BufferJSON.reviver).registered);
+      } catch {}
+    }
+    if (!registered) await store.clearNamespace("auth:" + instance.id);
+    connecting.delete(instance.id);
+    stopped.delete(instance.id);
+  }
   return {
     connect,
     async pairingCode(instance, phone) {
+      const digits = String(phone || "").replace(/\D/g, "").replace(/^00/, "");
+      if (digits.length < 8 || digits.length > 15)
+        throw Object.assign(Error("Enter the full number with country code, digits only (for example 97450000000)."), { status: 400 });
+      if (sockets.get(instance.id)?.authState?.creds?.registered)
+        throw Object.assign(Error("This instance is already linked"), { status: 409 });
+      // A pairing code only works with the socket that created it, so always start from a clean, unlinked session.
+      await reset(instance);
       await connect(instance);
       const s = sockets.get(instance.id);
       if (!s)
-        throw Object.assign(Error("Connection is not ready"), { status: 409 });
-      if (s.authState.creds.registered)
-        throw Object.assign(Error("This instance is already linked"), {
-          status: 409,
-        });
+        throw Object.assign(Error("Connection is not ready. Try again in a moment."), { status: 409 });
       await s.waitForSocketOpen();
-      return s.requestPairingCode(phone.replace("+", ""));
+      // The first QR proves the WhatsApp handshake finished; requesting earlier produces codes the phone rejects.
+      for (let i = 0; i < 75 && !qrs.has(instance.id) && sockets.get(instance.id) === s; i++)
+        await new Promise((r) => setTimeout(r, 200));
+      if (sockets.get(instance.id) !== s)
+        throw Object.assign(Error("WhatsApp closed the connection. Try again."), { status: 409 });
+      const code = await s.requestPairingCode(digits);
+      return String(code).toUpperCase();
     },
+    reset,
     async recordSent(instance, message) {
       if (inbox && message?.message) await inbox.persist(instance, message);
     },

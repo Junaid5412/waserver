@@ -107,7 +107,7 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
     "/pairing-code",
     wrap(async (req, res) => {
       const { phone } = z
-        .object({ phone: z.string().regex(/^\+?[1-9]\d{6,14}$/) })
+        .object({ phone: z.string().max(40).transform((v) => v.replace(/[\s().-]/g, "")).pipe(z.string().regex(/^\+?[1-9]\d{7,14}$/, "Enter the number with country code, for example +97450000000")) })
         .parse(req.body);
       res.json({ code: await wa.pairingCode(req.instance, phone) });
     }),

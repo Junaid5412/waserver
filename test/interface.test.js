@@ -1,4 +1,4 @@
-import test from "node:test";
+﻿import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
@@ -142,6 +142,19 @@ test("Queued message cancellation uses the selected instance and safely renders 
           r.method === "POST",
       ),
     );
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("Console remembers the open page across refreshes", async () => {
+  const { dom, document } = setup();
+  try {
+    await wait(() => document.querySelector("[data-instance]"));
+    document.querySelector('[data-view="account"]').click();
+    assert.equal(dom.window.location.hash, "#/account");
+    const saved = JSON.parse(dom.window.localStorage.getItem("zelonNav"));
+    assert.equal(saved.view, "account");
   } finally {
     dom.window.close();
   }

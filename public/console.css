@@ -355,3 +355,9 @@ body:has(.shell){background:#f4f6fa;font-size:14.5px;color:var(--ink)}
   .ua-stats{grid-template-columns:1fr 1fr}
   .ua-actions .btn{flex:1 1 auto;justify-content:center}
 }
+
+/* Consistent sentence-case labels */
+.status,.chip-s,.inst-meta>span:first-child,.role,.sess em,.wa-title small,.hint.cap{text-transform:capitalize}
+.status::first-letter{text-transform:uppercase}
+.nav-text,.nav-item,.bn-item span{text-transform:none}
+

@@ -1,4 +1,4 @@
-const root = document.querySelector("#root");
+﻿const root = document.querySelector("#root");
 let user = null,
   instances = [],
   selected = null,
@@ -62,57 +62,53 @@ function form(id, fn) {
   });
 }
 function landing() {
-  root.innerHTML = `<header>${brand}<nav><a href="#features">Features</a><a href="#developers">Developers</a><a href="#faq">FAQ</a><a class="btn bright" href="/console">Open console</a></nav></header><main><section class="hero"><div><div class="eyebrow">Messaging infrastructure, yours to own</div><h1>Your applications.<br>Your WhatsApp.<br><em>Connected.</em></h1><p>Build conversations into your workflow. Connect a number, create an API key, and send messages from your own applications.</p><div class="actions"><a class="btn bright" href="/console">Open your console</a><a class="btn" href="#developers">Explore the API</a></div><div class="hint">Self-hosted · Persistent sessions · No Zelon subscription tiers</div></div><div class="codepanel"><div class="codehead"><span>POST /api/instances/:id/messages</span><span>REST API</span></div><pre>curl -X POST "$ZELON_URL/api/instances/$ID/messages" \\\n  -H "Authorization: Bearer $API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '{\n    "to": "+97450000000",\n    "type": "text",\n    "text": "Your booking is confirmed."\n  }'</pre><div class="response">Example response · 202 Accepted<br>{ "id": "…", "status": "queued" }</div></div></section><section class="section stats"><div><strong>QR</strong><span>Link in seconds</span></div><div><strong>REST</strong><span>Simple JSON API</span></div><div><strong>3 SDKs</strong><span>Node, Python, PHP</span></div><div><strong>Own</strong><span>Self-hosted data</span></div></section><section id="features" class="section"><div class="eyebrow">One connection. More possibilities.</div><h2>The building blocks of better conversations.</h2><div class="featuregrid">${[
-    [
-      "01",
-      "Messages & media",
-      "Send text, images, video, audio and documents through a single API.",
-    ],
-    [
-      "02",
-      "Instance management",
-      "Link WhatsApp with a QR code and manage connections from your console.",
-    ],
-    [
-      "03",
-      "Signed webhooks",
-      "Receive incoming messages, connection events and receipts with retry handling.",
-    ],
-    [
-      "04",
-      "Groups & contacts",
-      "Create groups, manage participants and check WhatsApp number availability.",
-    ],
-    [
-      "05",
-      "Scheduling & history",
-      "Queue messages for later and inspect persistent send and event records.",
-    ],
-    [
-      "06",
-      "Keys & session security",
-      "Use scoped API keys and encrypted WhatsApp credentials stored in your database.",
-    ],
-  ]
-    .map(
-      ([n, h, p]) =>
-        `<article class="card"><div class="number">${n}</div><h3>${h}</h3><p>${p}</p></article>`,
-    )
-    .join(
-      "",
-    )}</div></section><section id="developers" class="section"><div class="strip"><div><h3>From your first request to your daily workflow.</h3><p>Use any language that speaks HTTP. API examples are available inside your console.</p></div><a href="/console" class="btn primary">Go to developer console</a></div></section><section id="faq" class="section"><h2>A few things to know.</h2><details><summary>Do I need a WhatsApp number?</summary><p>Yes. Connect your number using WhatsApp’s Linked devices screen and the QR code in your console.</p></details><details><summary>Is Zelon API free?</summary><p>This self-hosted application has no subscription tiers. Hosting, database and any external services have their own costs. WhatsApp still applies its own limits.</p></details><details><summary>Is this the official WhatsApp Business API?</summary><p>No. This connection uses the open-source Baileys WhatsApp Web integration. It is independent of Meta and GREEN-API. Connect numbers you control and follow WhatsApp’s terms.</p></details><details><summary>Does my data survive redeployment?</summary><p>Production data and encrypted connection credentials are stored in your configured private SQLite directory or MySQL database. Keep your database and encryption key when redeploying.</p></details></section></main><footer><span>© ${new Date().getFullYear()} Zelon API</span><span>Independent WhatsApp integration platform</span></footer>`;
+  window.ZelonSite.landing(root);
 }
 function login() {
   root.onkeydown = null;
-  root.innerHTML = `<header>${brand}<nav><a href="/">Back to website</a></nav></header><main class="auth"><section class="card"><div class="eyebrow">Developer console</div><h1>Welcome back.</h1><p class="hint">Sign in to manage your WhatsApp connections.</p><form id="login"><label for="email">Email address</label><input id="email" name="email" type="email" autocomplete="username" required><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required><div class="actions"><button type="submit" class="btn primary">Sign in</button></div><p class="hint">Access is provisioned by your platform administrator.</p></form></section></main>`;
+  window.ZelonSite.login(root);
+  const err = document.querySelector("#loginErr");
   form("login", async (d) => {
-    await api("/login", "POST", d);
+    err.hidden = true;
+    try {
+      await api("/login", "POST", d);
+    } catch (e) {
+      err.textContent = e.message || "Sign-in failed";
+      err.hidden = false;
+      return;
+    }
     await load();
   });
+}
+const VIEWS = ["overview", "instances", "docs", "users", "system", "account"];
+let restored = false;
+function saveNav() {
+  try {
+    const h = "#/" + view + (selected ? "/" + selected.id + "/" + tab : "");
+    if (location.hash !== h) history.replaceState(null, "", location.pathname + location.search + h);
+    localStorage.setItem("zelonNav", JSON.stringify({ view, inst: selected?.id || null, tab }));
+  } catch {}
+}
+function restoreNav() {
+  restored = true;
+  let want = null;
+  const m = /^#\/([a-z]+)(?:\/([\w-]+)\/([\w-]+))?$/.exec(location.hash || "");
+  if (m) want = { view: m[1], inst: m[2] || null, tab: m[3] || "connection" };
+  else {
+    try { want = JSON.parse(localStorage.getItem("zelonNav") || "null"); } catch {}
+  }
+  if (!want || !VIEWS.includes(want.view)) return;
+  if ((want.view === "users" || want.view === "system") && user.role !== "admin") return;
+  view = want.view;
+  if (want.inst) {
+    const found = instances.find((x) => x.id === want.inst);
+    if (found) { selected = found; tab = want.tab || "connection"; }
+  }
 }
 async function load() {
   user = await api("/me");
   instances = await api("/instances");
+  if (!restored) restoreNav();
   if (selected) selected = instances.find((x) => x.id === selected.id) || null;
   shell();
 }
@@ -141,6 +137,8 @@ const ICONS = {
 const ico = (n, s = 20) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n] || ""}</svg>`;
 function shell() {
   clearInterval(timer);
+  root.className = "";
+  document.title = "Zelon API console";
   const items = [
     ["Main", [["overview", "Overview", "home"], ["instances", "WhatsApp instances", "phone"], ["docs", "API docs", "book"]]],
     ...(user.role === "admin" ? [["Admin", [["users", "User accounts", "users"], ["system", "System health", "activity"]]]] : []),
@@ -165,6 +163,9 @@ function shell() {
   );
   const out = async () => {
     await api("/logout", "POST");
+    try { localStorage.removeItem("zelonNav"); } catch {}
+    restored = false; view = "overview"; selected = null; tab = "connection";
+    history.replaceState(null, "", location.pathname + location.search);
     login();
   };
   on("logout", out);
@@ -178,9 +179,9 @@ function summarize(data) {
     .map(([k, v]) => {
       const label = k.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase());
       const val = typeof v === "object" ? (Array.isArray(v) ? v.length + " items" : Object.keys(v).length + " fields") : String(v);
-      return label + ": " + (val.length > 80 ? val.slice(0, 77) + "…" : val);
+      return label + ": " + (val.length > 80 ? val.slice(0, 77) + "â€¦" : val);
     })
-    .join(" · ");
+    .join(" Â· ");
 }
 const uptime = (s) => {
   s = Number(s) || 0;
@@ -196,6 +197,7 @@ function cards(limit) {
 }
 function render() {
   clearInterval(timer);
+  saveNav();
   document.body.classList.remove("page-chats", "inbox-lock");
   const w = document.querySelector("#workspace");
   if (selected) {
@@ -222,7 +224,7 @@ function render() {
   const name = user.email.split("@")[0];
   w.innerHTML = view === "overview" ? `<section class="welcome"><div><div class="eyebrow">Overview</div><h1>Welcome back, ${esc(name)}</h1><p>Connect numbers, send messages and manage everything from one place.</p></div><button id="new" class="btn bright">${ico("plus", 18)}New instance</button></section>
   <div class="metrics"><div class="card metric"><span class="ico-box">${ico("phone")}</span><div><div class="value">${instances.length}</div><div class="hint">Instances</div></div></div><div class="card metric"><span class="ico-box ok">${ico("check")}</span><div><div class="value">${connected}</div><div class="hint">Connected</div></div></div><div class="card metric"><span class="ico-box warn">${ico("alert")}</span><div><div class="value">${instances.length - connected}</div><div class="hint">Needs setup</div></div></div></div>
-  <div class="dash-grid"><section class="card"><div class="row card-title"><h3>Your instances</h3><button class="btn mini" data-view-link="instances">View all</button></div>${cards(5)}</section><section class="card"><h3>Quick start</h3><ol class="steps"><li><span>1</span><div><strong>Create an instance</strong><p>Give your WhatsApp connection a name.</p></div></li><li><span>2</span><div><strong>Scan the QR code</strong><p>WhatsApp → Linked devices → Link a device.</p></div></li><li><span>3</span><div><strong>Generate an API key</strong><p>Start sending from your application.</p></div></li></ol><button class="btn" data-view-link="docs">${ico("book", 16)}Read API docs</button></section></div>` : `<div class="top"><div><div class="eyebrow">Workspace</div><h1>WhatsApp instances</h1><p>Connect and manage your numbers.</p></div><button id="new" class="btn primary">${ico("plus", 18)}New instance</button></div><section class="card">${cards()}</section>`;
+  <div class="dash-grid"><section class="card"><div class="row card-title"><h3>Your instances</h3><button class="btn mini" data-view-link="instances">View all</button></div>${cards(5)}</section><section class="card"><h3>Quick start</h3><ol class="steps"><li><span>1</span><div><strong>Create an instance</strong><p>Give your WhatsApp connection a name.</p></div></li><li><span>2</span><div><strong>Scan the QR code</strong><p>WhatsApp â†’ Linked devices â†’ Link a device.</p></div></li><li><span>3</span><div><strong>Generate an API key</strong><p>Start sending from your application.</p></div></li></ol><button class="btn" data-view-link="docs">${ico("book", 16)}Read API docs</button></section></div>` : `<div class="top"><div><div class="eyebrow">Workspace</div><h1>WhatsApp instances</h1><p>Connect and manage your numbers.</p></div><button id="new" class="btn primary">${ico("plus", 18)}New instance</button></div><section class="card">${cards()}</section>`;
   document.querySelectorAll("[data-view-link]").forEach((b) => (b.onclick = () => document.querySelector('.sidebar [data-view="' + b.dataset.viewLink + '"]').click()));
   w.insertAdjacentHTML(
     "beforeend",
@@ -343,7 +345,7 @@ function instancePage() {
     const method0 = localStorage.getItem("zelonLinkMethod") === "pair" ? "pair" : "qr";
     const linkCard = connected
       ? `<div class="state-ok"><span class="ico-box ok big">${ico("check", 28)}</span><h3>WhatsApp is connected</h3><p class="hint">${x.phone ? "Linked number <strong>+" + esc(x.phone) + "</strong> is" : "Your number is"} online and ready to send and receive messages.</p><div class="actions center"><button id="restart" class="btn">Restart connection</button><button id="disconnect" class="btn danger">Log out number</button></div></div>`
-      : `<h3>Link your WhatsApp number</h3><p class="hint">Choose how you want to link this number. You only need one method.</p><div class="alert" id="linkAlert" hidden></div><div class="seg" role="tablist"><button type="button" class="segbtn ${method0 === "qr" ? "active" : ""}" data-method="qr">${ico("qr", 18)}Scan QR code</button><button type="button" class="segbtn ${method0 === "pair" ? "active" : ""}" data-method="pair">${ico("key", 18)}Pairing code</button></div><div id="methodQr" ${method0 === "qr" ? "" : "hidden"}><ol class="how"><li>Open WhatsApp on your phone</li><li>Go to <b>Linked devices → Link a device</b></li><li>Scan the QR code shown below</li></ol><div id="qrbox" class="qrbox"></div><div class="actions center"><button id="connect" class="btn primary">Generate QR code</button></div></div><div id="methodPair" ${method0 === "pair" ? "" : "hidden"}><ol class="how"><li>Enter the number you want to link</li><li>Open WhatsApp → <b>Linked devices → Link a device</b></li><li>Choose <b>Link with phone number instead</b> and type the code</li></ol><form id="pairForm"><label for="pairPhone">WhatsApp number (with country code)</label><input id="pairPhone" name="pairPhone" type="tel" placeholder="+97450000000" required><div class="actions"><button type="submit" class="btn primary">Get pairing code</button></div></form><div id="pairResult"></div></div>`;
+      : `<h3>Link your WhatsApp number</h3><p class="hint">Choose how you want to link this number. You only need one method.</p><div class="alert" id="linkAlert" hidden></div><div class="seg" role="tablist"><button type="button" class="segbtn ${method0 === "qr" ? "active" : ""}" data-method="qr">${ico("qr", 18)}Scan QR code</button><button type="button" class="segbtn ${method0 === "pair" ? "active" : ""}" data-method="pair">${ico("key", 18)}Pairing code</button></div><div id="methodQr" ${method0 === "qr" ? "" : "hidden"}><ol class="how"><li>Open WhatsApp on your phone</li><li>Go to <b>Linked devices â†’ Link a device</b></li><li>Scan the QR code shown below</li></ol><div id="qrbox" class="qrbox"></div><div class="actions center"><button id="connect" class="btn primary">Generate QR code</button></div></div><div id="methodPair" ${method0 === "pair" ? "" : "hidden"}><ol class="how"><li>Enter the number you want to link</li><li>Open WhatsApp â†’ <b>Linked devices â†’ Link a device</b></li><li>Choose <b>Link with phone number instead</b> and type the code</li></ol><form id="pairForm"><label for="pairPhone">WhatsApp number (with country code)</label><input id="pairPhone" name="pairPhone" type="tel" placeholder="+97450000000" required><div class="actions"><button type="submit" class="btn primary">Get pairing code</button></div></form><div id="pairResult"></div></div>`;
     p.innerHTML = `<div class="split"><section class="card link-card">${linkCard}</section><section class="card"><h3>API access</h3><p class="hint">Generate an API key scoped to this instance. It is shown once. Generating a new key revokes the previous one.</p><div class="actions"><button id="key" class="btn">${ico("key", 16)}Generate API key</button></div><div id="keybox"></div><p class="hint">Instance ID</p><div class="key">${esc(x.id)}</div></section></div>`;
     const swap = (m) => {
       localStorage.setItem("zelonLinkMethod", m);
@@ -360,7 +362,7 @@ function instancePage() {
     form("pairForm", async (d) => {
       const r = await api(base + "/pairing-code", "POST", { phone: d.pairPhone });
       const code = String(r.code || "").replace(/(.{4})(?=.)/, "$1-");
-      document.querySelector("#pairResult").innerHTML = `<div class="paircode"><span>Your pairing code</span><strong>${esc(code)}</strong><button type="button" class="btn mini" id="copyCode">Copy code</button><p class="hint">Enter it in WhatsApp within about a minute.</p></div>`;
+      document.querySelector("#pairResult").innerHTML = `<div class="paircode"><span>Your pairing code</span><strong>${esc(code)}</strong><button type="button" class="btn mini" id="copyCode">Copy code</button><p class="hint">Open WhatsApp, go to Linked devices, choose Link with phone number and type this code within about a minute. Request a new code if it is rejected - only the latest one works.</p></div>`;
       on("copyCode", async () => {
         await navigator.clipboard?.writeText(String(r.code));
         toast("Code copied");
@@ -408,7 +410,7 @@ function instancePage() {
         if (box)
           box.innerHTML = d.qr
             ? `<img class="qr" src="${esc(d.qr)}" alt="WhatsApp linking QR code">`
-            : `<p class="hint center">${["connecting", "reconnecting", "awaiting_qr"].includes(d.status) ? "Connecting to WhatsApp… the QR code will appear here." : "Select Generate QR code to start linking."}</p>`;
+            : `<p class="hint center">${["connecting", "reconnecting", "awaiting_qr"].includes(d.status) ? "Connecting to WhatsAppâ€¦ the QR code will appear here." : "Select Generate QR code to start linking."}</p>`;
         const alert = document.querySelector("#linkAlert");
         if (alert) {
           alert.hidden = !d.error;
@@ -493,7 +495,7 @@ function instancePage() {
           }),
       );
     }
-    p.innerHTML = '<div class="loading">Loading records…</div>';
+    p.innerHTML = '<div class="loading">Loading recordsâ€¦</div>';
     fetchRecords().catch((e) => {
       p.textContent = e.message;
     });
@@ -520,7 +522,7 @@ function instancePage() {
           rows
             .map(
               (r) =>
-                `<p><span class="status ${esc(r.status)}">${esc(r.status)}</span> ${r.attempts} retries · ${esc(r.error || r.id)} ${r.status === "failed" ? `<button class="btn" data-hook="${r.id}">Retry</button>` : ""}</p>`,
+                `<p><span class="status ${esc(r.status)}">${esc(r.status)}</span> ${r.attempts} retries Â· ${esc(r.error || r.id)} ${r.status === "failed" ? `<button class="btn" data-hook="${r.id}">Retry</button>` : ""}</p>`,
             )
             .join("");
         document.querySelectorAll("[data-hook]").forEach(
@@ -542,14 +544,14 @@ function instancePage() {
       .catch((e) => toast(e.message));
   }
   if (tab === "groups") {
-    p.innerHTML = `<section class="card"><div class="row card-title"><h3>Your groups</h3><div class="row"><input id="groupSearch" class="inline-search" placeholder="Search groups" aria-label="Search groups"><button id="groups" class="btn mini">Refresh</button></div></div><div id="groupList"><p class="hint">Loading groups…</p></div></section><div class="split spaced"><section class="card"><h3>Check a WhatsApp number</h3><form id="check"><label for="phone">Phone number</label><input name="phone" id="phone" placeholder="+97450000000" required><div class="actions"><button type="submit" class="btn primary">Check number</button></div></form><div id="result"></div></section><section class="card"><h3>Create a group</h3><form id="groupCreate"><label for="groupName">Group name</label><input id="groupName" name="name" required><label for="participants">Participants (one phone number per line)</label><textarea name="participants" id="participants" required></textarea><div class="actions"><button type="submit" class="btn primary">Create group</button></div></form></section></div><section class="card"><h3>Manage group members</h3><form id="members"><label for="groupId">Group</label><input id="groupId" name="groupId" list="groupChoices" placeholder="Pick a group or paste 123456789@g.us" autocomplete="off" required><datalist id="groupChoices"></datalist><label for="memberPhones">Participants (one phone per line)</label><textarea id="memberPhones" name="participants" required></textarea><label for="memberAction">Action</label><select id="memberAction" name="action"><option value="add">Add</option><option value="remove">Remove</option><option value="promote">Promote to admin</option><option value="demote">Remove admin role</option></select><div class="actions"><button class="btn primary" type="submit">Update members</button></div></form></section>`;
+    p.innerHTML = `<section class="card"><div class="row card-title"><h3>Your groups</h3><div class="row"><input id="groupSearch" class="inline-search" placeholder="Search groups" aria-label="Search groups"><button id="groups" class="btn mini">Refresh</button></div></div><div id="groupList"><p class="hint">Loading groupsâ€¦</p></div></section><div class="split spaced"><section class="card"><h3>Check a WhatsApp number</h3><form id="check"><label for="phone">Phone number</label><input name="phone" id="phone" placeholder="+97450000000" required><div class="actions"><button type="submit" class="btn primary">Check number</button></div></form><div id="result"></div></section><section class="card"><h3>Create a group</h3><form id="groupCreate"><label for="groupName">Group name</label><input id="groupName" name="name" required><label for="participants">Participants (one phone number per line)</label><textarea name="participants" id="participants" required></textarea><div class="actions"><button type="submit" class="btn primary">Create group</button></div></form></section></div><section class="card"><h3>Manage group members</h3><form id="members"><label for="groupId">Group</label><input id="groupId" name="groupId" list="groupChoices" placeholder="Pick a group or paste 123456789@g.us" autocomplete="off" required><datalist id="groupChoices"></datalist><label for="memberPhones">Participants (one phone per line)</label><textarea id="memberPhones" name="participants" required></textarea><label for="memberAction">Action</label><select id="memberAction" name="action"><option value="add">Add</option><option value="remove">Remove</option><option value="promote">Promote to admin</option><option value="demote">Remove admin role</option></select><div class="actions"><button class="btn primary" type="submit">Update members</button></div></form></section>`;
     p.classList.add("stack");
     let groupRows = [];
     const drawGroups = () => {
       const q = document.querySelector("#groupSearch").value.toLowerCase();
       const rows = groupRows.filter((g) => (g.subject || "").toLowerCase().includes(q));
       document.querySelector("#groupList").innerHTML = rows.length
-        ? `<div class="inst-list">${rows.map((g) => `<article class="group-row"><span class="avatar group">${ico("users", 20)}</span><div class="inst-info"><strong>${esc(g.subject || "Unnamed group")}</strong><span class="hint">${g.participants?.length || 0} participants${g.desc ? " · " + esc(String(g.desc).slice(0, 60)) : ""}</span></div><button class="btn mini primary" data-open-group="${esc(g.id)}">Open chat</button><button class="btn mini" data-group-info="${esc(g.id)}">Details</button></article>`).join("")}</div>`
+        ? `<div class="inst-list">${rows.map((g) => `<article class="group-row"><span class="avatar group">${ico("users", 20)}</span><div class="inst-info"><strong>${esc(g.subject || "Unnamed group")}</strong><span class="hint">${g.participants?.length || 0} participants${g.desc ? " Â· " + esc(String(g.desc).slice(0, 60)) : ""}</span></div><button class="btn mini primary" data-open-group="${esc(g.id)}">Open chat</button><button class="btn mini" data-group-info="${esc(g.id)}">Details</button></article>`).join("")}</div>`
         : `<p class="hint">${groupRows.length ? "No groups match your search." : "No groups found for this number."}</p>`;
       document.querySelectorAll("[data-open-group]").forEach((b) => (b.onclick = () => {
         const g = groupRows.find((r) => r.id === b.dataset.openGroup);
@@ -560,7 +562,7 @@ function instancePage() {
       document.querySelectorAll("[data-group-info]").forEach((b) => (b.onclick = async () => {
         try {
           const g = await api(base + "/groups/" + encodeURIComponent(b.dataset.groupInfo) + "/overview");
-          const m = modal(`<h2>${esc(g.subject)}</h2><p class="hint">${g.createdAt ? "Created " + esc(new Date(g.createdAt).toLocaleDateString()) : ""}${g.owner ? " · Owner " + esc(g.owner) : ""}</p>${g.description ? `<p>${esc(g.description)}</p>` : ""}<div class="chips"><span class="status ${g.announce ? "queued" : "connected"}">${g.announce ? "Only admins can send" : "Everyone can send"}</span><span class="status ${g.restrict ? "queued" : "connected"}">${g.restrict ? "Only admins edit info" : "Everyone can edit info"}</span></div><h3>${g.participants.length} participants</h3><div class="members">${g.participants.map((u) => `<div class="record row"><div><strong>${esc(u.name || u.phone)}</strong>${u.name ? `<div class="hint">${esc(u.phone)}</div>` : ""}</div>${u.admin ? `<span class="status connected">${u.admin === "superadmin" ? "Owner" : "Admin"}</span>` : ""}</div>`).join("")}</div><div class="actions"><button class="btn" id="closeGroup">Close</button></div>`);
+          const m = modal(`<h2>${esc(g.subject)}</h2><p class="hint">${g.createdAt ? "Created " + esc(new Date(g.createdAt).toLocaleDateString()) : ""}${g.owner ? " Â· Owner " + esc(g.owner) : ""}</p>${g.description ? `<p>${esc(g.description)}</p>` : ""}<div class="chips"><span class="status ${g.announce ? "queued" : "connected"}">${g.announce ? "Only admins can send" : "Everyone can send"}</span><span class="status ${g.restrict ? "queued" : "connected"}">${g.restrict ? "Only admins edit info" : "Everyone can edit info"}</span></div><h3>${g.participants.length} participants</h3><div class="members">${g.participants.map((u) => `<div class="record row"><div><strong>${esc(u.name || u.phone)}</strong>${u.name ? `<div class="hint">${esc(u.phone)}</div>` : ""}</div>${u.admin ? `<span class="status connected">${u.admin === "superadmin" ? "Owner" : "Admin"}</span>` : ""}</div>`).join("")}</div><div class="actions"><button class="btn" id="closeGroup">Close</button></div>`);
           on("closeGroup", m.close);
         } catch (e) { toast(e.message); }
       }));
@@ -599,36 +601,16 @@ function instancePage() {
   }
 }
 function docs() {
-  document.querySelector("#workspace").innerHTML =
-    `<div class="top"><div><div class="eyebrow">Developer resources</div><h1>API documentation</h1><p>Connect your applications with scoped Bearer authentication.</p></div></div><div class="panel card"><h3>Authentication</h3><p>Generate a key in your instance’s Connection tab. Include it in the Authorization header. Keys work only for their assigned instance. Send a unique Idempotency-Key header when queuing each message; retries with that same key reuse the existing job, preventing duplicate queue entries.</p><pre class="doccode">Authorization: Bearer YOUR_API_KEY</pre><h3>Send a message</h3><pre class="doccode">POST /api/instances/INSTANCE_ID/messages\nContent-Type: application/json\n\n{\n  "to": "+97450000000",\n  "type": "text",\n  "text": "Hello from Zelon API"\n}</pre><p class="hint">Response: 202 with a message ID and queued status. Scheduling uses sendAt in ISO 8601 UTC. Media uses base64 data, mimetype and filename. Use mediaId from a finalized chunk upload (100 MB default).</p><p><a class="btn" href="/api-reference.html" target="_blank" rel="noopener">Complete API reference & SDKs</a></p><h3>Available operations</h3><div class="tablewrap"><table><tr><th>Method</th><th>Instance endpoint</th><th>Purpose</th></tr>${[
-      ["POST", "/messages", "Queue text, media, contacts, location or polls"],
-      ["GET", "/messages", "Read outgoing history"],
-      ["GET", "/events", "Read incoming messages and receipts"],
-      ["POST", "/check-number", 'Check a phone number: { "phone": "+974…" }'],
-      ["GET", "/groups", "List groups"],
-      [
-        "POST",
-        "/groups",
-        'Create: { "name": "Team", "participants": ["+974…"] }',
-      ],
-      [
-        "PUT",
-        "/groups/:group/participants",
-        "Update members; action: add, remove, promote, demote",
-      ],
-      ["GET", "/avatar?phone=+974…", "Fetch a profile picture URL"],
-    ]
-      .map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`)
-      .join(
-        "",
-      )}</table></div><h3>Webhooks</h3><p>Configure your public HTTPS endpoint in the Webhooks tab. Verify the raw body signature using the displayed secret. Delivery is at least once; deduplicate by event ID. Event types: connection, message, receipt.</p><h3>Failure handling</h3><p>400: invalid input. 401: invalid credentials. 404: inaccessible instance. 409: conflicting state or idempotency key. 429: request rate exceeded. Messages interrupted during a send are marked unknown; check delivery before retrying to prevent duplicates.</p><h3>Deployment contract</h3><p>One worker owns the database and WhatsApp sessions; additional local HTTP processes forward to it. Message and event history use indexed database queries and cursor pagination. Your configured SQLite/MySQL database stores records and encrypted WhatsApp credentials. Preserve ENCRYPTION_KEY across deployments. Shared inbox, status publishing, contacts, auto replies, consent-based campaigns, encrypted large media and SDK examples are included. Read the complete API reference and deployment guide in GitHub.</p></div>`;
+  const w = document.querySelector("#workspace");
+  w.innerHTML = '<div class="top"><div><div class="eyebrow">Developer resources</div><h1>API documentation</h1><p>Guides, endpoint reference and copy-ready examples. <a href="/api-reference.html" target="_blank" rel="noopener">Open full page</a></p></div></div><div class="site docsite embed" id="docEmbed"></div>';
+  window.ZelonDocs.render(w.querySelector("#docEmbed"));
 }
 async function boot() {
   if (location.pathname === "/") {
     landing();
     return;
   }
-  root.innerHTML = '<div class="loading">Opening your workspace…</div>';
+  root.innerHTML = '<div class="loading">Opening your workspaceâ€¦</div>';
   try {
     await load();
   } catch (e) {
@@ -692,3 +674,4 @@ function usersPage() {
 function accountPage() {
   return window.ZelonAdmin.account(adminCtx());
 }
+
