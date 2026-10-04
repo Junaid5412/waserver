@@ -51,8 +51,13 @@ window.ZelonAdmin = (() => {
     const draw = () => {
       const ka = d.keepAlive,
         mem = d.memory,
-        heapPct = (mem.heapUsed / Math.max(1, mem.heapTotal)) * 100,
         rs = d.resources || null,
+        heapLimit = mem.heapLimit || rs?.process?.heapLimit || null,
+        heapPct = heapLimit ? (mem.heapUsed / heapLimit) * 100 : (mem.heapUsed / Math.max(1, mem.heapTotal)) * 100,
+        heapTone = heapLimit ? toneFor(heapPct) : (mem.heapUsed > 500 * 1024 * 1024 ? "warn" : ""),
+        heapLabel = heapLimit
+          ? `${mb(mem.heapUsed)} / ${mb(mem.heapTotal)} · ${mb(heapLimit)} max`
+          : `${mb(mem.heapUsed)} / ${mb(mem.heapTotal)}`,
         memLimit = rs?.memory?.limit || null,
         memUsed = rs?.memory?.used ?? mem.rss,
         memPct = memLimit ? (memUsed / memLimit) * 100 : 0,
@@ -102,7 +107,7 @@ window.ZelonAdmin = (() => {
       <div class="sh-two">
         <section class="card"><h3>Resources</h3>
           <div class="res"><div class="row"><span>App memory (container)</span><b>${memLabel}</b></div>${memBar}</div>
-          <div class="res"><div class="row"><span>Node heap</span><b>${mb(mem.heapUsed)} / ${mb(mem.heapTotal)}</b></div>${bar(heapPct, toneFor(heapPct))}</div>
+          <div class="res"><div class="row"><span>Node heap</span><b>${heapLabel}</b></div>${bar(heapPct, heapTone)}</div>
           <div class="res"><div class="row"><span>Process (RSS)</span><b>${mb(mem.rss)}</b></div></div>
           <div class="res"><div class="row"><span>CPU used by this app</span><b>${cpuLabel}</b></div>${cpuBar}<p class="hint" style="margin:2px 0 0">${cpuNote}</p></div>
           <p class="hint" style="margin-top:12px">Figures are for this app only. Server-wide totals are not shown because on shared hosting they include other websites.</p></section>

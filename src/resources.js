@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import os from "node:os";
+import v8 from "node:v8";
 
 const read = (p) => {
   try { return readFileSync(p, "utf8").trim(); } catch { return null; }
@@ -57,9 +58,11 @@ function cpuPercent() {
 export function resources() {
   const m = memory(), mem = process.memoryUsage();
   const quota = cpuQuota();
+  let heapLimit = null;
+  try { heapLimit = v8.getHeapStatistics()?.heap_size_limit || null; } catch {}
   return {
     memory: { used: m.used, limit: m.limit, source: m.source },
-    process: { rss: mem.rss, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal, external: mem.external },
+    process: { rss: mem.rss, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal, heapLimit, external: mem.external },
     cpu: { processPercent: cpuPercent(), limitCores: quota ? Math.round(quota * 100) / 100 : null },
   };
 }

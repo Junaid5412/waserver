@@ -395,6 +395,7 @@ app.get(
       byStatus = {};
     for (const x of all) byStatus[x.status || "disconnected"] = (byStatus[x.status || "disconnected"] || 0) + 1;
     const mem = process.memoryUsage();
+    const rs = resources();
     res.json({
       database: "healthy",
       databaseMs,
@@ -406,8 +407,13 @@ app.get(
       platform: os.platform() + " " + os.arch(),
       pid: process.pid,
       environment: production ? "production" : "development",
-      resources: resources(),
-      memory: { rss: mem.rss, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal },
+      resources: rs,
+      memory: {
+        rss: mem.rss,
+        heapUsed: mem.heapUsed,
+        heapTotal: mem.heapTotal,
+        heapLimit: rs.process?.heapLimit || null,
+      },
       instances: { total: all.length, byStatus, sockets: all.filter((x) => wa.has(x.id)).length },
       liveStreams: bus.size(),
       counts,
