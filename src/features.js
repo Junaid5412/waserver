@@ -231,8 +231,9 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
     wrap(async (req, res) => {
       const chat = chatJid(req.params.chat),
         paging = page(req.query),
-        ctx = await resolver.context(req.instance),
         aliases = await resolver.aliasesOf(req.instance, chat);
+      if (chat.endsWith("@g.us")) await resolver.learnGroup(req.instance, chat);
+      const ctx = await resolver.context(req.instance);
       const seen = new Set(),
         rows = (
           await Promise.all(
@@ -251,14 +252,14 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
           .filter((row) => !isJunkType(row.type))
           .map((row) => {
             const m = inbox.dto(row),
-              who = m.participant || row.chatId,
-              canon = ctx.canon(who),
+              who = m.participant || m.participantAlt || (row.chatId.endsWith("@g.us") ? "" : row.chatId),
+              canon = who ? ctx.canon(who) : "",
               phone = /@s\.whatsapp\.net$/.test(canon) ? "+" + canon.split("@")[0] : "";
             return {
               ...m,
               participantPhone: phone,
-              participantJid: canon,
-              name: row.fromMe ? "You" : ctx.nameFor(who) || m.name || (phone || "WhatsApp user"),
+              participantJid: canon && !canon.endsWith("@g.us") ? canon : "",
+              name: row.fromMe ? "You" : (who && ctx.nameFor(who)) || m.name || phone || "",
             };
           }),
       );
@@ -521,7 +522,8 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
       try { s = wa.active(req.instance.id); } catch { return res.status(404).end(); }
       const raw = String(req.params.chat),
         own = raw === "me",
-        key = req.instance.id + "|" + raw,
+        full = req.query.full === "1",
+        key = req.instance.id + "|" + raw + (full ? "|full" : ""),
         hit = pictures.get(key);
       const send = (p) => {
         if (!p.buf) return res.set("Cache-Control", "private, max-age=600").status(404).end();
@@ -533,12 +535,16 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
         const list = own ? [jidNormalizedUser(s.user.id)] : await candidates(req.instance, chatJid(raw));
         for (const j of list) {
           try {
-            const url = await s.profilePictureUrl(j, "preview", 8000);
+            let url = null;
+            for (const kind of full ? ["image", "preview"] : ["preview"]) {
+              try { url = await s.profilePictureUrl(j, kind, 8000); } catch { url = null; }
+              if (url) break;
+            }
             if (!url) continue;
             const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
             if (!r.ok) continue;
             const buf = Buffer.from(await r.arrayBuffer());
-            if (buf.length && buf.length < 3_000_000) {
+            if (buf.length && buf.length < 6_000_000) {
               entry.buf = buf;
               entry.type = r.headers.get("content-type") || "image/jpeg";
               break;
@@ -854,17 +860,26 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
   );
   router.get(
     "/statuses",
-    wrap(async (req, res) =>
+    wrap(async (req, res) => {
+      const ctx = await resolver.context(req.instance);
+      const rows = await store.query("inbox", { instanceId: req.instance.id, chatId: "status@broadcast", ...page(req.query) });
       res.json(
-        (
-          await store.query("inbox", {
-            instanceId: req.instance.id,
-            chatId: "status@broadcast",
-            ...page(req.query),
-          })
-        ).map(inbox.dto),
-      ),
-    ),
+        rows
+          .filter((r) => !r.hidden && !r.deleted && !isJunkType(r.type))
+          .map((row) => {
+            const m = inbox.dto(row),
+              who = m.participant || m.participantAlt || "",
+              canon = who ? ctx.canon(who) : "",
+              phone = /@s\.whatsapp\.net$/.test(canon) ? "+" + canon.split("@")[0] : "";
+            return {
+              ...m,
+              participantJid: canon && !canon.endsWith("@g.us") ? canon : "",
+              participantPhone: phone,
+              name: row.fromMe ? "My status" : (who && ctx.nameFor(who)) || m.name || phone || "",
+            };
+          }),
+      );
+    }),
   );
   router.post(
     "/statuses",

@@ -61,6 +61,7 @@ export function previewOf(info) {
   return map[t] || (t ? t.charAt(0).toUpperCase() + t.slice(1) : "Message");
 }
 export function createInbox(store, enc, notify = () => {}) {
+  const seenNames = new Map();
   const tell = (instance, event) => { try { notify(instance, event); } catch {} };
   async function rowsFor(instance, waId) {
     return store.query("inbox", { instanceId: instance.id, lookupKey: waId, limit: 10 });
@@ -158,6 +159,17 @@ export function createInbox(store, enc, notify = () => {}) {
     const remote = normalizeJid(m.key.remoteJid),
       altJid = m.key.remoteJidAlt || m.key.senderPn || m.key.participantPn;
     if (remote.endsWith("@lid") && altJid) await alias(instance, remote, altJid);
+    const part = normalizeJid(m.key.participant),
+      partAlt = m.key.participantAlt || m.key.participantPn;
+    if (part?.endsWith("@lid") && partAlt) await alias(instance, part, partAlt);
+    const whoJid = part || (!remote.endsWith("@g.us") ? remote : "");
+    if (whoJid && !m.key.fromMe && m.pushName) {
+      const nk = hash(instance.id + ":" + whoJid);
+      if (seenNames.get(nk) !== m.pushName) {
+        seenNames.set(nk, m.pushName);
+        await store.set("wa-names", nk, { id: nk, instanceId: instance.id, userId: instance.userId, lookupKey: whoJid, jid: whoJid, name: m.pushName, createdAt: new Date().toISOString() });
+      }
+    }
     const chatId = await resolve(instance, remote),
       ts = timestampSeconds(m.messageTimestamp);
     const createdAt = new Date(
@@ -335,6 +347,7 @@ export function createInbox(store, enc, notify = () => {}) {
       createdAt: row.createdAt,
       ...describeMessage(m.message),
       participant: m.key?.participant || "",
+      participantAlt: m.key?.participantAlt || m.key?.participantPn || m.key?.senderPn || "",
       name: m.pushName || "",
       deleted: !!row.deleted,
       edited: !!row.edited,

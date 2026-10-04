@@ -375,3 +375,25 @@ body:has(.shell){background:#f4f6fa;font-size:14.5px;color:var(--ink)}
 .sh-skel-card b{width:90px;height:18px;margin-bottom:8px}
 .sh-skel-card u{width:140px;height:12px;text-decoration:none}
 @keyframes shShim{to{background-position:-200% 0}}
+/* ===== instances page ===== */
+.inst-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:0 0 18px}
+.inst-stats>div{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:14px;align-items:center;padding:16px 18px;border:1px solid var(--line,#e3e8ef);border-radius:16px;background:#fff;box-shadow:0 1px 2px #0f172a0a}
+.inst-stats .ico-box{grid-row:1/3}
+.inst-stats b{font-size:26px;line-height:1.1;color:#0f172a}
+.inst-stats span:last-child{font-size:12.5px;color:#64748b;font-weight:600}
+.inst-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 16px}
+.inst-toolbar input{flex:1 1 240px;max-width:380px;border-radius:12px}
+.inst-filters{display:flex;gap:8px;flex-wrap:wrap}
+.inst-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,290px),1fr));gap:16px}
+.inst-card{position:relative;display:flex;flex-direction:column;gap:6px;padding:18px;border:1px solid var(--line,#e3e8ef);border-radius:18px;background:#fff;box-shadow:0 1px 2px #0f172a0a;transition:box-shadow .2s,transform .2s,border-color .2s;overflow:hidden}
+.inst-card::before{content:"";position:absolute;inset:0 0 auto 0;height:4px;background:#cbd5e1}
+.inst-card.connected::before{background:linear-gradient(90deg,#10b981,#34d399)}
+.inst-card.awaiting_qr::before,.inst-card.connecting::before,.inst-card.reconnecting::before{background:#f59e0b}
+.inst-card:hover{transform:translateY(-2px);box-shadow:0 14px 30px -14px #0f172a40;border-color:#cfd8e3}
+.inst-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
+.inst-card h3{margin:0;font-size:18px;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inst-num{margin:0;color:#475569;font-size:14px;font-variant-numeric:tabular-nums}
+.inst-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;padding-top:12px;border-top:1px dashed #e3e8ef}
+.inst-foot small{color:#94a3b8;font-size:12px;font-family:ui-monospace,monospace}
+.inst-none{grid-column:1/-1;padding:32px;text-align:center;color:#64748b;border:1px dashed #cbd5e1;border-radius:16px}
+@media(max-width:640px){.inst-stats{grid-template-columns:1fr;gap:10px}.inst-stats>div{padding:12px 14px}.inst-toolbar input{max-width:none}}

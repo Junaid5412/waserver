@@ -224,7 +224,7 @@ function render() {
   const name = user.email.split("@")[0];
   w.innerHTML = view === "overview" ? `<section class="welcome"><div><div class="eyebrow">Overview</div><h1>Welcome back, ${esc(name)}</h1><p>Connect numbers, send messages and manage everything from one place.</p></div><button id="new" class="btn bright">${ico("plus", 18)}New instance</button></section>
   <div class="metrics"><div class="card metric"><span class="ico-box">${ico("phone")}</span><div><div class="value">${instances.length}</div><div class="hint">Instances</div></div></div><div class="card metric"><span class="ico-box ok">${ico("check")}</span><div><div class="value">${connected}</div><div class="hint">Connected</div></div></div><div class="card metric"><span class="ico-box warn">${ico("alert")}</span><div><div class="value">${instances.length - connected}</div><div class="hint">Needs setup</div></div></div></div>
-  <div class="dash-grid"><section class="card"><div class="row card-title"><h3>Your instances</h3><button class="btn mini" data-view-link="instances">View all</button></div>${cards(5)}</section><section class="card"><h3>Quick start</h3><ol class="steps"><li><span>1</span><div><strong>Create an instance</strong><p>Give your WhatsApp connection a name.</p></div></li><li><span>2</span><div><strong>Scan the QR code</strong><p>WhatsApp → Linked devices → Link a device.</p></div></li><li><span>3</span><div><strong>Generate an API key</strong><p>Start sending from your application.</p></div></li></ol><button class="btn" data-view-link="docs">${ico("book", 16)}Read API docs</button></section></div>` : `<div class="top"><div><div class="eyebrow">Workspace</div><h1>WhatsApp instances</h1><p>Connect and manage your numbers.</p></div><button id="new" class="btn primary">${ico("plus", 18)}New instance</button></div><section class="card">${cards()}</section>`;
+  <div class="dash-grid"><section class="card"><div class="row card-title"><h3>Your instances</h3><button class="btn mini" data-view-link="instances">View all</button></div>${cards(5)}</section><section class="card"><h3>Quick start</h3><ol class="steps"><li><span>1</span><div><strong>Create an instance</strong><p>Give your WhatsApp connection a name.</p></div></li><li><span>2</span><div><strong>Scan the QR code</strong><p>WhatsApp → Linked devices → Link a device.</p></div></li><li><span>3</span><div><strong>Generate an API key</strong><p>Start sending from your application.</p></div></li></ol><button class="btn" data-view-link="docs">${ico("book", 16)}Read API docs</button></section></div>` : `<div class="top"><div><div class="eyebrow">Workspace</div><h1>WhatsApp instances</h1><p>Connect and manage your numbers.</p></div><button id="new" class="btn primary">${ico("plus", 18)}New instance</button></div>${instancesView()}`;
   document.querySelectorAll("[data-view-link]").forEach((b) => (b.onclick = () => document.querySelector('.sidebar [data-view="' + b.dataset.viewLink + '"]').click()));
   w.insertAdjacentHTML(
     "beforeend",
@@ -257,6 +257,7 @@ function render() {
   });
   on("new", newInstance);
   on("first", newInstance);
+  bindInstances();
   document.querySelectorAll("[data-instance]").forEach(
     (b) =>
       (b.onclick = () => {
@@ -265,6 +266,33 @@ function render() {
         render();
       }),
   );
+}
+const instStatus = (x) => String(x.status || "disconnected");
+function instancesView() {
+  if (!instances.length) return `<section class="card">${cards()}</section>`;
+  const n = instances.length, up = instances.filter((x) => x.status === "connected").length;
+  return `<div class="inst-stats"><div><span class="ico-box">${ico("phone", 18)}</span><b>${n}</b><span>Total numbers</span></div><div class="ok"><span class="ico-box ok">${ico("check", 18)}</span><b>${up}</b><span>Connected</span></div><div class="warn"><span class="ico-box warn">${ico("alert", 18)}</span><b>${n - up}</b><span>Not connected</span></div></div>
+  <div class="inst-toolbar"><input id="instSearch" type="search" placeholder="Search by name or number" aria-label="Search instances" autocomplete="off"><div class="inst-filters" role="tablist"><button class="chip active" data-ifilter="all">All</button><button class="chip" data-ifilter="connected">Connected</button><button class="chip" data-ifilter="other">Not connected</button></div></div>
+  <div class="inst-grid" id="instGrid"></div>`;
+}
+function bindInstances() {
+  const grid = document.querySelector("#instGrid");
+  if (!grid) return;
+  let q = "", f = "all";
+  const draw = () => {
+    const rows = instances.filter((x) => {
+      const hay = (x.name + " " + (x.phone || "")).toLowerCase();
+      if (q && !hay.includes(q)) return false;
+      return f === "all" || (f === "connected" ? x.status === "connected" : x.status !== "connected");
+    });
+    grid.innerHTML = rows.length
+      ? rows.map((x) => `<article class="inst-card ${esc(instStatus(x))}"><div class="inst-top"><span class="inst-avatar">${ico("phone", 22)}</span><span class="status ${esc(instStatus(x))}">${esc(instStatus(x).replaceAll("_", " "))}</span></div><h3>${esc(x.name)}</h3><p class="inst-num">${x.phone ? "+" + esc(x.phone) : "No number linked yet"}</p><div class="inst-foot"><small>ID ${esc(String(x.id).slice(0, 8))}</small><button class="btn primary" data-instance="${esc(x.id)}">Manage${ico("chevron", 16)}</button></div></article>`).join("")
+      : '<div class="inst-none">No numbers match your search.</div>';
+    grid.querySelectorAll("[data-instance]").forEach((b) => (b.onclick = () => { selected = instances.find((x) => x.id === b.dataset.instance); tab = "connection"; render(); }));
+  };
+  document.querySelector("#instSearch").oninput = (e) => { q = e.target.value.trim().toLowerCase(); draw(); };
+  document.querySelectorAll("[data-ifilter]").forEach((b) => (b.onclick = () => { f = b.dataset.ifilter; document.querySelectorAll("[data-ifilter]").forEach((c) => c.classList.toggle("active", c === b)); draw(); }));
+  draw();
 }
 function newInstance() {
   const modal = document.createElement("div");

@@ -39,6 +39,7 @@ window.ZelonChat = (() => {
     ext: S('<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>', 17),
     msg: S('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>', 17),
     stopSq: S('<rect x="6" y="6" width="12" height="12" rx="2"/>', 20),
+    status: S('<circle cx="12" cy="12" r="9" stroke-dasharray="3.2 2.6"/><circle cx="12" cy="12" r="4"/>', 20),
     locate: S('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8"/>', 18),
   };
   const tickPaths = {
@@ -209,6 +210,7 @@ window.ZelonChat = (() => {
           <button class="wa-me" id="waMe" title="Your profile" aria-label="Your profile">${avatar({ name: "Me" }, "sm", true)}</button>
           <h3>Chats</h3>
           <div class="wa-tools">
+            <button class="wa-ib" id="statusBtn" title="Status updates" aria-label="Status updates">${I.status}</button>
             <button class="wa-ib" id="newChatBtn" title="New chat" aria-label="New chat">${I.plus}</button>
             <button class="wa-ib" id="reloadInbox" title="Refresh" aria-label="Refresh conversations">${I.refresh}</button>
             <button class="wa-ib" id="fullInbox" title="Full screen" aria-label="Full screen">${I.expand}</button>
@@ -235,6 +237,7 @@ window.ZelonChat = (() => {
     function drawList(force) {
       const q = query.trim().toLowerCase();
       let rows = chats.filter((c) => {
+        if (c.chatId === "status@broadcast") return false;
         const text = ((c.name || "") + " " + (c.chatId || "") + " " + (c.phone || "")).toLowerCase();
         if (q && !text.includes(q)) return false;
         if (filter === "archived") return !!c.archived;
@@ -283,7 +286,10 @@ window.ZelonChat = (() => {
       if (m.name && !looksRaw(m.name) && !/^WhatsApp user/.test(m.name)) return m.name;
       return senderPhone(m) || "WhatsApp user";
     };
-    const senderJid = (m) => m.participantJid || m.participant || (m.chatId && !/@g\.us$/.test(m.chatId) ? m.chatId : "");
+    const senderJid = (m) => {
+      const j = m.participantJid || m.participant || m.participantAlt || (m.chatId && !/@g\.us$/.test(m.chatId) ? m.chatId : "");
+      return /@g\.us$|@broadcast$/.test(j) ? "" : norm(j);
+    };
     function mediaHtml(m) {
       if (!m.hasMedia) return "";
       const url = esc(mediaUrl(m, true));
@@ -302,7 +308,7 @@ window.ZelonChat = (() => {
       let h = m.quotedText ? `<div class="wa-quote">${esc(m.quotedText)}</div>` : "";
       h += mediaHtml(m);
       if (m.location && Number.isFinite(m.location.latitude))
-        h += `<a class="wa-loc" target="_blank" rel="noopener noreferrer" href="https://www.google.com/maps?q=${encodeURIComponent(m.location.latitude + "," + m.location.longitude)}"><span class="wa-locmap">${I.pin2}</span><span><b>${esc(m.location.name || "Shared location")}</b><small>${esc(m.location.address || Number(m.location.latitude).toFixed(5) + ", " + Number(m.location.longitude).toFixed(5))}</small><em>Open in Maps</em></span></a>`;
+        h += `<a class="wa-loc" target="_blank" rel="noopener noreferrer" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(m.location.latitude + "," + m.location.longitude)}"><span class="wa-locmap">${I.pin2}</span><span><b>Location</b><small>${Number(m.location.latitude).toFixed(6)}, ${Number(m.location.longitude).toFixed(6)}</small><em>Open in Maps</em></span></a>`;
       for (const c of m.contacts || []) h += `<div class="wa-contact">${I.user}<span><b>${esc(c.name)}</b><small>${esc(c.phone ? fmtPhone(c.phone) : "Contact card")}</small></span></div>`;
       if (m.pollOptions?.length)
         h += `<div class="wa-poll"><b>${I.poll} ${esc(m.text || "Poll")}</b>${m.pollOptions.map((o) => `<div>○ ${esc(o)}</div>`).join("")}</div>`;
@@ -551,7 +557,6 @@ window.ZelonChat = (() => {
         <p class="muted wa-locmsg" id="locMsg">Or type the coordinates yourself.</p>
         ${formRow("Latitude", '<input id="locLat" inputmode="decimal" placeholder="e.g. 25.28540" autocomplete="off">')}
         ${formRow("Longitude", '<input id="locLng" inputmode="decimal" placeholder="e.g. 51.53100" autocomplete="off">')}
-        ${formRow("Place name (optional)", '<input id="locName" maxlength="100" placeholder="e.g. Our office" autocomplete="off">')}
         <div class="wa-dactions"><button type="button" class="btn primary" id="locSend">Send location</button><button type="button" class="btn ghost" data-close>Cancel</button></div></div>`);
       const q = (s) => el.querySelector(s);
       q("#locNow").onclick = () => {
@@ -567,7 +572,7 @@ window.ZelonChat = (() => {
         const lat = Number(q("#locLat").value.trim().replace(",", ".")), lng = Number(q("#locLng").value.trim().replace(",", "."));
         if (!q("#locLat").value.trim() || !q("#locLng").value.trim() || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) { q("#locMsg").textContent = "Enter a valid latitude (-90 to 90) and longitude (-180 to 180)."; return; }
         e.currentTarget.disabled = true;
-        const name = q("#locName").value.trim();
+        const name = "";
         try {
           await quickSend({ type: "location", latitude: lat, longitude: lng, ...(name ? { name } : {}) }, { location: { latitude: lat, longitude: lng, name }, match: ["location", "liveLocation"] });
           el.remove();
@@ -706,6 +711,61 @@ window.ZelonChat = (() => {
         openPrivate(m, { quote: b.dataset.sact === "private", info: b.dataset.sact === "profile" });
       };
       placeMenu(menu, rect.left, rect.bottom + 4);
+    }
+    /* ---------- profile photo popup ---------- */
+    function picViewer(id, name) {
+      const url = picUrl(id) + "?full=1";
+      const el = modal(esc(name || "Profile photo"), `<div class="wa-picview"><img class="wa-picbig" alt="Profile photo" src="${esc(url)}"><p class="wa-picmiss muted" hidden>No profile photo is available for this contact.</p></div><div class="wa-dactions"><a class="btn" download="profile-photo.jpg" href="${esc(url)}">${I.download}<span>Download</span></a></div>`, { wide: true });
+      const img = el.querySelector("img");
+      img.onerror = () => { img.hidden = true; el.querySelector(".wa-picmiss").hidden = false; el.querySelector("a.btn").hidden = true; };
+    }
+
+    /* ---------- status updates ---------- */
+    async function statusDialog() {
+      const el = modal("Status updates", '<div class="wa-stload"><span class="sh-spin"></span><span>Loading status updates…</span></div>', { wide: true });
+      const body = el.querySelector(".wa-dbody");
+      let rows;
+      try { rows = await api(base + "/statuses?limit=100"); } catch (err) { body.innerHTML = `<p class="muted">Could not load statuses (${esc(err.message)}).</p>`; return; }
+      rows = (Array.isArray(rows) ? rows : []).filter((m) => !isJunk(m.type) && !m.deleted);
+      const groups = new Map();
+      for (const m of rows.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))) {
+        const key = m.fromMe ? "me" : senderJid(m) || m.name || "unknown";
+        if (!groups.has(key)) groups.set(key, { key, jid: m.fromMe ? "me" : senderJid(m), name: m.fromMe ? "My status" : senderName(m), phone: senderPhone(m), items: [] });
+        groups.get(key).items.push(m);
+      }
+      const list = [...groups.values()].sort((a, b) => Date.parse(b.items.at(-1).createdAt) - Date.parse(a.items.at(-1).createdAt));
+      const ago = (iso) => { const mins = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000)); return mins < 1 ? "Just now" : mins < 60 ? mins + " min ago" : mins < 1440 ? Math.round(mins / 60) + " h ago" : listTime(iso); };
+      const av = (g) => (g.jid === "me" ? avatar({ chatId: "me", name: "Me" }, "md", true) : avatar({ chatId: g.jid || g.key, name: g.name }, "md"));
+      const drawList = () => {
+        body.innerHTML = list.length
+          ? `<p class="muted wa-stnote">Status updates from your contacts. WhatsApp removes them after 24 hours, so only updates this server received are listed.</p><div class="wa-stlist">${list.map((g, i) => `<button class="wa-stitem" data-sg="${i}">${av(g)}<span><b>${esc(g.name)}</b><small>${g.phone && g.phone !== g.name ? esc(g.phone) + " · " : ""}${g.items.length} update${g.items.length === 1 ? "" : "s"} · ${esc(ago(g.items.at(-1).createdAt))}</small></span></button>`).join("")}</div>`
+          : `<div class="wa-stempty">${I.status}<b>No status updates yet</b><p class="muted">When your contacts post a status, it will appear here while this number is connected.</p></div>`;
+        body.querySelectorAll("[data-sg]").forEach((b) => (b.onclick = () => story(list[Number(b.dataset.sg)], 0)));
+      };
+      const story = (g, i) => {
+        const m = g.items[i];
+        const url = esc(mediaUrl(m, true)), dl = esc(mediaUrl(m, false));
+        let media = "";
+        if (m.type === "image") media = `<img class="wa-stimg" src="${url}" alt="Status photo">`;
+        else if (m.type === "video") media = `<video class="wa-stimg" src="${url}" controls autoplay playsinline></video>`;
+        else if (m.type === "audio") media = `<div class="wa-stimg wa-sttext"><audio controls src="${url}"></audio></div>`;
+        else media = `<div class="wa-stimg wa-sttext"><p>${fmt(m.text || "")}</p></div>`;
+        const caption = m.hasMedia && m.text ? `<p class="wa-stcap">${fmt(m.text)}</p>` : "";
+        body.innerHTML = `<div class="wa-sthead"><button class="wa-ib" data-stback aria-label="Back">${I.back}</button>${av(g)}<span><b>${esc(g.name)}</b><small>${esc(ago(m.createdAt))} · ${esc(hhmm(m.createdAt))}</small></span><em>${i + 1} / ${g.items.length}</em></div>
+          <div class="wa-stbars">${g.items.map((_, k) => `<i class="${k <= i ? "on" : ""}"></i>`).join("")}</div>
+          <div class="wa-stage">${media}</div>${caption}
+          <div class="wa-dactions wa-stact"><button class="btn" data-stprev ${i === 0 ? "disabled" : ""}>Previous</button><button class="btn" data-stnext ${i === g.items.length - 1 ? "disabled" : ""}>Next</button>
+          ${m.hasMedia ? `<a class="btn primary" href="${dl}">${I.download}<span>Download</span></a>` : `<button class="btn primary" data-stcopy>${I.copy}<span>Copy text</span></button>`}
+          ${g.jid && g.jid !== "me" ? `<button class="btn" data-stmsg>${I.msg}<span>Message</span></button>` : ""}</div>`;
+        body.querySelector("[data-stback]").onclick = drawList;
+        body.querySelector("[data-stprev]").onclick = () => story(g, i - 1);
+        body.querySelector("[data-stnext]").onclick = () => story(g, i + 1);
+        const cp = body.querySelector("[data-stcopy]");
+        if (cp) cp.onclick = async () => { await navigator.clipboard?.writeText(m.text || ""); toast("Copied"); };
+        const mg = body.querySelector("[data-stmsg]");
+        if (mg) mg.onclick = () => { el.remove(); openPrivate({ ...m, participantJid: g.jid }); };
+      };
+      drawList();
     }
     function sendPresence(kind) {
       if (!current) return;
@@ -1044,7 +1104,7 @@ window.ZelonChat = (() => {
       const live = chats.find((x) => x.chatId === target.chatId) || target;
       const muted = live.muteUntil && Date.parse(live.muteUntil) > Date.now();
       const shell = (inner) => `<header class="wa-ihead"><button class="wa-ib" id="waInfoX" aria-label="Close info">${I.x}</button><h3>${target.kind === "group" ? "Group info" : "Contact info"}</h3></header><div class="wa-ibody">
-        <div class="wa-hero">${avatar(target, "xl")}<h2>${esc(target.name || target.chatId)}</h2><p>${esc(target.kind === "group" ? (target.participants ? target.participants + " participants" : "Group") : target.phoneFmt || target.phone || "")}</p></div>${inner}</div>`;
+        <div class="wa-hero"><button type="button" class="wa-picbtn" data-pic="${esc(target.chatId)}" data-name="${esc(target.name || "")}" title="View photo">${avatar(target, "xl")}</button><h2>${esc(target.name || target.chatId)}</h2><p>${esc(target.kind === "group" ? (target.participants ? target.participants + " participants" : "Group") : target.phoneFmt || target.phone || "")}</p></div>${inner}</div>`;
       const bind = () => {
         $("#waInfoX").onclick = closeInfo;
         $("#waInfoAvatar") && 0;
@@ -1102,6 +1162,8 @@ window.ZelonChat = (() => {
         if (m) messageMenu(m, r.left - 150, r.bottom + 4);
         return;
       }
+      const picEl = t.closest("[data-pic]");
+      if (picEl) { picViewer(picEl.dataset.pic, picEl.dataset.name); return; }
       const snd = t.closest("[data-sender]");
       if (snd) { e.stopPropagation(); const sm = allMsgs().find((x) => x.waId === snd.dataset.sender); if (sm) senderMenu(sm, snd.getBoundingClientRect()); return; }
       const pdfEl = t.closest("[data-pdf]");
@@ -1149,11 +1211,12 @@ window.ZelonChat = (() => {
     $("#chatSearch").onkeydown = (e) => {
       if (e.key === "Enter") { const first = p.querySelector("#chatRows [data-chat], #chatRows [data-start]"); first?.click(); }
     };
+    $("#statusBtn").onclick = () => statusDialog();
     $("#newChatBtn").onclick = () => { $("#chatSearch").focus(); toast("Type a phone number with country code to start a chat"); };
     $("#reloadInbox").onclick = async () => { try { await refreshList(); if (current) await refreshCurrent(); toast("Conversations refreshed"); } catch (err) { toast(err.message); } };
     $("#waMe").onclick = () => {
       const me = { chatId: "me", name: "My profile", kind: "contact", phone: state.phone ? "+" + state.phone : "" };
-      const el = modal("Your WhatsApp profile", '<div class="wa-hero">' + avatar(me, "xl", true) + "<h2>" + esc(state.phone ? fmtPhone(state.phone) : "This number") + '</h2><p class="muted">Your name, about and profile photo are managed in <b>Profile &amp; settings</b>.</p><div class="wa-dactions center"><button type="button" class="btn primary" id="meEdit">' + I.edit + "<span>Edit profile</span></button></div></div>");
+      const el = modal("Your WhatsApp profile", '<div class="wa-hero"><button type="button" class="wa-picbtn" data-pic="me" data-name="My profile photo" title="View photo">' + avatar(me, "xl", true) + '</button>' + "<h2>" + esc(state.phone ? fmtPhone(state.phone) : "This number") + '</h2><p class="muted">Your name, about and profile photo are managed in <b>Profile &amp; settings</b>.</p><div class="wa-dactions center"><button type="button" class="btn primary" id="meEdit">' + I.edit + "<span>Edit profile</span></button></div></div>");
       el.querySelector("#meEdit").onclick = () => { el.remove(); if (ctx.go) ctx.go("tools"); else toast("Open Messaging > Profile & settings to edit your profile"); };
     };
     const more = $("#moreChats");

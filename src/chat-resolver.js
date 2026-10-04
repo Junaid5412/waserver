@@ -17,9 +17,10 @@ export function createChatResolver({ store, wa }) {
   const groupCache = new Map();
 
   async function context(instance) {
-    const [contacts, aliases] = await Promise.all([
+    const [contacts, aliases, pushNames] = await Promise.all([
       store.query("contacts", { instanceId: instance.id, limit: 1000 }),
       store.query("wa-alias", { instanceId: instance.id, limit: 1000 }),
+      store.query("wa-names", { instanceId: instance.id, limit: 1000 }),
     ]);
     const lidToPn = new Map(),
       names = new Map();
@@ -33,6 +34,7 @@ export function createChatResolver({ store, wa }) {
       const display = c.name || c.notify || c.verifiedName || "";
       if (display && !names.has(id)) names.set(id, display);
     }
+    for (const n of pushNames) { const id = normalizeJid(n.jid); if (id && n.name && !names.has(id)) names.set(id, n.name); }
     const canon = (j) => {
       const n = normalizeJid(j);
       return lidToPn.get(n) || n;
@@ -58,12 +60,29 @@ export function createChatResolver({ store, wa }) {
       const all = await wa.active(instance.id).groupFetchAllParticipating();
       const map = {};
       for (const g of Object.values(all || {}))
-        map[g.id] = { subject: g.subject || "", size: g.participants?.length || 0 };
+        map[g.id] = { subject: g.subject || "", size: g.participants?.length || 0, parts: g.participants || [] };
       groupCache.set(instance.id, { at: Date.now(), map });
       return map;
     } catch {
       return hit?.map || {};
     }
+  }
+
+  /** Learns phone numbers for @lid members from the live group roster so names/numbers resolve everywhere. */
+  async function learnGroup(instance, groupJid) {
+    try {
+      const g = (await groupMap(instance))[groupJid];
+      if (!g?.parts?.length) return;
+      for (const p of g.parts) {
+        const lid = normalizeJid(p.lid || (isLid(p.id) ? p.id : "")),
+          pn = normalizeJid(p.phoneNumber || p.jid || (isPn(p.id) ? p.id : ""));
+        if (!isLid(lid) || !isPn(pn)) continue;
+        const id = hash(instance.id + ":" + lid),
+          prev = await store.get("wa-alias", id);
+        if (prev?.pn === pn) continue;
+        await store.set("wa-alias", id, { id, instanceId: instance.id, userId: instance.userId, lid, pn, lookupKey: lid, createdAt: prev?.createdAt || new Date().toISOString() });
+      }
+    } catch { /* roster is best effort */ }
   }
 
   async function list(instance, rows) {
@@ -129,5 +148,5 @@ export function createChatResolver({ store, wa }) {
     return found ? found.aliases : [n];
   }
 
-  return { context, list, aliasesOf, groupMap, key: (instance, chat) => hash(instance.id + ":" + chat) };
+  return { context, list, aliasesOf, groupMap, learnGroup, key: (instance, chat) => hash(instance.id + ":" + chat) };
 }
