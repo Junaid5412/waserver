@@ -5,6 +5,9 @@ import {
   WAMessageStatus,
   WAMessageStubType,
   getAggregateVotesInPollMessage,
+  aesDecryptGCM,
+  hmacSign,
+  proto,
 } from "@whiskeysockets/baileys";
 import { hash } from "./security.js";
 export const pack = (enc, v) =>
@@ -71,6 +74,61 @@ export function unwrapEdited(m) {
   }
   return cur || m;
 }
+function toBuf(val) {
+  if (!val) return Buffer.alloc(0);
+  if (Buffer.isBuffer(val)) return val;
+  if (val instanceof Uint8Array) return Buffer.from(val.buffer, val.byteOffset, val.byteLength);
+  if (val?.type === "Buffer" && Array.isArray(val?.data)) return Buffer.from(val.data);
+  if (Array.isArray(val)) return Buffer.from(val);
+  return Buffer.from(val);
+}
+export function decryptSecretEncryptedMessage(secretEnc, targetInfo) {
+  if (!secretEnc?.encPayload || !secretEnc?.encIv || !targetInfo?.secret || !targetInfo?.id) return null;
+  const toBinary = (txt) => (Buffer.isBuffer(txt) ? txt : Buffer.from(txt || ""));
+  const encPayload = toBuf(secretEnc.encPayload);
+  const encIv = toBuf(secretEnc.encIv);
+  const secret = toBuf(targetInfo.secret);
+  const id = String(targetInfo.id);
+
+  const candidates = [
+    targetInfo.sender,
+    targetInfo.remoteJid,
+    targetInfo.participant,
+    targetInfo.origSender,
+  ].filter(Boolean);
+
+  const jidVariants = new Set();
+  for (const s of candidates) {
+    if (typeof s !== "string") continue;
+    jidVariants.add(s);
+    jidVariants.add(s.replace(/:\d+@/, "@"));
+    const user = s.split("@")[0].split(":")[0];
+    if (user) {
+      jidVariants.add(user);
+      jidVariants.add(`${user}@s.whatsapp.net`);
+    }
+  }
+
+  for (const senderJid of jidVariants) {
+    try {
+      const senderBuf = toBinary(senderJid);
+      const sign = Buffer.concat([
+        toBinary(id),
+        senderBuf,
+        senderBuf,
+        toBinary("Message Edit"),
+        new Uint8Array([1]),
+      ]);
+      const key = hmacSign(secret, new Uint8Array(32));
+      const decKey = hmacSign(sign, key);
+      const decrypted = aesDecryptGCM(encPayload, decKey, encIv, Buffer.from(""));
+      if (decrypted) {
+        return proto.Message.decode(decrypted);
+      }
+    } catch {}
+  }
+  return null;
+}
 export function createInbox(store, enc, notify = () => {}) {
   const seenNames = new Map();
   const tell = (instance, event) => { try { notify(instance, event); } catch {} };
@@ -82,7 +140,9 @@ export function createInbox(store, enc, notify = () => {}) {
     const nowIso = new Date().toISOString();
     for (const row of rows) await store.patch("inbox", row.id, { deleted: true, deletedAt: nowIso });
     if (rows[0]) {
-      const chat = await store.get("chats", hash(instance.id + ":" + rows[0].chatId));
+      const resolvedChatId = await resolve(instance, rows[0].chatId);
+      const chat = (await store.get("chats", hash(instance.id + ":" + rows[0].chatId))) ||
+                   (await store.get("chats", hash(instance.id + ":" + resolvedChatId)));
       if (chat?.lastMessageId === waId) {
         const stored = await load(instance.id, waId);
         let previewText = "🚫 This message was deleted";
@@ -93,7 +153,9 @@ export function createInbox(store, enc, notify = () => {}) {
         }
         await store.patch("chats", chat.id, { lastPreview: enc.seal(previewText) });
       }
-      tell(instance, { type: "update", chatId: rows[0].chatId, waId });
+      for (const cid of new Set([rows[0].chatId, resolvedChatId])) {
+        tell(instance, { type: "update", chatId: cid, waId });
+      }
     }
   }
   async function applyEdit(instance, waId, edited) {
@@ -146,9 +208,12 @@ export function createInbox(store, enc, notify = () => {}) {
         edits,
       });
     }
-    const chat = await store.get("chats", hash(instance.id + ":" + rows[0].chatId));
-    if (chat?.lastMessageId === waId) await store.patch("chats", chat.id, { lastPreview: enc.seal(previewOf(newInfo)) });
-    tell(instance, { type: "update", chatId: rows[0].chatId, waId });
+    const resolvedChatId = await resolve(instance, rows[0].chatId);
+    for (const cid of new Set([rows[0].chatId, resolvedChatId])) {
+      const chat = await store.get("chats", hash(instance.id + ":" + cid));
+      if (chat?.lastMessageId === waId) await store.patch("chats", chat.id, { lastPreview: enc.seal(previewOf(newInfo)) });
+      tell(instance, { type: "update", chatId: cid, waId });
+    }
   }
   async function react(instance, reactions) {
     for (const { key, reaction } of reactions || []) {
@@ -166,8 +231,8 @@ export function createInbox(store, enc, notify = () => {}) {
     }
   }
   async function protocol(instance, pm) {
-    const target = pm?.key?.id,
-      t = pm?.type;
+    const target = pm?.key?.id || pm?.targetMessageKey?.id || (typeof pm?.key === "string" ? pm.key : null);
+    const t = pm?.type;
     if (!target) return;
     if (t === 0 || t === "REVOKE") await markDeleted(instance, target);
     else if (t === 14 || t === "MESSAGE_EDIT" || pm?.editedMessage) await applyEdit(instance, target, pm.editedMessage);
@@ -232,12 +297,55 @@ export function createInbox(store, enc, notify = () => {}) {
     if (!m.key?.id || !m.key.remoteJid || !m.message) return false;
     const raw = normalizeMessageContent(m.message) || {},
       rawKind = getContentType(raw);
-    const pm = raw.protocolMessage || m.message?.protocolMessage || m.message?.editedMessage?.message?.protocolMessage;
+    const sem = raw.secretEncryptedMessage || m.message?.secretEncryptedMessage;
+    if (sem) {
+      const targetId = sem.targetMessageKey?.id;
+      if (targetId) {
+        const orig = await load(instance.id, targetId);
+        const origRows = orig ? [] : await rowsFor(instance, targetId);
+        const origData = orig || (origRows[0]?.data ? unpack(enc, origRows[0].data) : null);
+        const secret = origData?.message?.messageContextInfo?.messageSecret ||
+                       origData?.messageContextInfo?.messageSecret ||
+                       origData?.message?.extendedTextMessage?.contextInfo?.messageSecret;
+        if (secret) {
+          const sender = sem.targetMessageKey?.participant || sem.targetMessageKey?.remoteJid || m.key.participant || m.key.remoteJid;
+          const origSender = origData?.key?.participant || origData?.key?.remoteJid || origRows[0]?.chatId;
+          const decrypted = decryptSecretEncryptedMessage(sem, { secret, id: targetId, sender, origSender });
+          if (decrypted) {
+            await applyEdit(instance, targetId, decrypted);
+            return false;
+          }
+        }
+      }
+      return false;
+    }
+    const pm = raw.protocolMessage ||
+               m.message?.protocolMessage ||
+               m.message?.editedMessage?.message?.protocolMessage ||
+               m.message?.editedMessage?.protocolMessage ||
+               raw.editedMessage?.message?.protocolMessage ||
+               raw.editedMessage?.protocolMessage;
     if (pm) { await protocol(instance, pm); return false; }
     if (rawKind === "protocolMessage") { await protocol(instance, raw.protocolMessage); return false; }
-    if (rawKind === "editedMessage" || m.message?.editedMessage) {
+    if (rawKind === "editedMessage" || m.message?.editedMessage || raw?.editedMessage) {
+      const targetId = pm?.key?.id ||
+                       pm?.targetMessageKey?.id ||
+                       m.message?.messageContextInfo?.messageAssociation?.parentMessageKey?.id ||
+                       raw?.messageContextInfo?.messageAssociation?.parentMessageKey?.id ||
+                       m.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+                       raw?.extendedTextMessage?.contextInfo?.stanzaId ||
+                       m.message?.editedMessage?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+                       m.message?.editedMessage?.contextInfo?.stanzaId;
       const unwrapped = unwrapEdited(m.message);
-      await applyEdit(instance, m.key.id, unwrapped);
+      if (targetId) {
+        await applyEdit(instance, targetId, unwrapped);
+        return false;
+      }
+      const existing = (await rowsFor(instance, m.key.id)).length > 0;
+      if (existing) {
+        await applyEdit(instance, m.key.id, unwrapped);
+        return false;
+      }
       return false;
     }
     if (rawKind === "reactionMessage") {
@@ -361,17 +469,34 @@ export function createInbox(store, enc, notify = () => {}) {
         await store.patch("receipts", receiptId, apply);
       }
       if (update.messageStubType === WAMessageStubType.REVOKE) await markDeleted(instance, key.id);
+      if (update.message?.secretEncryptedMessage) {
+        const sem = update.message.secretEncryptedMessage;
+        const targetId = sem.targetMessageKey?.id || key.id;
+        const orig = await load(instance.id, targetId);
+        const origRows = orig ? [] : await rowsFor(instance, targetId);
+        const origData = orig || (origRows[0]?.data ? unpack(enc, origRows[0].data) : null);
+        const secret = origData?.message?.messageContextInfo?.messageSecret ||
+                       origData?.messageContextInfo?.messageSecret ||
+                       origData?.message?.extendedTextMessage?.contextInfo?.messageSecret;
+        if (secret) {
+          const sender = sem.targetMessageKey?.participant || sem.targetMessageKey?.remoteJid || key.participant || key.remoteJid;
+          const origSender = origData?.key?.participant || origData?.key?.remoteJid || origRows[0]?.chatId;
+          const decrypted = decryptSecretEncryptedMessage(sem, { secret, id: targetId, sender, origSender });
+          if (decrypted) await applyEdit(instance, targetId, decrypted);
+        }
+      }
       const isEdit = update.messageStubType === WAMessageStubType.MESSAGE_EDIT ||
                      update.messageStubType === 14 ||
                      !!update.message?.editedMessage ||
                      !!update.message?.protocolMessage?.editedMessage ||
                      (update.message?.protocolMessage?.type === 14 || update.message?.protocolMessage?.type === "MESSAGE_EDIT");
       if (isEdit) {
+        const targetId = update.message?.protocolMessage?.key?.id || key.id;
         const payload = update.message?.editedMessage?.message ||
                         update.message?.editedMessage ||
                         update.message?.protocolMessage?.editedMessage ||
                         update.message;
-        await applyEdit(instance, key.id, payload);
+        await applyEdit(instance, targetId, payload);
       } else if (update.message) {
         const info = describeMessage(update.message);
         if (entries.length) {

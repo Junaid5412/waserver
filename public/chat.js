@@ -1476,11 +1476,21 @@ window.ZelonChat = (() => {
           key, update: { status: receipt?.playedTimestamp ? 5 : receipt?.readTimestamp ? 4 : 3 },
         }));
         if (updates) applyReceipts(updates);
-        /* Also schedule a soft refresh so any edge case is caught */
-        clearTimeout(refreshTimer);
-        refreshTimer = setTimeout(() => refreshCurrent().catch(() => {}), 1500);
+        const hasEdit = (ev.data?.updates || []).some(
+          (u) => u?.update?.message || u?.update?.messageStubType === 14 || u?.message || u?.messageStubType === 14
+        );
+        if (hasEdit) {
+          refreshCurrent().catch(() => {});
+          refreshList().catch(() => {});
+        } else {
+          clearTimeout(refreshTimer);
+          refreshTimer = setTimeout(() => refreshCurrent().catch(() => {}), 1500);
+        }
       } else if (ev.type === "update") {
         scheduleRefresh(ev.chatId);
+        if (current && ev.waId && msgs.some((m) => m.waId === ev.waId)) {
+          refreshCurrent().catch(() => {});
+        }
       } else if (ev.type === "connection") {
         state.status = ev.data?.status || state.status;
         banner();

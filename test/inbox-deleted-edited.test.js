@@ -1,12 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createInbox, pack } from "../src/inbox.js";
+import crypto from "node:crypto";
+import { aesEncryptGCM, hmacSign, proto } from "@whiskeysockets/baileys";
+import { createInbox, pack, decryptSecretEncryptedMessage } from "../src/inbox.js";
 
 function mockStore() {
   const map = new Map();
   return {
     async get(ns, key) { return map.get(ns + ":" + key); },
     async set(ns, key, val) { map.set(ns + ":" + key, val); },
+    async insert(ns, key, val) {
+      const full = ns + ":" + key;
+      if (map.has(full)) return false;
+      map.set(full, val);
+      return true;
+    },
     async patch(ns, key, patch) {
       const cur = map.get(ns + ":" + key) || {};
       const updated = typeof patch === "function" ? patch(cur) : { ...cur, ...patch };
@@ -268,4 +276,195 @@ test("a message that is edited and then deleted preserves both edited history an
   assert.ok(dto.deletedAt);
   assert.ok(dto.editedAt);
 });
+
+test("decryptSecretEncryptedMessage successfully decrypts WhatsApp edited message payload", async () => {
+  const secret = crypto.randomBytes(32);
+  const targetId = "3EB0ABC123DEF456";
+  const sender = "1234567890:1@s.whatsapp.net";
+  const sign = Buffer.concat([
+    Buffer.from(targetId),
+    Buffer.from(sender),
+    Buffer.from(sender),
+    Buffer.from("Message Edit"),
+    new Uint8Array([1]),
+  ]);
+  const key = hmacSign(secret, new Uint8Array(32));
+  const encKey = hmacSign(sign, key);
+  const iv = crypto.randomBytes(12);
+  const originalProto = proto.Message.encode({ conversation: "Encrypted edited text" }).finish();
+  const encPayload = aesEncryptGCM(originalProto, encKey, iv, Buffer.from(""));
+  const secretEnc = { encPayload, encIv: iv };
+
+  const decrypted = decryptSecretEncryptedMessage(secretEnc, { secret, id: targetId, sender });
+  assert.ok(decrypted);
+  assert.equal(decrypted.conversation, "Encrypted edited text");
+});
+
+test("persist handles incoming counterparty edit via secretEncryptedMessage", async () => {
+  const store = mockStore();
+  let updatedEvent = null;
+  const inbox = createInbox(store, enc, (inst, ev) => { updatedEvent = ev; });
+  const instance = { id: "inst-1", userId: "user-1" };
+  const targetId = "COUNTERPARTY_MSG_1";
+  const counterpartyJid = "9876543210@s.whatsapp.net";
+  const secret = crypto.randomBytes(32);
+
+  // 1. Initial message from counterparty
+  const initialMsg = {
+    key: { id: targetId, remoteJid: counterpartyJid, fromMe: false },
+    message: {
+      conversation: "Hello from counterparty (original)",
+      messageContextInfo: { messageSecret: secret },
+    },
+    messageTimestamp: Math.floor(Date.now() / 1000),
+  };
+  await inbox.persist(instance, initialMsg);
+
+  // 2. Incoming edit arrives as secretEncryptedMessage under a new stanza ID
+  const sign = Buffer.concat([
+    Buffer.from(targetId),
+    Buffer.from(counterpartyJid),
+    Buffer.from(counterpartyJid),
+    Buffer.from("Message Edit"),
+    new Uint8Array([1]),
+  ]);
+  const key = hmacSign(secret, new Uint8Array(32));
+  const encKey = hmacSign(sign, key);
+  const iv = crypto.randomBytes(12);
+  const editedProto = proto.Message.encode({ conversation: "Hello from counterparty (EDITED!)" }).finish();
+  const encPayload = aesEncryptGCM(editedProto, encKey, iv, Buffer.from(""));
+
+  const editMsgStanza = {
+    key: { id: "STANZA_EDIT_999", remoteJid: counterpartyJid, fromMe: false },
+    message: {
+      secretEncryptedMessage: {
+        targetMessageKey: { id: targetId, remoteJid: counterpartyJid, fromMe: false },
+        encPayload,
+        encIv: iv,
+      },
+    },
+    messageTimestamp: Math.floor(Date.now() / 1000) + 5,
+  };
+
+  const persistResult = await inbox.persist(instance, editMsgStanza);
+  assert.equal(persistResult, false, "Edit stanzas should not be inserted as duplicate messages");
+
+  // 3. Verify original message row was updated
+  const rows = await store.query("inbox", { instanceId: instance.id, lookupKey: targetId });
+  assert.equal(rows.length, 1);
+  const row = rows[0];
+  assert.equal(row.edited, true);
+  assert.equal(row.originalText, "Hello from counterparty (original)");
+  assert.equal(row.edits.length, 1);
+  assert.equal(row.edits[0].text, "Hello from counterparty (original)");
+
+  const dto = inbox.dto(row);
+  assert.equal(dto.edited, true);
+  assert.equal(dto.text, "Hello from counterparty (EDITED!)");
+  assert.equal(dto.originalText, "Hello from counterparty (original)");
+
+  // 4. Verify no spurious message exists for STANZA_EDIT_999
+  const spuriousRows = await store.query("inbox", { instanceId: instance.id, lookupKey: "STANZA_EDIT_999" });
+  assert.equal(spuriousRows.length, 0);
+
+  // 5. Verify notify update event was fired
+  assert.ok(updatedEvent);
+  assert.equal(updatedEvent.type, "update");
+  assert.equal(updatedEvent.waId, targetId);
+});
+
+test("persist handles incoming counterparty edit via protocolMessage with different stanza ID", async () => {
+  const store = mockStore();
+  const inbox = createInbox(store, enc);
+  const instance = { id: "inst-1", userId: "user-1" };
+  const targetId = "COUNTERPARTY_PM_1";
+  const counterpartyJid = "5551234@s.whatsapp.net";
+
+  const initialMsg = {
+    key: { id: targetId, remoteJid: counterpartyJid, fromMe: false },
+    message: { conversation: "Original text before PM edit" },
+    messageTimestamp: Math.floor(Date.now() / 1000),
+  };
+  await inbox.persist(instance, initialMsg);
+
+  const pmEditStanza = {
+    key: { id: "STANZA_PM_888", remoteJid: counterpartyJid, fromMe: false },
+    message: {
+      protocolMessage: {
+        type: 14,
+        key: { id: targetId, remoteJid: counterpartyJid, fromMe: false },
+        editedMessage: { conversation: "Updated text via protocolMessage" },
+      },
+    },
+    messageTimestamp: Math.floor(Date.now() / 1000) + 10,
+  };
+
+  const persistResult = await inbox.persist(instance, pmEditStanza);
+  assert.equal(persistResult, false);
+
+  const rows = await store.query("inbox", { instanceId: instance.id, lookupKey: targetId });
+  assert.equal(rows.length, 1);
+  const dto = inbox.dto(rows[0]);
+  assert.equal(dto.edited, true);
+  assert.equal(dto.text, "Updated text via protocolMessage");
+  assert.equal(dto.originalText, "Original text before PM edit");
+
+  const spuriousRows = await store.query("inbox", { instanceId: instance.id, lookupKey: "STANZA_PM_888" });
+  assert.equal(spuriousRows.length, 0);
+});
+
+test("receipt handles secretEncryptedMessage update for counterparty message", async () => {
+  const store = mockStore();
+  const inbox = createInbox(store, enc);
+  const instance = { id: "inst-1", userId: "user-1" };
+  const targetId = "MSG_RECEIPT_SECRET_1";
+  const counterpartyJid = "777888999@s.whatsapp.net";
+  const secret = crypto.randomBytes(32);
+
+  const initialMsg = {
+    key: { id: targetId, remoteJid: counterpartyJid, fromMe: false },
+    message: {
+      conversation: "Receipt original message",
+      messageContextInfo: { messageSecret: secret },
+    },
+    messageTimestamp: Math.floor(Date.now() / 1000),
+  };
+  await inbox.persist(instance, initialMsg);
+
+  const sign = Buffer.concat([
+    Buffer.from(targetId),
+    Buffer.from(counterpartyJid),
+    Buffer.from(counterpartyJid),
+    Buffer.from("Message Edit"),
+    new Uint8Array([1]),
+  ]);
+  const key = hmacSign(secret, new Uint8Array(32));
+  const encKey = hmacSign(sign, key);
+  const iv = crypto.randomBytes(12);
+  const editedProto = proto.Message.encode({ conversation: "Receipt decrypted edited message!" }).finish();
+  const encPayload = aesEncryptGCM(editedProto, encKey, iv, Buffer.from(""));
+
+  await inbox.receipt(instance, [
+    {
+      key: { id: "STANZA_UPDATE_1", remoteJid: counterpartyJid, fromMe: false },
+      update: {
+        message: {
+          secretEncryptedMessage: {
+            targetMessageKey: { id: targetId, remoteJid: counterpartyJid, fromMe: false },
+            encPayload,
+            encIv: iv,
+          },
+        },
+      },
+    },
+  ]);
+
+  const rows = await store.query("inbox", { instanceId: instance.id, lookupKey: targetId });
+  assert.equal(rows.length, 1);
+  const dto = inbox.dto(rows[0]);
+  assert.equal(dto.edited, true);
+  assert.equal(dto.text, "Receipt decrypted edited message!");
+  assert.equal(dto.originalText, "Receipt original message");
+});
+
 
