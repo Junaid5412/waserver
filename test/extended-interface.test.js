@@ -198,7 +198,7 @@ test("Chat shows rich data and securely fetches an inline media preview", async 
   assert.match(txt, /Photo caption/);
   assert.match(txt, /Sam/);
   assert.match(txt, /Yes <script>/);
-  assert(d.querySelector('a[href^="https://www.google.com/maps?q="]'));
+  assert(d.querySelector('a[href^="https://www.google.com/maps/search/?api=1&query="]'));
   assert.equal(d.querySelectorAll("script").length, 0);
   assert.match(d.querySelector(".wa-media img").getAttribute("src"), /\/inbox\/image-id\/media\?.*inline=1/);
 });
