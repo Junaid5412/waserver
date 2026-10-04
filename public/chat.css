@@ -245,3 +245,68 @@ body.inbox-lock{overflow:hidden}
   .wa .wa-chat{min-height:70px}
 }
 @media(hover:none){.wa-chev{opacity:.0}.wa-b .wa-chev{display:none}}
+
+/* ===== v2: readable headings, attach menu, recorder, PDF viewer, cards ===== */
+.wa-dialog{color:#111b21}
+.wa-dialog>header{background:#fff;color:#111b21}
+.wa-dialog h3,.wa-dialog .wa-hero h2{color:#111b21!important}
+.wa-dialog .wa-hero p,.wa-dialog .muted{color:#54656f}
+.wa-dactions.center{justify-content:center}
+.wa-who{display:block;max-width:100%;padding:0;border:0;background:transparent;cursor:pointer;text-align:left;font:inherit;font-size:13px;font-weight:700;line-height:1.3;color:hsl(var(--h,160) 70% 30%)}
+.wa-who:hover{text-decoration:underline}
+.wa-who small{display:inline;margin-left:6px;font-size:11.5px;font-weight:500;color:#667781}
+button.wa-avbtn{padding:0;border:0;cursor:pointer;position:relative}
+.wa-menuhead{display:flex;flex-direction:column;padding:8px 12px 6px;border-bottom:1px solid var(--wa-line);margin-bottom:4px;min-width:0}
+.wa-menuhead b{font-size:14px;color:#111b21;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wa-menuhead small{color:#667781;font-size:12px}
+.wa-attmenu{min-width:200px}
+.wa-attmenu button i{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:#f0f2f5;font-style:normal}
+.wa-attmenu button i svg{color:inherit!important}
+.wa .wa-compose.empty .send-btn{display:none}
+.wa .wa-compose:not(.empty) .wa-micbtn{display:none}
+.wa .wa-micbtn{background:#00a884;color:#fff}
+.wa-rec{display:flex;align-items:center;gap:12px;padding:10px 14px calc(10px + env(safe-area-inset-bottom));background:var(--wa-panel)}
+.wa-rec[hidden]{display:none}
+.wa-recdot{width:12px;height:12px;border-radius:50%;background:#ea0038;animation:waPulse 1s infinite}
+@keyframes waPulse{50%{opacity:.25}}
+.wa-rec b{font-variant-numeric:tabular-nums;color:#111b21;min-width:42px}
+.wa-recbar{flex:1;display:flex;align-items:center;gap:4px;height:28px}
+.wa-recbar i{flex:1;max-width:6px;height:6px;border-radius:3px;background:#00a884;animation:waBar 0.9s ease-in-out infinite}
+.wa-recbar i:nth-child(2){animation-delay:.12s}.wa-recbar i:nth-child(3){animation-delay:.24s}.wa-recbar i:nth-child(4){animation-delay:.36s}.wa-recbar i:nth-child(5){animation-delay:.48s}.wa-recbar i:nth-child(6){animation-delay:.6s}.wa-recbar i:nth-child(7){animation-delay:.72s}
+@keyframes waBar{50%{height:24px}}
+.wa-form{display:flex;flex-direction:column;gap:12px}
+.wa-frow{display:flex;flex-direction:column;gap:5px;font-size:13px;font-weight:600;color:#41525d}
+.wa-frow input,.wa-frow textarea{width:100%;padding:10px 12px;border:1px solid #d1d7db;border-radius:10px;background:#fff;color:#111b21;font:inherit;font-weight:400;font-size:14px}
+.wa-frow input:focus,.wa-frow textarea:focus{outline:2px solid #00a88466;border-color:#00a884}
+.wa-check{display:flex;align-items:center;gap:8px;font-size:14px;color:#111b21}
+.wa-locnow{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:44px}
+.wa-locmsg{margin:0!important;font-size:13px}
+.wa-doc{width:100%;text-align:left;border:0;font:inherit;color:inherit;cursor:pointer;text-decoration:none}
+.wa-doc:hover{filter:brightness(.97)}
+.wa-dico{position:relative;flex:none;display:grid;place-items:center;width:42px;height:48px;border-radius:8px;background:#e7ebf5;color:#5157ae}
+.wa-dico i{position:absolute;bottom:3px;font-style:normal;font-size:9px;font-weight:800;letter-spacing:.3px}
+.wa-dico svg{width:24px;height:24px;margin-bottom:8px}
+.wa-dico.pdf{background:#fde8e8;color:#d93025}
+.wa-doc.pdf small,.wa-doc small{color:#667781}
+.wa-audio{display:flex;align-items:center;gap:8px}
+.wa-mic{flex:none;display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:#00a884;color:#fff}
+.wa-mic svg{width:18px;height:18px}
+.wa-loc{align-items:stretch!important}
+.wa-locmap{flex:none;display:grid!important;place-items:center;width:56px;border-radius:8px;background:linear-gradient(135deg,#cfe8d5,#b7dcc0);color:#d93025!important}
+.wa-loc em{font-style:normal;font-size:12px;font-weight:600;color:#027eb5}
+.wa-pdfwrap{padding:0!important;z-index:260}
+.wa-pdfview{display:flex;flex-direction:column;width:100%;height:100%;background:#fff}
+.wa-pdfview>header{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#111b21;color:#fff}
+.wa-pdfview>header .wa-ib{color:#fff}
+.wa-pdfview>header .wa-dico{width:34px;height:40px}
+.wa-pdftitle{flex:1;min-width:0;display:flex;flex-direction:column}
+.wa-pdftitle b{color:#fff;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wa-pdftitle small{color:#aebac1;font-size:12px}
+.wa-pdfview .btn.mini{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 12px;white-space:nowrap;text-decoration:none}
+.wa-pdfview .btn.ghost{background:transparent;color:#fff;border:1px solid #ffffff55}
+.wa-pdfbody{flex:1;min-height:0;background:#525659}
+.wa-pdfbody iframe{width:100%;height:100%;border:0;background:#fff}
+.wa-pdfview>footer{padding:8px 14px calc(8px + env(safe-area-inset-bottom));font-size:13px;color:#54656f;background:#f0f2f5;text-align:center}
+.wa-pdfview>footer a{color:#027eb5;font-weight:600}
+@media(max-width:640px){.wa-pdfview .btn.mini span{display:none}.wa-pdfview .btn.mini{padding:0 10px}.wa-pdfview>header{padding:8px 10px}}
+@media(min-width:900px){.wa-pdfwrap{padding:24px!important}.wa-pdfview{max-width:1100px;margin:auto;border-radius:14px;overflow:hidden}}.wa-pdfwrap{position:fixed!important;inset:0}

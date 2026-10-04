@@ -33,6 +33,13 @@ window.ZelonChat = (() => {
     poll: S('<path d="M18 20V10M12 20V4M6 20v-6"/>', 20),
     ban: S('<circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/>', 15),
     image: S('<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>', 20),
+    mic: S('<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v4"/>', 22),
+    doc: S('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>', 22),
+    headphones: S('<path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1v-6h3zM3 19a2 2 0 0 0 2 2h1v-6H3z"/>', 22),
+    ext: S('<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>', 17),
+    msg: S('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>', 17),
+    stopSq: S('<rect x="6" y="6" width="12" height="12" rx="2"/>', 20),
+    locate: S('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8"/>', 18),
   };
   const tickPaths = {
     one: '<path d="M11.1.7 4.6 7.1 1.9 4.5 1 5.4l3.6 3.5L12 1.6z"/>',
@@ -85,6 +92,45 @@ window.ZelonChat = (() => {
   };
   const bytes = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB");
 
+  /* ---------- phone numbers: international formatting for every country ---------- */
+  const CALLING = (() => {
+    const s = new Set("1 7 20 27 30 31 32 33 34 36 39 40 41 43 44 45 46 47 48 49 51 52 53 54 55 56 57 58 60 61 62 63 64 65 66 81 82 84 86 90 91 92 93 94 95 98 211 212 213 216 218 290 291 297 298 299 420 421 423 670 672 673 674 675 676 677 678 679 680 681 682 683 685 686 687 688 689 690 691 692 850 852 853 855 856 880 886 960 961 962 963 964 965 966 967 968 970 971 972 973 974 975 976 977 992 993 994 995 996 998".split(" "));
+    const range = (a, b) => { for (let i = a; i <= b; i++) s.add(String(i)); };
+    range(220, 258); range(260, 269); range(350, 359); range(370, 389); range(500, 509); range(590, 599);
+    return s;
+  })();
+  const fmtPhone = (raw) => {
+    const d = String(raw || "").split("@")[0].replace(/\D/g, "");
+    if (d.length < 7 || d.length > 15) return d ? "+" + d : "";
+    const cc = [1, 2, 3].map((n) => d.slice(0, n)).find((c) => CALLING.has(c));
+    if (!cc) return "+" + d;
+    const rest = d.slice(cc.length);
+    if (cc === "1" && rest.length === 10) return `+1 (${rest.slice(0, 3)}) ${rest.slice(3, 6)}-${rest.slice(6)}`;
+    const parts = rest.length <= 8 ? rest.match(/\d{1,4}/g) : [rest.slice(0, 3), rest.slice(3, 6), rest.slice(6)];
+    return "+" + cc + " " + parts.filter(Boolean).join(" ");
+  };
+  const isPnJid = (j) => /@s\.whatsapp\.net$/.test(j || "");
+  const isPdf = (m) => /pdf/i.test(m.mimetype || "") || /\.pdf$/i.test(m.filename || "");
+  const looksRaw = (n) => !n || /^\+?[\d\s()-]{5,}$/.test(n) || /@(s\.whatsapp\.net|lid|g\.us|broadcast|newsletter)$/.test(n);
+  const JUNK = new Set(["comment", "encComment", "secretEncrypted", "pollUpdate", "protocol", "encEventResponse", "placeholder", "senderKeyDistribution", "keepInChat", "encReaction", "messageContext", "botInvoke", "peerDataOperationRequest", "peerDataOperationRequestResponse"]);
+  const isJunk = (t) => !!t && (JUNK.has(String(t).replace(/Message$/, "")));
+  const TYPE_LABEL = { audio: "🎤 Voice message", image: "📷 Photo", video: "🎥 Video", document: "📄 Document", location: "📍 Location", liveLocation: "📍 Live location", contact: "👤 Contact", contacts: "👤 Contact", poll: "📊 Poll", pollCreation: "📊 Poll", sticker: "Sticker" };
+  const cleanPreview = (t) => {
+    const m = /^\[(\w+)\]$/.exec(t || "");
+    if (!m) return t || "";
+    if (isJunk(m[1])) return "";
+    return TYPE_LABEL[m[1]] || m[1].replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase());
+  };
+  const niceChat = (c) => {
+    const isGroup = c.kind === "group" || /@g\.us$/.test(c.chatId || "");
+    const jidPhone = isPnJid(c.chatId) ? c.chatId.split("@")[0] : String(c.phone || "").replace(/\D/g, "");
+    c.phoneFmt = jidPhone ? fmtPhone(jidPhone) : "";
+    if (!isGroup && looksRaw(c.name)) c.name = c.phoneFmt || (/@lid$/.test(c.chatId || "") ? "WhatsApp user" : c.name);
+    if (isGroup && looksRaw(c.name)) c.name = "Group";
+    c.lastPreview = cleanPreview(c.lastPreview);
+    return c;
+  };
+
   async function render(ctx) {
     const { p, base, api, esc, toast, upload } = ctx;
     document.body.classList.remove("inbox-lock");
@@ -110,6 +156,7 @@ window.ZelonChat = (() => {
       const r = await fetch("/api" + base + "/chats" + q);
       const rows = await r.json();
       if (!r.ok) throw Error(rows.error || "Could not load conversations");
+      if (Array.isArray(rows)) rows.forEach(niceChat);
       const h = (k) => r.headers?.get?.(k);
       return {
         rows,
@@ -184,7 +231,7 @@ window.ZelonChat = (() => {
       layer = $("#waLayer");
 
     /* ---------- chat list ---------- */
-    const preview = (c) => (c.lastPreview ? esc(c.lastPreview) : '<span class="muted">No messages yet</span>');
+    const preview = (c) => (c.lastPreview ? esc(cleanPreview(c.lastPreview)) : '<span class="muted">No messages yet</span>');
     function drawList(force) {
       const q = query.trim().toLowerCase();
       let rows = chats.filter((c) => {
@@ -229,28 +276,38 @@ window.ZelonChat = (() => {
       return current.chatId === n || (current.aliases || []).includes(n);
     };
     const sigOf = (list) => JSON.stringify(list.map((m) => [m.waId, m.status, m.text, m.edited, m.deleted, m.starred, m.reactions, m.pending, m.late]));
-    const allMsgs = () => [...pending.map((m) => ({ ...m })), ...msgs].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-    const senderName = (m) => (m.fromMe ? "You" : m.name || m.participant || "Contact");
+    const allMsgs = () => [...pending.map((m) => ({ ...m })), ...msgs].filter((m) => !isJunk(m.type)).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    const senderPhone = (m) => m.participantPhone ? fmtPhone(m.participantPhone) : isPnJid(m.participant) ? fmtPhone(m.participant) : "";
+    const senderName = (m) => {
+      if (m.fromMe) return "You";
+      if (m.name && !looksRaw(m.name) && !/^WhatsApp user/.test(m.name)) return m.name;
+      return senderPhone(m) || "WhatsApp user";
+    };
+    const senderJid = (m) => m.participantJid || m.participant || (m.chatId && !/@g\.us$/.test(m.chatId) ? m.chatId : "");
     function mediaHtml(m) {
       if (!m.hasMedia) return "";
       const url = esc(mediaUrl(m, true));
       if (m.type === "image") return `<div class="wa-media"><img src="${url}" loading="lazy" alt="Photo" data-zoom="${esc(m.waId)}"></div>`;
       if (m.type === "sticker") return `<div class="wa-media sticker"><img src="${url}" loading="lazy" alt="Sticker"></div>`;
       if (m.type === "video") return `<div class="wa-media"><video controls preload="metadata" src="${url}"></video></div>`;
-      if (m.type === "audio") return `<div class="wa-audio"><audio controls preload="none" src="${url}"></audio></div>`;
-      return `<a class="wa-doc" href="${esc(mediaUrl(m, false))}">${I.file}<span><b>${esc(m.filename || "Document")}</b><small>${esc((m.mimetype || "File").split("/").pop().toUpperCase())} · tap to download</small></span></a>`;
+      if (m.type === "audio") return `<div class="wa-audio"><span class="wa-mic">${I.mic}</span><audio controls preload="none" src="${url}"></audio></div>`;
+      const pdf = isPdf(m);
+      const ext = ((m.filename || "").split(".").pop() || (m.mimetype || "File").split("/").pop()).slice(0, 5).toUpperCase();
+      return pdf
+        ? `<button type="button" class="wa-doc pdf" data-pdf="${esc(m.waId)}"><span class="wa-dico pdf">${I.file}<i>PDF</i></span><span><b>${esc(m.filename || "Document.pdf")}</b><small>PDF document · tap to view</small></span></button>`
+        : `<a class="wa-doc" href="${esc(mediaUrl(m, false))}"><span class="wa-dico">${I.file}<i>${esc(ext)}</i></span><span><b>${esc(m.filename || "Document")}</b><small>${esc(ext)} file · tap to download</small></span></a>`;
     }
     function bodyHtml(m) {
       if (m.deleted) return `<div class="wa-text deleted">${I.ban} <span>This message was deleted</span></div>`;
       let h = m.quotedText ? `<div class="wa-quote">${esc(m.quotedText)}</div>` : "";
       h += mediaHtml(m);
       if (m.location && Number.isFinite(m.location.latitude))
-        h += `<a class="wa-loc" target="_blank" rel="noopener noreferrer" href="https://www.google.com/maps?q=${encodeURIComponent(m.location.latitude + "," + m.location.longitude)}">${I.pin2}<span><b>${esc(m.location.name || "Shared location")}</b><small>${esc(m.location.address || "Open in Maps")}</small></span></a>`;
-      for (const c of m.contacts || []) h += `<div class="wa-contact">${I.user}<span><b>${esc(c.name)}</b><small>Contact card</small></span></div>`;
+        h += `<a class="wa-loc" target="_blank" rel="noopener noreferrer" href="https://www.google.com/maps?q=${encodeURIComponent(m.location.latitude + "," + m.location.longitude)}"><span class="wa-locmap">${I.pin2}</span><span><b>${esc(m.location.name || "Shared location")}</b><small>${esc(m.location.address || Number(m.location.latitude).toFixed(5) + ", " + Number(m.location.longitude).toFixed(5))}</small><em>Open in Maps</em></span></a>`;
+      for (const c of m.contacts || []) h += `<div class="wa-contact">${I.user}<span><b>${esc(c.name)}</b><small>${esc(c.phone ? fmtPhone(c.phone) : "Contact card")}</small></span></div>`;
       if (m.pollOptions?.length)
         h += `<div class="wa-poll"><b>${I.poll} ${esc(m.text || "Poll")}</b>${m.pollOptions.map((o) => `<div>○ ${esc(o)}</div>`).join("")}</div>`;
       else if (m.text) h += `<div class="wa-text">${fmt(m.text)}</div>`;
-      else if (!m.hasMedia && !m.location && !(m.contacts || []).length) h += `<div class="wa-text muted">[${esc(m.type || "message")}]</div>`;
+      else if (!m.hasMedia && !m.location && !(m.contacts || []).length) h += `<div class="wa-text muted">${esc(cleanPreview("[" + (m.type || "message") + "]") || "Unsupported message")}</div>`;
       else if (m.hasMedia && m.text) h += "";
       return h;
     }
@@ -279,10 +336,11 @@ window.ZelonChat = (() => {
           next = list[i + 1],
           lastOfRun = !next || (next.fromMe ? "me" : next.participant || "them") !== key || dayLabel(next.createdAt) !== d || (Date.parse(next.createdAt) || 0) - at > 300000;
         lastKey = key; lastAt = at;
-        const who = !m.fromMe && isGroup && head ? `<div class="wa-who" style="--h:${hueOf(m.participant || m.name)}">${esc(senderName(m))}</div>` : "";
+        const sj = senderJid(m);
+        const who = !m.fromMe && isGroup && head ? `<button type="button" class="wa-who" data-sender="${esc(m.waId)}" style="--h:${hueOf(sj || m.name)}" title="Message options">${esc(senderName(m))}${senderPhone(m) && senderName(m) !== senderPhone(m) ? `<small>${esc(senderPhone(m))}</small>` : ""}</button>` : "";
         const av = !m.fromMe && isGroup
           ? lastOfRun
-            ? `<span class="wa-av xs" style="--h:${hueOf(m.participant)}"><i>${esc(initialOf(senderName(m)))}</i>${m.participant ? `<img class="pic" loading="lazy" alt="" src="${esc(picUrl(m.participant))}">` : ""}</span>`
+            ? `<button type="button" class="wa-av xs wa-avbtn" data-sender="${esc(m.waId)}" style="--h:${hueOf(sj)}"><i>${esc(initialOf(senderName(m)))}</i>${sj ? `<img class="pic" loading="lazy" alt="" src="${esc(picUrl(sj))}">` : ""}</button>`
             : '<span class="wa-av xs ghost"></span>'
           : "";
         const meta = `<span class="wa-meta">${m.starred ? `<span class="wa-star">${I.star}</span>` : ""}${m.edited && !m.deleted ? "<em>edited</em>" : ""}<time>${esc(hhmm(m.createdAt))}</time>${m.fromMe && !m.deleted ? statusIcon(m) : ""}</span>`;
@@ -314,7 +372,7 @@ window.ZelonChat = (() => {
     function dropMatchedPending() {
       pending = pending.filter((pm) => {
         if (Date.now() - pm.sentAt > 180000) return false;
-        return !msgs.some((m) => m.fromMe && Date.parse(m.createdAt) >= pm.sentAt - 15000 && (pm.text ? m.text === pm.text : m.type === pm.type));
+        return !msgs.some((m) => m.fromMe && Date.parse(m.createdAt) >= pm.sentAt - 15000 && (pm.text ? m.text === pm.text : (pm.match || [pm.type]).includes(m.type)));
       });
       for (const pm of pending) pm.late = Date.now() - pm.sentAt > 60000;
     }
@@ -367,7 +425,7 @@ window.ZelonChat = (() => {
         return `<span class="live">${presence.state === "recording" ? "recording audio…" : (presence.who ? presence.who + " is " : "") + "typing…"}</span>`;
       }
       if (current.kind === "group") return esc(current.participants ? current.participants + " participants" : "Group · click for group info");
-      return esc(current.phone || "Click for contact info");
+      return esc(current.phoneFmt || current.phone || "Click for contact info");
     }
     function drawConversation() {
       const c = $("#conversation");
@@ -397,10 +455,13 @@ window.ZelonChat = (() => {
           <form id="replyForm" class="wa-compose">
             <div class="wa-emoji" id="waEmoji" hidden>${EMOJI.map((e) => `<button type="button" data-emoji="${e}">${e}</button>`).join("")}</div>
             <button type="button" class="wa-ib" id="waEmojiBtn" title="Emoji" aria-label="Emoji">${I.smile}</button>
-            <label class="wa-ib attach" title="Attach a file">${I.clip}<input id="replyAttachment" name="replyAttachment" type="file" aria-label="Attach an image, video, audio or document"></label>
+            <button type="button" class="wa-ib attach" id="waAttachBtn" title="Attach" aria-label="Attach">${I.clip}</button>
+            <input id="replyAttachment" name="replyAttachment" type="file" hidden aria-label="Attach an image, video, audio or document">
             <textarea id="replyText" name="replyText" rows="1" maxlength="20000" placeholder="Type a message" aria-label="Message">${esc(draft)}</textarea>
+            <button type="button" class="wa-send wa-micbtn" id="waMic" title="Record a voice message" aria-label="Record a voice message">${I.mic}</button>
             <button type="submit" class="wa-send send-btn" aria-label="Send">${I.send}</button>
           </form>
+          <div class="wa-rec" id="waRec" hidden></div>
         </div>`;
       root.classList.add("chat-open");
       drawContext();
@@ -411,6 +472,7 @@ window.ZelonChat = (() => {
     }
     function drawContext() {
       const box = $("#waCtx");
+      syncSend();
       if (!box) return;
       if (editing) {
         box.hidden = false;
@@ -423,6 +485,7 @@ window.ZelonChat = (() => {
     }
     function drawAttachment() {
       const box = $("#waAttach");
+      syncSend();
       if (!attachment) { box.hidden = true; box.innerHTML = ""; return; }
       box.hidden = false;
       const isImg = attachment.type.startsWith("image/");
@@ -436,6 +499,214 @@ window.ZelonChat = (() => {
       drawAttachment();
       $("#replyText").focus();
     }
+    function syncSend() {
+      const f = $("#replyForm"), t = $("#replyText");
+      if (f && t) f.classList.toggle("empty", !t.value.trim() && !attachment && !editing);
+    }
+    async function quickSend(payload, tmpExtra = {}) {
+      const to = payload.to || current.chatId;
+      const tmp = { waId: "tmp-" + crypto.randomUUID(), fromMe: true, pending: true, sentAt: Date.now(), createdAt: new Date().toISOString(), status: "pending", text: "", hasMedia: false, reactions: {}, type: payload.type, ...tmpExtra };
+      await api(base + "/messages", "POST", { quotedId: replyTo?.waId, ...payload, to }, { "Idempotency-Key": crypto.randomUUID() });
+      if (current && current.chatId === to) {
+        pending.push(tmp);
+        replyTo = null; drawContext();
+        msgSig = ""; drawMessages({ stick: true });
+        setTimeout(() => refreshCurrent().catch(() => {}), 1500);
+        setTimeout(() => refreshCurrent().catch(() => {}), 4000);
+      }
+    }
+
+    /* ---------- attachments menu ---------- */
+    function attachMenu(rect) {
+      closeMenus();
+      const menu = document.createElement("div");
+      menu.className = "wa-menu wa-attmenu";
+      const items = [
+        ["document", I.doc, "Document", "#5157ae"],
+        ["media", I.image, "Photos & videos", "#0d6fd6"],
+        ["audio", I.headphones, "Audio file", "#e0672a"],
+        ["location", I.pin2, "Location", "#0f9d58"],
+        ["contact", I.user, "Contact", "#0b8fa3"],
+        ["poll", I.poll, "Poll", "#c9962b"],
+      ];
+      menu.innerHTML = items.map(([k, ic, l, c]) => `<button type="button" data-att="${k}"><i style="color:${c}">${ic}</i><span>${l}</span></button>`).join("");
+      menu.onclick = (e) => {
+        const b = e.target.closest("[data-att]");
+        if (!b) return;
+        closeMenus();
+        const k = b.dataset.att, fi = $("#replyAttachment");
+        if (k === "document") { fi.accept = ""; fi.click(); }
+        else if (k === "media") { fi.accept = "image/*,video/*"; fi.click(); }
+        else if (k === "audio") { fi.accept = "audio/*"; fi.click(); }
+        else if (k === "location") locationDialog();
+        else if (k === "contact") contactDialog();
+        else if (k === "poll") pollDialog();
+      };
+      placeMenu(menu, rect.left, rect.top - 270);
+    }
+    const formRow = (label, input) => `<label class="wa-frow"><span>${label}</span>${input}</label>`;
+    function locationDialog() {
+      const el = modal("Share location", `<div class="wa-form">
+        <button type="button" class="btn primary wa-locnow" id="locNow">${I.locate}<span>Use my current location</span></button>
+        <p class="muted wa-locmsg" id="locMsg">Or type the coordinates yourself.</p>
+        ${formRow("Latitude", '<input id="locLat" inputmode="decimal" placeholder="e.g. 25.28540" autocomplete="off">')}
+        ${formRow("Longitude", '<input id="locLng" inputmode="decimal" placeholder="e.g. 51.53100" autocomplete="off">')}
+        ${formRow("Place name (optional)", '<input id="locName" maxlength="100" placeholder="e.g. Our office" autocomplete="off">')}
+        <div class="wa-dactions"><button type="button" class="btn primary" id="locSend">Send location</button><button type="button" class="btn ghost" data-close>Cancel</button></div></div>`);
+      const q = (s) => el.querySelector(s);
+      q("#locNow").onclick = () => {
+        if (!navigator.geolocation) { q("#locMsg").textContent = "Location is not available in this browser."; return; }
+        q("#locMsg").textContent = "Finding your location…";
+        navigator.geolocation.getCurrentPosition(
+          (pos) => { q("#locLat").value = pos.coords.latitude.toFixed(6); q("#locLng").value = pos.coords.longitude.toFixed(6); q("#locMsg").textContent = "Location found. Press Send location."; },
+          () => { q("#locMsg").textContent = "Could not read your location. Allow location access or type the coordinates."; },
+          { enableHighAccuracy: true, timeout: 12000 },
+        );
+      };
+      q("#locSend").onclick = async (e) => {
+        const lat = Number(q("#locLat").value.trim().replace(",", ".")), lng = Number(q("#locLng").value.trim().replace(",", "."));
+        if (!q("#locLat").value.trim() || !q("#locLng").value.trim() || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) { q("#locMsg").textContent = "Enter a valid latitude (-90 to 90) and longitude (-180 to 180)."; return; }
+        e.currentTarget.disabled = true;
+        const name = q("#locName").value.trim();
+        try {
+          await quickSend({ type: "location", latitude: lat, longitude: lng, ...(name ? { name } : {}) }, { location: { latitude: lat, longitude: lng, name }, match: ["location", "liveLocation"] });
+          el.remove();
+        } catch (err) { toast(err.message); e.currentTarget.disabled = false; }
+      };
+    }
+    function contactDialog() {
+      const el = modal("Share contact", `<div class="wa-form">${formRow("Contact name", '<input id="ctName" maxlength="100" autocomplete="off">')}${formRow("Phone number", '<input id="ctPhone" inputmode="tel" placeholder="+97450014037" autocomplete="off">')}
+        <p class="muted wa-locmsg" id="ctMsg"></p><div class="wa-dactions"><button type="button" class="btn primary" id="ctSend">Send contact</button><button type="button" class="btn ghost" data-close>Cancel</button></div></div>`);
+      el.querySelector("#ctSend").onclick = async (e) => {
+        const name = el.querySelector("#ctName").value.trim(), phone = el.querySelector("#ctPhone").value.replace(/[^\d]/g, "");
+        if (!name || phone.length < 7) { el.querySelector("#ctMsg").textContent = "Enter a name and a phone number with country code."; return; }
+        e.currentTarget.disabled = true;
+        try { await quickSend({ type: "contact", name, phone }, { contacts: [{ name, phone }], match: ["contact", "contacts", "contactsArray"] }); el.remove(); }
+        catch (err) { toast(err.message); e.currentTarget.disabled = false; }
+      };
+    }
+    function pollDialog() {
+      const el = modal("Create poll", `<div class="wa-form">${formRow("Question", '<input id="plQ" maxlength="200" autocomplete="off">')}${formRow("Options (one per line, 2 to 12)", '<textarea id="plO" rows="4" placeholder="Option 1&#10;Option 2"></textarea>')}
+        <label class="wa-check"><input type="checkbox" id="plMulti"><span>Allow multiple answers</span></label>
+        <p class="muted wa-locmsg" id="plMsg"></p><div class="wa-dactions"><button type="button" class="btn primary" id="plSend">Send poll</button><button type="button" class="btn ghost" data-close>Cancel</button></div></div>`);
+      el.querySelector("#plSend").onclick = async (e) => {
+        const text = el.querySelector("#plQ").value.trim(), options = el.querySelector("#plO").value.split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 12);
+        if (!text || options.length < 2) { el.querySelector("#plMsg").textContent = "Add a question and at least two options."; return; }
+        e.currentTarget.disabled = true;
+        const multi = el.querySelector("#plMulti").checked;
+        try { await quickSend({ type: "poll", text, options, selectableCount: multi ? options.length : 1 }, { pollOptions: options, text: "", match: ["poll", "pollCreation", "pollCreationV3"] }); el.remove(); }
+        catch (err) { toast(err.message); e.currentTarget.disabled = false; }
+      };
+    }
+
+    /* ---------- voice messages ---------- */
+    let rec = null;
+    const clock = (s) => Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+    function hideRec() {
+      const box = $("#waRec"), f = $("#replyForm");
+      if (box) { box.hidden = true; box.innerHTML = ""; }
+      if (f) f.hidden = false;
+    }
+    async function toWav(blob) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      const actx = new AC();
+      const buf = await actx.decodeAudioData(await blob.arrayBuffer());
+      actx.close?.();
+      const rate = 16000, len = Math.max(1, Math.ceil(buf.duration * rate));
+      const off = new OfflineAudioContext(1, len, rate);
+      const src = off.createBufferSource();
+      src.buffer = buf; src.connect(off.destination); src.start();
+      const pcm = (await off.startRendering()).getChannelData(0);
+      const dv = new DataView(new ArrayBuffer(44 + len * 2));
+      const w = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+      w(0, "RIFF"); dv.setUint32(4, 36 + len * 2, true); w(8, "WAVE"); w(12, "fmt "); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+      dv.setUint32(24, rate, true); dv.setUint32(28, rate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); w(36, "data"); dv.setUint32(40, len * 2, true);
+      for (let i = 0; i < len; i++) dv.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 0x7fff, true);
+      return new File([dv], "voice-message.wav", { type: "audio/wav" });
+    }
+    async function startRecording() {
+      if (rec) return;
+      if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) return toast("Voice recording is not supported in this browser");
+      let stream;
+      try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+      catch { return toast("Microphone access was blocked. Allow it in the browser to record."); }
+      const ogg = !!MediaRecorder.isTypeSupported?.("audio/ogg;codecs=opus");
+      const mr = ogg ? new MediaRecorder(stream, { mimeType: "audio/ogg;codecs=opus" }) : new MediaRecorder(stream);
+      const chunks = [];
+      mr.ondataavailable = (e) => { if (e.data?.size) chunks.push(e.data); };
+      rec = { mr, stream, chunks, ogg, started: Date.now(), chatId: current.chatId };
+      mr.start(250);
+      const box = $("#waRec");
+      $("#replyForm").hidden = true;
+      box.hidden = false;
+      box.innerHTML = `<button type="button" class="wa-ib" id="waRecX" title="Cancel" aria-label="Cancel recording">${I.trash}</button><span class="wa-recdot"></span><b id="waRecT">0:00</b><span class="wa-recbar"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><button type="button" class="wa-send" id="waRecSend" title="Send voice message" aria-label="Send voice message">${I.send}</button>`;
+      $("#waRecX").onclick = () => finishRec(false);
+      $("#waRecSend").onclick = () => finishRec(true);
+      rec.timer = setInterval(() => { const t = $("#waRecT"); if (t && rec) t.textContent = clock((Date.now() - rec.started) / 1000); }, 250);
+      sendPresence("recording");
+    }
+    function finishRec(send) {
+      const r = rec;
+      if (!r) return;
+      rec = null;
+      clearInterval(r.timer);
+      hideRec();
+      sendPresence("paused");
+      r.mr.onstop = async () => {
+        r.stream.getTracks().forEach((t) => t.stop());
+        if (!send) return;
+        if (Date.now() - r.started < 800) return toast("Recording too short");
+        try {
+          toast("Sending voice message…");
+          const raw = new Blob(r.chunks, { type: r.mr.mimeType || "audio/webm" });
+          const file = r.ogg ? new File([raw], "voice-message.ogg", { type: "audio/ogg; codecs=opus" }) : await toWav(raw);
+          const mediaId = await upload(base, file, api, toast);
+          await quickSend({ to: r.chatId, type: "audio", mediaId, ptt: r.ogg }, { match: ["audio"] });
+        } catch (err) { toast(err.message || "Could not send the voice message"); }
+      };
+      try { r.mr.state !== "inactive" ? r.mr.stop() : r.mr.onstop(); } catch { r.stream.getTracks().forEach((t) => t.stop()); }
+    }
+
+    /* ---------- PDF viewer ---------- */
+    function pdfViewer(m) {
+      const el = document.createElement("div");
+      el.className = "wa-modal wa-pdfwrap";
+      const view = mediaUrl(m, true), dl = mediaUrl(m, false), name = m.filename || "Document.pdf";
+      el.innerHTML = `<div class="wa-pdfview" role="dialog" aria-modal="true" aria-label="${esc(name)}">
+        <header><span class="wa-dico pdf">${I.file}<i>PDF</i></span><div class="wa-pdftitle"><b>${esc(name)}</b><small>${esc(senderName(m))} · ${esc(hhmm(m.createdAt))}</small></div>
+          <a class="btn mini" href="${esc(dl)}">${I.download}<span>Download</span></a><a class="btn mini ghost" target="_blank" rel="noopener" href="${esc(view)}">${I.ext}<span>New tab</span></a><button class="wa-ib" data-close aria-label="Close">${I.x}</button></header>
+        <div class="wa-pdfbody"><iframe title="${esc(name)}" src="${esc(view)}#toolbar=1&navpanes=0&view=FitH"></iframe></div>
+        <footer>Cannot see the document? <a href="${esc(view)}" target="_blank" rel="noopener">Open it in a new tab</a> or <a href="${esc(dl)}">download it</a>.</footer></div>`;
+      el.onclick = (e) => { if (e.target === el || e.target.closest("[data-close]")) el.remove(); };
+      layer.appendChild(el);
+    }
+
+    /* ---------- group sender actions ---------- */
+    async function openPrivate(m, { quote = false, info = false } = {}) {
+      const jid = senderJid(m);
+      if (!jid) return toast("This sender's number is not available");
+      try {
+        const meta = { chatId: jid, name: senderName(m), kind: "contact", phone: isPnJid(jid) ? "+" + jid.split("@")[0] : "" };
+        window.__zelonChatMeta = { id: norm(jid), ...meta };
+        await open(jid);
+        if (quote) { replyTo = m; editing = null; drawContext(); $("#replyText")?.focus(); }
+        if (info) openInfo();
+      } catch (err) { toast(err.message); }
+    }
+    function senderMenu(m, rect) {
+      closeMenus();
+      const menu = document.createElement("div");
+      menu.className = "wa-menu";
+      menu.innerHTML = `<div class="wa-menuhead"><b>${esc(senderName(m))}</b>${senderPhone(m) && senderPhone(m) !== senderName(m) ? `<small>${esc(senderPhone(m))}</small>` : ""}</div>
+        <button data-sact="chat">${I.msg}<span>Message ${esc(senderName(m))}</span></button><button data-sact="private">${I.reply}<span>Reply privately</span></button><button data-sact="profile">${I.info}<span>View profile</span></button>`;
+      menu.onclick = (e) => {
+        const b = e.target.closest("[data-sact]");
+        if (!b) return;
+        closeMenus();
+        openPrivate(m, { quote: b.dataset.sact === "private", info: b.dataset.sact === "profile" });
+      };
+      placeMenu(menu, rect.left, rect.bottom + 4);
+    }
     function sendPresence(kind) {
       if (!current) return;
       api(base + "/chats/" + encodeURIComponent(current.chatId) + "/presence", "POST", { presence: kind }).catch(() => {});
@@ -446,6 +717,7 @@ window.ZelonChat = (() => {
       const grow = () => { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 140) + "px"; };
       grow();
       ta.oninput = () => {
+        syncSend();
         grow();
         if (!editing) drafts.set(current.chatId, ta.value);
         if (Date.now() - typingSent > 4000 && ta.value.trim()) { typingSent = Date.now(); sendPresence("composing"); }
@@ -461,6 +733,9 @@ window.ZelonChat = (() => {
         if (f) { e.preventDefault(); setAttachment(f); }
       };
       $("#replyAttachment").onchange = (e) => setAttachment(e.target.files[0]);
+      $("#waAttachBtn").onclick = (e) => { e.stopPropagation(); attachMenu(e.currentTarget.getBoundingClientRect()); };
+      $("#waMic").onclick = () => startRecording();
+      syncSend();
       $("#waEmojiBtn").onclick = () => { $("#waEmoji").hidden = !$("#waEmoji").hidden; };
       $("#waEmoji").onclick = (e) => {
         const b = e.target.closest("[data-emoji]");
@@ -559,7 +834,7 @@ window.ZelonChat = (() => {
       const switching = !current || current.chatId !== chatId;
       if (current) drafts.set(current.chatId, $("#replyText")?.value || drafts.get(current.chatId) || "");
       current = { ...meta, chatId };
-      if (switching) { msgs = []; pending = []; replyTo = null; editing = null; attachment = null; searchOpen = false; unseen = 0; msgSig = ""; closeInfo(); presence = null; }
+      if (switching) { if (rec) finishRec(false); msgs = []; pending = []; replyTo = null; editing = null; attachment = null; searchOpen = false; unseen = 0; msgSig = ""; closeInfo(); presence = null; }
       drawConversation();
       drawList(true);
       const rows = await fetchMessages(false);
@@ -607,6 +882,8 @@ window.ZelonChat = (() => {
         if (m.fromMe && m.text && !m.hasMedia && m.type !== "poll") items.push(["edit", I.edit, "Edit"]);
         if (m.hasMedia) items.push(["download", I.download, "Download"]);
         if (m.pollOptions?.length) items.push(["votes", I.poll, "Poll results"]);
+        if (m.hasMedia && isPdf(m)) items.push(["view", I.doc, "View PDF"]);
+        if (!m.fromMe && (current?.kind === "group" || /@g\.us$/.test(current?.chatId || "")) && senderJid(m)) { items.push(["private", I.reply, "Reply privately"]); items.push(["chat", I.msg, "Message " + senderName(m)]); }
         items.push(["info", I.info, "Message info"]);
       }
       items.push(["delete", I.trash, "Delete", "danger"]);
@@ -646,6 +923,9 @@ window.ZelonChat = (() => {
         else if (act === "forward") forwardDialog(m);
         else if (act === "delete") deleteDialog(m);
         else if (act === "info") infoDialog(m);
+        else if (act === "view") pdfViewer(m);
+        else if (act === "private") openPrivate(m, { quote: true });
+        else if (act === "chat") openPrivate(m);
         else if (act === "votes") {
           const votes = await api(base + "/polls/" + encodeURIComponent(m.waId) + "/votes");
           const rows = Array.isArray(votes) ? votes : Object.entries(votes || {}).map(([name, voters]) => ({ name, voters }));
@@ -764,7 +1044,7 @@ window.ZelonChat = (() => {
       const live = chats.find((x) => x.chatId === target.chatId) || target;
       const muted = live.muteUntil && Date.parse(live.muteUntil) > Date.now();
       const shell = (inner) => `<header class="wa-ihead"><button class="wa-ib" id="waInfoX" aria-label="Close info">${I.x}</button><h3>${target.kind === "group" ? "Group info" : "Contact info"}</h3></header><div class="wa-ibody">
-        <div class="wa-hero">${avatar(target, "xl")}<h2>${esc(target.name || target.chatId)}</h2><p>${esc(target.kind === "group" ? (target.participants ? target.participants + " participants" : "Group") : target.phone || "")}</p></div>${inner}</div>`;
+        <div class="wa-hero">${avatar(target, "xl")}<h2>${esc(target.name || target.chatId)}</h2><p>${esc(target.kind === "group" ? (target.participants ? target.participants + " participants" : "Group") : target.phoneFmt || target.phone || "")}</p></div>${inner}</div>`;
       const bind = () => {
         $("#waInfoX").onclick = closeInfo;
         $("#waInfoAvatar") && 0;
@@ -796,7 +1076,7 @@ window.ZelonChat = (() => {
         } else {
           const biz = d.business;
           extra = `<div class="wa-card"><small>About</small><p>${d.about ? fmt(d.about) : '<span class="muted">No status available</span>'}</p>${d.aboutSetAt ? `<small class="muted">Updated ${esc(new Date(d.aboutSetAt).toLocaleDateString())}</small>` : ""}</div>
-            <div class="wa-card"><div class="wa-line"><b>Phone</b><span>${esc(d.phone || target.phone || "—")}</span></div>${d.name ? `<div class="wa-line"><b>Saved name</b><span>${esc(d.name)}</span></div>` : ""}</div>
+            <div class="wa-card"><div class="wa-line"><b>Phone</b><span>${esc(target.phoneFmt || fmtPhone(d.phone || target.phone) || "—")}</span></div>${d.name ? `<div class="wa-line"><b>Saved name</b><span>${esc(d.name)}</span></div>` : ""}</div>
             ${biz ? `<div class="wa-card"><small>Business</small>${biz.description ? `<p>${esc(biz.description)}</p>` : ""}${biz.address ? `<div class="wa-line"><b>Address</b><span>${esc(biz.address)}</span></div>` : ""}${biz.email ? `<div class="wa-line"><b>Email</b><span>${esc(biz.email)}</span></div>` : ""}</div>` : ""}
             <div class="wa-card danger-zone">${target.phone ? `<button data-iact="${d.blocked ? "unblock" : "block"}" class="wa-dangerbtn">${I.block}<span>${d.blocked ? "Unblock" : "Block"} ${esc(target.name || target.phone)}</span></button>` : ""}<button data-iact="copy" class="wa-plain">${I.copy}<span>Copy number</span></button></div>`;
         }
@@ -822,6 +1102,10 @@ window.ZelonChat = (() => {
         if (m) messageMenu(m, r.left - 150, r.bottom + 4);
         return;
       }
+      const snd = t.closest("[data-sender]");
+      if (snd) { e.stopPropagation(); const sm = allMsgs().find((x) => x.waId === snd.dataset.sender); if (sm) senderMenu(sm, snd.getBoundingClientRect()); return; }
+      const pdfEl = t.closest("[data-pdf]");
+      if (pdfEl) { const pm = allMsgs().find((x) => x.waId === pdfEl.dataset.pdf); if (pm) pdfViewer(pm); return; }
       const zoom = t.closest("[data-zoom]");
       if (zoom) {
         const m = allMsgs().find((x) => x.waId === zoom.dataset.zoom);
@@ -867,7 +1151,11 @@ window.ZelonChat = (() => {
     };
     $("#newChatBtn").onclick = () => { $("#chatSearch").focus(); toast("Type a phone number with country code to start a chat"); };
     $("#reloadInbox").onclick = async () => { try { await refreshList(); if (current) await refreshCurrent(); toast("Conversations refreshed"); } catch (err) { toast(err.message); } };
-    $("#waMe").onclick = () => { const me = { chatId: "me", name: "My profile", kind: "contact", phone: state.phone ? "+" + state.phone : "" }; modal("Your WhatsApp profile", `<div class="wa-hero">${avatar(me, "xl", true)}<h2>${esc(state.phone ? "+" + state.phone : "This number")}</h2><p class="muted">Edit your name, about and photo in <b>Messaging → Profile &amp; settings</b>.</p></div>`); };
+    $("#waMe").onclick = () => {
+      const me = { chatId: "me", name: "My profile", kind: "contact", phone: state.phone ? "+" + state.phone : "" };
+      const el = modal("Your WhatsApp profile", '<div class="wa-hero">' + avatar(me, "xl", true) + "<h2>" + esc(state.phone ? fmtPhone(state.phone) : "This number") + '</h2><p class="muted">Your name, about and profile photo are managed in <b>Profile &amp; settings</b>.</p><div class="wa-dactions center"><button type="button" class="btn primary" id="meEdit">' + I.edit + "<span>Edit profile</span></button></div></div>");
+      el.querySelector("#meEdit").onclick = () => { el.remove(); if (ctx.go) ctx.go("tools"); else toast("Open Messaging > Profile & settings to edit your profile"); };
+    };
     const more = $("#moreChats");
     more.onclick = async () => {
       more.disabled = true;

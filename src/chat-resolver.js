@@ -45,8 +45,8 @@ export function createChatResolver({ store, wa }) {
     const labelFor = (j) => {
       const c = canon(j);
       if (isPn(c)) return "+" + digits(c);
-      if (isLid(c)) return "WhatsApp user …" + digits(c).slice(-4);
-      return digits(c);
+      if (isLid(c)) return "WhatsApp user";
+      return /^\d{5,}@(s\.whatsapp\.net)?$/.test(c) ? "+" + digits(c) : "WhatsApp user";
     };
     return { canon, nameFor, labelFor, lidToPn };
   }

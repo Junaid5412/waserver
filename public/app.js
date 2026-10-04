@@ -334,6 +334,7 @@ function instancePage() {
       form,
       on,
       toast,
+      go: (t) => { tab = t; render(); },
       startPolling: (fn, ms) => { clearInterval(timer); timer = setInterval(fn, ms); },
     }).catch((e) => {
       p.textContent = e.message;

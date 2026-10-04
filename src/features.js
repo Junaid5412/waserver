@@ -7,7 +7,7 @@ import {
   jidNormalizedUser,
 } from "@whiskeysockets/baileys";
 import pino from "pino";
-import { timestampSeconds, describeMessage, normalizeJid } from "./inbox.js";
+import { timestampSeconds, describeMessage, normalizeJid, isJunkType, previewOf } from "./inbox.js";
 import { createChatResolver } from "./chat-resolver.js";
 import { hash, jid, token } from "./security.js";
 import { fail } from "./errors.js";
@@ -205,18 +205,25 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
       });
       const search = String(req.query.search || "").toLowerCase();
       const merged = await resolver.list(req.instance, rows);
-      res.json(
-        merged
-          .filter(
-            (c) =>
-              !search ||
-              (c.name + " " + c.chatId + " " + c.phone).toLowerCase().includes(search),
-          )
-          .map((c) => ({
-            ...c,
-            lastPreview: c.lastPreview ? enc.open(c.lastPreview) : "",
-          })),
+      const shown = merged.filter(
+        (c) => !search || (c.name + " " + c.chatId + " " + c.phone).toLowerCase().includes(search),
       );
+      const out = [];
+      for (const c of shown) {
+        let p = c.lastPreview ? enc.open(c.lastPreview) : "";
+        const m = /^\[(\w+)\]$/.exec(p);
+        if (m) {
+          if (isJunkType(m[1])) {
+            p = "";
+            const rows2 = (await Promise.all(c.aliases.map((chatId) => store.query("inbox", { instanceId: req.instance.id, chatId, limit: 25 })))).flat()
+              .filter((r) => !r.hidden && !isJunkType(r.type))
+              .sort((x, y) => Date.parse(y.createdAt) - Date.parse(x.createdAt));
+            if (rows2[0]) { const d = inbox.dto(rows2[0]); p = previewOf({ type: d.type, text: d.text, filename: d.filename }); }
+          } else p = previewOf({ type: m[1] });
+        }
+        out.push({ ...c, lastPreview: p });
+      }
+      res.json(out);
     }),
   );
   router.get(
@@ -240,14 +247,20 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
           .filter((r) => !seen.has(r.waId) && seen.add(r.waId))
           .slice(0, paging.limit);
       res.json(
-        rows.map((row) => {
-          const m = inbox.dto(row),
-            who = m.participant || row.chatId;
-          return {
-            ...m,
-            name: row.fromMe ? "You" : ctx.nameFor(who) || m.name || ctx.labelFor(who),
-          };
-        }),
+        rows
+          .filter((row) => !isJunkType(row.type))
+          .map((row) => {
+            const m = inbox.dto(row),
+              who = m.participant || row.chatId,
+              canon = ctx.canon(who),
+              phone = /@s\.whatsapp\.net$/.test(canon) ? "+" + canon.split("@")[0] : "";
+            return {
+              ...m,
+              participantPhone: phone,
+              participantJid: canon,
+              name: row.fromMe ? "You" : ctx.nameFor(who) || m.name || (phone || "WhatsApp user"),
+            };
+          }),
       );
     }),
   );
@@ -462,10 +475,14 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
           { image: ".jpg", video: ".mp4", audio: ".ogg", sticker: ".webp" }[
             info.type
           ] || "";
+      const mime = String(info.mimetype || "application/octet-stream").toLowerCase().split(";")[0].trim();
+      const inlineOk = !!req.query.inline && /^(image\/(png|jpe?g|gif|webp|bmp)|video\/[\w.+-]+|audio\/[\w.+-]+|application\/pdf)$/.test(mime);
       res.set({
         "Content-Type": info.mimetype || "application/octet-stream",
-        "Content-Disposition": `${req.query.inline ? "inline" : "attachment"}; filename="${safeName(info.filename || "whatsapp-" + m.key.id + extension)}"`,
-        ...(req.query.inline ? { "Cache-Control": "private, max-age=86400" } : {}),
+        "Content-Disposition": `${inlineOk ? "inline" : "attachment"}; filename="${safeName(info.filename || "whatsapp-" + m.key.id + extension)}"`,
+        "X-Content-Type-Options": "nosniff",
+        ...(inlineOk ? { "Cache-Control": "private, max-age=86400" } : {}),
+        ...(mime === "application/pdf" && inlineOk ? { "Content-Security-Policy": "frame-ancestors 'self'" } : {}),
       });
       let bytes = 0;
       for await (const chunk of stream) {

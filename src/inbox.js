@@ -51,7 +51,15 @@ export function describeMessage(message) {
       ? (value.contextInfo.quotedMessage.conversation || value.contextInfo.quotedMessage.extendedTextMessage?.text || value.contextInfo.quotedMessage.imageMessage?.caption || "Quoted message").slice(0, 500) : "",
   };
 }
-const IGNORED = new Set(["senderKeyDistributionMessage", "pollUpdateMessage", "keepInChatMessage", "encReactionMessage", "messageContextInfo", "reactionMessage", "protocolMessage"]);
+const IGNORED = new Set(["senderKeyDistributionMessage", "pollUpdateMessage", "keepInChatMessage", "encReactionMessage", "messageContextInfo", "reactionMessage", "protocolMessage", "commentMessage", "encCommentMessage", "secretEncryptedMessage", "encEventResponseMessage", "placeholderMessage", "botInvokeMessage", "messageHistoryBundle", "peerDataOperationRequestMessage", "peerDataOperationRequestResponseMessage"]);
+const JUNK_SHORT = new Set([...IGNORED].map((k) => k.replace(/Message$/, "")));
+export const isJunkType = (t) => !!t && (JUNK_SHORT.has(t) || IGNORED.has(t));
+export function previewOf(info) {
+  if (info.text) return info.text;
+  const t = info.type;
+  const map = { audio: "\ud83c\udfa4 Voice message", image: "\ud83d\udcf7 Photo", video: "\ud83c\udfa5 Video", document: "\ud83d\udcc4 " + (info.filename || "Document"), location: "\ud83d\udccd Location", liveLocation: "\ud83d\udccd Live location", contact: "\ud83d\udc64 Contact", contacts: "\ud83d\udc64 Contact", poll: "\ud83d\udcca Poll", pollCreation: "\ud83d\udcca Poll", sticker: "Sticker" };
+  return map[t] || (t ? t.charAt(0).toUpperCase() + t.slice(1) : "Message");
+}
 export function createInbox(store, enc, notify = () => {}) {
   const tell = (instance, event) => { try { notify(instance, event); } catch {} };
   async function rowsFor(instance, waId) {
@@ -75,7 +83,7 @@ export function createInbox(store, enc, notify = () => {}) {
       for (const row of rows) await store.patch("inbox", row.id, { data: pack(enc, stored), edited: true });
       const info = describeMessage(edited);
       const chat = await store.get("chats", hash(instance.id + ":" + rows[0].chatId));
-      if (chat?.lastMessageId === waId) await store.patch("chats", chat.id, { lastPreview: enc.seal(info.text || "[" + info.type + "]") });
+      if (chat?.lastMessageId === waId) await store.patch("chats", chat.id, { lastPreview: enc.seal(previewOf(info)) });
     }
     tell(instance, { type: "update", chatId: rows[0].chatId, waId });
   }
@@ -200,7 +208,7 @@ export function createInbox(store, enc, notify = () => {}) {
         name:
           (!m.key.fromMe && !chatId.endsWith("@g.us") && m.pushName) || c.name,
         lastMessageId: m.key.id,
-        lastPreview: enc.seal(info.text || "[" + info.type + "]"),
+        lastPreview: enc.seal(previewOf(info)),
         createdAt,
         unread: (c.unread || 0) + (fresh && notify && !m.key.fromMe ? 1 : 0),
       };
