@@ -1,4 +1,4 @@
-﻿/* Zelon API - public website and sign-in page */
+/* Zelon API - public website and sign-in page */
 (function () {
   const S = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
   const I = {
@@ -26,13 +26,13 @@
 
   const SNIP = {
     curl: () =>
-      `<span class="tk-k">curl</span> -X POST <span class="tk-s">"https://YOUR-DOMAIN/api/instances/$ID/messages"</span> \\\n  -H <span class="tk-s">"Authorization: Bearer $API_KEY"</span> \\\n  -H <span class="tk-s">"Idempotency-Key: order-1042"</span> \\\n  -H <span class="tk-s">"Content-Type: application/json"</span> \\\n  -d <span class="tk-s">'{\n    "to": "+97450000000",\n    "type": "text",\n    "text": "Your order #1042 has shipped ðŸšš"\n  }'</span>`,
+      `<span class="tk-k">curl</span> -X POST <span class="tk-s">"https://YOUR-DOMAIN/api/instances/$ID/messages"</span> \\\n  -H <span class="tk-s">"Authorization: Bearer $API_KEY"</span> \\\n  -H <span class="tk-s">"Idempotency-Key: order-1042"</span> \\\n  -H <span class="tk-s">"Content-Type: application/json"</span> \\\n  -d <span class="tk-s">'{\n    "to": "+97450000000",\n    "type": "text",\n    "text": "Your order #1042 has shipped 🚚"\n  }'</span>`,
     node: () =>
-      `<span class="tk-c">// npm i node-fetch (or use Node 18+ fetch)</span>\n<span class="tk-k">const</span> res = <span class="tk-k">await</span> fetch(<span class="tk-s">\`https://YOUR-DOMAIN/api/instances/\${ID}/messages\`</span>, {\n  method: <span class="tk-s">"POST"</span>,\n  headers: {\n    Authorization: <span class="tk-s">\`Bearer \${API_KEY}\`</span>,\n    <span class="tk-s">"Content-Type"</span>: <span class="tk-s">"application/json"</span>,\n    <span class="tk-s">"Idempotency-Key"</span>: <span class="tk-s">"order-1042"</span>,\n  },\n  body: JSON.stringify({\n    to: <span class="tk-s">"+97450000000"</span>,\n    type: <span class="tk-s">"text"</span>,\n    text: <span class="tk-s">"Your order #1042 has shipped ðŸšš"</span>,\n  }),\n});\n<span class="tk-k">console</span>.log(<span class="tk-k">await</span> res.json());`,
+      `<span class="tk-c">// npm i node-fetch (or use Node 18+ fetch)</span>\n<span class="tk-k">const</span> res = <span class="tk-k">await</span> fetch(<span class="tk-s">\`https://YOUR-DOMAIN/api/instances/\${ID}/messages\`</span>, {\n  method: <span class="tk-s">"POST"</span>,\n  headers: {\n    Authorization: <span class="tk-s">\`Bearer \${API_KEY}\`</span>,\n    <span class="tk-s">"Content-Type"</span>: <span class="tk-s">"application/json"</span>,\n    <span class="tk-s">"Idempotency-Key"</span>: <span class="tk-s">"order-1042"</span>,\n  },\n  body: JSON.stringify({\n    to: <span class="tk-s">"+97450000000"</span>,\n    type: <span class="tk-s">"text"</span>,\n    text: <span class="tk-s">"Your order #1042 has shipped 🚚"</span>,\n  }),\n});\n<span class="tk-k">console</span>.log(<span class="tk-k">await</span> res.json());`,
     python: () =>
-      `<span class="tk-k">import</span> requests\n\nr = requests.post(\n    <span class="tk-s">f"https://YOUR-DOMAIN/api/instances/{ID}/messages"</span>,\n    headers={<span class="tk-s">"Authorization"</span>: <span class="tk-s">f"Bearer {API_KEY}"</span>,\n             <span class="tk-s">"Idempotency-Key"</span>: <span class="tk-s">"order-1042"</span>},\n    json={<span class="tk-s">"to"</span>: <span class="tk-s">"+97450000000"</span>,\n          <span class="tk-s">"type"</span>: <span class="tk-s">"text"</span>,\n          <span class="tk-s">"text"</span>: <span class="tk-s">"Your order #1042 has shipped ðŸšš"</span>},\n)\n<span class="tk-k">print</span>(r.json())`,
+      `<span class="tk-k">import</span> requests\n\nr = requests.post(\n    <span class="tk-s">f"https://YOUR-DOMAIN/api/instances/{ID}/messages"</span>,\n    headers={<span class="tk-s">"Authorization"</span>: <span class="tk-s">f"Bearer {API_KEY}"</span>,\n             <span class="tk-s">"Idempotency-Key"</span>: <span class="tk-s">"order-1042"</span>},\n    json={<span class="tk-s">"to"</span>: <span class="tk-s">"+97450000000"</span>,\n          <span class="tk-s">"type"</span>: <span class="tk-s">"text"</span>,\n          <span class="tk-s">"text"</span>: <span class="tk-s">"Your order #1042 has shipped 🚚"</span>},\n)\n<span class="tk-k">print</span>(r.json())`,
     php: () =>
-      `&lt;?php\n$ch = curl_init(<span class="tk-s">"https://YOUR-DOMAIN/api/instances/$id/messages"</span>);\ncurl_setopt_array($ch, [\n  CURLOPT_POST =&gt; <span class="tk-n">true</span>,\n  CURLOPT_RETURNTRANSFER =&gt; <span class="tk-n">true</span>,\n  CURLOPT_HTTPHEADER =&gt; [\n    <span class="tk-s">"Authorization: Bearer $apiKey"</span>,\n    <span class="tk-s">"Content-Type: application/json"</span>,\n    <span class="tk-s">"Idempotency-Key: order-1042"</span>,\n  ],\n  CURLOPT_POSTFIELDS =&gt; json_encode([\n    <span class="tk-s">"to"</span> =&gt; <span class="tk-s">"+97450000000"</span>,\n    <span class="tk-s">"type"</span> =&gt; <span class="tk-s">"text"</span>,\n    <span class="tk-s">"text"</span> =&gt; <span class="tk-s">"Your order #1042 has shipped ðŸšš"</span>,\n  ]),\n]);\n<span class="tk-k">echo</span> curl_exec($ch);`,
+      `&lt;?php\n$ch = curl_init(<span class="tk-s">"https://YOUR-DOMAIN/api/instances/$id/messages"</span>);\ncurl_setopt_array($ch, [\n  CURLOPT_POST =&gt; <span class="tk-n">true</span>,\n  CURLOPT_RETURNTRANSFER =&gt; <span class="tk-n">true</span>,\n  CURLOPT_HTTPHEADER =&gt; [\n    <span class="tk-s">"Authorization: Bearer $apiKey"</span>,\n    <span class="tk-s">"Content-Type: application/json"</span>,\n    <span class="tk-s">"Idempotency-Key: order-1042"</span>,\n  ],\n  CURLOPT_POSTFIELDS =&gt; json_encode([\n    <span class="tk-s">"to"</span> =&gt; <span class="tk-s">"+97450000000"</span>,\n    <span class="tk-s">"type"</span> =&gt; <span class="tk-s">"text"</span>,\n    <span class="tk-s">"text"</span> =&gt; <span class="tk-s">"Your order #1042 has shipped 🚚"</span>,\n  ]),\n]);\n<span class="tk-k">echo</span> curl_exec($ch);`,
   };
 
   const FEATURES = [
@@ -63,16 +63,16 @@
 
   function codeWindow() {
     const tabs = [["curl", "cURL"], ["node", "Node.js"], ["python", "Python"], ["php", "PHP"]];
-    return `<div class="win" id="heroWin"><div class="win-bar"><i></i><i></i><i></i><div class="win-tabs">${tabs.map(([k, l], i) => `<button type="button" data-snip="${k}" class="${i ? "" : "on"}">${l}</button>`).join("")}</div></div><pre id="heroCode">${SNIP.curl()}</pre><div class="res"><b>202 Accepted</b> Â· 38 ms<br>{ <span class="tk-s">"id"</span>: <span class="tk-s">"9f1câ€¦"</span>, <span class="tk-s">"status"</span>: <span class="tk-s">"queued"</span> }</div></div>`;
+    return `<div class="win" id="heroWin"><div class="win-bar"><i></i><i></i><i></i><div class="win-tabs">${tabs.map(([k, l], i) => `<button type="button" data-snip="${k}" class="${i ? "" : "on"}">${l}</button>`).join("")}</div></div><pre id="heroCode">${SNIP.curl()}</pre><div class="res"><b>202 Accepted</b> · 38 ms<br>{ <span class="tk-s">"id"</span>: <span class="tk-s">"9f1c…"</span>, <span class="tk-s">"status"</span>: <span class="tk-s">"queued"</span> }</div></div>`;
   }
 
   function phoneMock() {
     return `<div class="phone"><div class="screen"><div class="scr-head"><span class="av">A</span><div><strong>Amina Rahman</strong><small>online</small></div></div><div class="scr-body">
       <div class="bub">Hi! Is my order ready?<small>10:41</small></div>
-      <div class="bub out">Hello Amina ðŸ‘‹ Order #1042 has shipped. Track it here: zelon.link/t/1042<small>10:41 <b>âœ“âœ“</b></small></div>
+      <div class="bub out">Hello Amina 👋 Order #1042 has shipped. Track it here: zelon.link/t/1042<small>10:41 <b>✓✓</b></small></div>
       <div class="bub">Amazing, thank you!<small>10:42</small></div>
-      <div class="bub out card2"><b>Delivery window</b><span>Today Â· 4:00 â€“ 6:00 PM</span><small>10:42 <b>âœ“âœ“</b></small></div>
-      <div class="bub out">Anything else we can help with? ðŸ˜Š<small>10:43 <b>âœ“âœ“</b></small></div></div></div></div>`;
+      <div class="bub out card2"><b>Delivery window</b><span>Today · 4:00 – 6:00 PM</span><small>10:42 <b>✓✓</b></small></div>
+      <div class="bub out">Anything else we can help with? 😊<small>10:43 <b>✓✓</b></small></div></div></div></div>`;
   }
 
   function landing(root) {
@@ -82,7 +82,7 @@
     <section class="hero2"><div class="wrap">
       <div><span class="pill"><i></i>WhatsApp messaging, built for developers</span>
         <h1>Connect your apps to <em>WhatsApp</em> in minutes.</h1>
-        <p class="lead">One clean REST API and a beautiful web console to send messages, receive replies in a live inbox, automate answers and run campaigns â€” on infrastructure you control.</p>
+        <p class="lead">One clean REST API and a beautiful web console to send messages, receive replies in a live inbox, automate answers and run campaigns — on infrastructure you control.</p>
         <div class="cta"><a class="sbtn primary lg" href="/console">Open the console</a><a class="sbtn ghost lg" href="/api-reference.html">Read the API docs</a></div>
         <div class="trust"><span>${I.check}Link by QR or pairing code</span><span>${I.check}Real-time webhooks</span><span>${I.check}Encrypted sessions</span></div></div>
       <div>${codeWindow()}</div></div></section>
@@ -103,16 +103,16 @@
         <div class="cta"><a class="sbtn primary" href="/api-reference.html">Explore the docs</a><a class="sbtn ghost" href="/openapi.json">OpenAPI spec</a></div></div>
       <div><div class="win"><div class="win-bar"><i></i><i></i><i></i><span style="margin-left:12px;color:#7e93a6;font-size:12.5px">webhook payload</span></div><pre>{
   <span class="tk-s">"type"</span>: <span class="tk-s">"message"</span>,
-  <span class="tk-s">"instanceId"</span>: <span class="tk-s">"a1b2â€¦"</span>,
+  <span class="tk-s">"instanceId"</span>: <span class="tk-s">"a1b2…"</span>,
   <span class="tk-s">"data"</span>: {
     <span class="tk-s">"chatId"</span>: <span class="tk-s">"97450000000@s.whatsapp.net"</span>,
     <span class="tk-s">"fromMe"</span>: <span class="tk-n">false</span>,
     <span class="tk-s">"text"</span>: <span class="tk-s">"Is my order ready?"</span>
   }
 }
-<span class="tk-c">// X-Zelon-Signature: sha256=â€¦</span></pre></div></div></div></section>
+<span class="tk-c">// X-Zelon-Signature: sha256=…</span></pre></div></div></div></section>
     <section class="blk"><div class="wrap"><div class="head-c"><div class="kicker">SDKs</div><h2>Use the language you already know.</h2></div>
-      <div class="sdkgrid" style="--x:0"><div class="sdk" style="background:#fff;border-color:#e3e9ef"><b style="color:#0f172a">Node.js</b><p style="color:#5b6b7c">Zero-dependency ES module client.</p><a style="color:#0a8f62" href="/sdk/zelon.mjs">Download zelon.mjs â†’</a></div><div class="sdk" style="background:#fff;border-color:#e3e9ef"><b style="color:#0f172a">Python</b><p style="color:#5b6b7c">Single-file client built on requests.</p><a style="color:#0a8f62" href="/sdk/zelon.py">Download zelon.py â†’</a></div><div class="sdk" style="background:#fff;border-color:#e3e9ef"><b style="color:#0f172a">PHP</b><p style="color:#5b6b7c">Drop-in class using cURL.</p><a style="color:#0a8f62" href="/sdk/zelon.php">Download zelon.php â†’</a></div></div></div></section>
+      <div class="sdkgrid" style="--x:0"><div class="sdk" style="background:#fff;border-color:#e3e9ef"><b style="color:#0f172a">Node.js</b><p style="color:#5b6b7c">Zero-dependency ES module client.</p><a style="color:#0a8f62" href="/sdk/zelon.mjs">Download zelon.mjs →</a></div><div class="sdk" style="background:#fff;border-color:#e3e9ef"><b style="color:#0f172a">Python</b><p style="color:#5b6b7c">Single-file client built on requests.</p><a style="color:#0a8f62" href="/sdk/zelon.py">Download zelon.py →</a></div><div class="sdk" style="background:#fff;border-color:#e3e9ef"><b style="color:#0f172a">PHP</b><p style="color:#5b6b7c">Drop-in class using cURL.</p><a style="color:#0a8f62" href="/sdk/zelon.php">Download zelon.php →</a></div></div></div></section>
     <section class="blk alt" id="faq"><div class="wrap"><div class="head-c"><div class="kicker">FAQ</div><h2>Good questions, straight answers.</h2></div>
       <div class="faq">${FAQ.map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join("")}</div></div></section>
     <section class="band"><div class="wrap"><h2>Ready to put WhatsApp to work?</h2><p>Open the console, link your number and send your first message today.</p><div class="cta"><a class="sbtn primary lg" href="/console">Get started</a><a class="sbtn ghost lg" href="/api-reference.html">View documentation</a></div></div></section>
@@ -120,7 +120,7 @@
       <div><h4>Product</h4><a href="#features">Features</a><a href="#how">How it works</a><a href="/console">Console</a></div>
       <div><h4>Developers</h4><a href="/api-reference.html">API documentation</a><a href="/openapi.json">OpenAPI spec</a><a href="/sdk/zelon.mjs">Node.js SDK</a><a href="/sdk/zelon.py">Python SDK</a></div>
       <div><h4>Company</h4><a href="#faq">FAQ</a><a href="/console">Sign in</a><a href="/health">Service status</a></div></div>
-      <div class="fbot"><span>Â© ${year} Zelon API. All Rights Reserved.</span><span>Zelon API is an independent product and is not affiliated with WhatsApp or Meta.</span></div></div></div>`;
+      <div class="fbot"><span>© ${year} Zelon API. All Rights Reserved.</span><span>Zelon API is an independent product and is not affiliated with WhatsApp or Meta.</span></div></div></div>`;
     const nav = root.querySelector("#snavMenu");
     root.querySelector("#burger").onclick = () => nav.classList.toggle("open");
     nav.addEventListener("click", (e) => e.target.closest("a") && nav.classList.remove("open"));
@@ -129,7 +129,7 @@
       root.querySelectorAll("[data-snip]").forEach((x) => x.classList.toggle("on", x === b));
       code.innerHTML = SNIP[b.dataset.snip]();
     }));
-    document.title = "Zelon API â€” WhatsApp messaging infrastructure";
+    document.title = "Zelon API — WhatsApp messaging infrastructure";
   }
 
   function login(root) {
@@ -137,20 +137,20 @@
     const bullets = [["chat", "Live inbox with real-time conversations"], ["key", "Scoped API keys, webhooks and automation"], ["shield", "Encrypted sessions and sign-in audit log"]];
     root.innerHTML = `
     <aside class="auth-l">${brand()}<div class="mid"><h2>Your WhatsApp,<br><em>connected</em> to everything.</h2><p class="lead">Manage numbers, chat with customers and build integrations from one secure workspace.</p>
-      <ul>${bullets.map(([i, t]) => `<li><span>${I[i]}</span>${esc(t)}</li>`).join("")}</ul></div><div class="copy">Â© ${year} Zelon API. All Rights Reserved.</div></aside>
-    <main class="auth-r"><a class="back" href="/">â† Back to website</a>
+      <ul>${bullets.map(([i, t]) => `<li><span>${I[i]}</span>${esc(t)}</li>`).join("")}</ul></div><div class="copy">© ${year} Zelon API. All Rights Reserved.</div></aside>
+    <main class="auth-r">
       <section class="auth-card"><h1>Welcome back</h1><p class="hint">Sign in to your Zelon API console.</p>
         <form id="login" novalidate><label for="email">Email address</label><div class="field"><input id="email" name="email" type="email" autocomplete="username" placeholder="you@company.com" required></div>
           <label for="password">Password</label><div class="field"><input id="password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required><button type="button" class="eye" id="eye" aria-label="Show password">${I.eye}</button></div>
           <div class="auth-err" id="loginErr" hidden></div>
           <button type="submit" class="sbtn primary">Sign in</button></form>
         <p class="auth-foot">Accounts are created by your workspace administrator.<br>Forgot your password? Ask an administrator to reset it.</p></section>
-      <p class="copy2">Â© ${year} Zelon API. All Rights Reserved.</p></main>`;
+      <p class="copy2">© ${year} Zelon API. All Rights Reserved.</p></main>`;
     root.querySelector("#eye").onclick = () => {
       const p = root.querySelector("#password");
       p.type = p.type === "password" ? "text" : "password";
     };
-    document.title = "Sign in â€” Zelon API";
+    document.title = "Sign in — Zelon API";
   }
 
   window.ZelonSite = { landing, login, brand, esc };

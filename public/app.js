@@ -1,4 +1,4 @@
-﻿const root = document.querySelector("#root");
+const root = document.querySelector("#root");
 let user = null,
   instances = [],
   selected = null,
@@ -179,9 +179,9 @@ function summarize(data) {
     .map(([k, v]) => {
       const label = k.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase());
       const val = typeof v === "object" ? (Array.isArray(v) ? v.length + " items" : Object.keys(v).length + " fields") : String(v);
-      return label + ": " + (val.length > 80 ? val.slice(0, 77) + "â€¦" : val);
+      return label + ": " + (val.length > 80 ? val.slice(0, 77) + "…" : val);
     })
-    .join(" Â· ");
+    .join(" · ");
 }
 const uptime = (s) => {
   s = Number(s) || 0;
@@ -224,7 +224,7 @@ function render() {
   const name = user.email.split("@")[0];
   w.innerHTML = view === "overview" ? `<section class="welcome"><div><div class="eyebrow">Overview</div><h1>Welcome back, ${esc(name)}</h1><p>Connect numbers, send messages and manage everything from one place.</p></div><button id="new" class="btn bright">${ico("plus", 18)}New instance</button></section>
   <div class="metrics"><div class="card metric"><span class="ico-box">${ico("phone")}</span><div><div class="value">${instances.length}</div><div class="hint">Instances</div></div></div><div class="card metric"><span class="ico-box ok">${ico("check")}</span><div><div class="value">${connected}</div><div class="hint">Connected</div></div></div><div class="card metric"><span class="ico-box warn">${ico("alert")}</span><div><div class="value">${instances.length - connected}</div><div class="hint">Needs setup</div></div></div></div>
-  <div class="dash-grid"><section class="card"><div class="row card-title"><h3>Your instances</h3><button class="btn mini" data-view-link="instances">View all</button></div>${cards(5)}</section><section class="card"><h3>Quick start</h3><ol class="steps"><li><span>1</span><div><strong>Create an instance</strong><p>Give your WhatsApp connection a name.</p></div></li><li><span>2</span><div><strong>Scan the QR code</strong><p>WhatsApp â†’ Linked devices â†’ Link a device.</p></div></li><li><span>3</span><div><strong>Generate an API key</strong><p>Start sending from your application.</p></div></li></ol><button class="btn" data-view-link="docs">${ico("book", 16)}Read API docs</button></section></div>` : `<div class="top"><div><div class="eyebrow">Workspace</div><h1>WhatsApp instances</h1><p>Connect and manage your numbers.</p></div><button id="new" class="btn primary">${ico("plus", 18)}New instance</button></div><section class="card">${cards()}</section>`;
+  <div class="dash-grid"><section class="card"><div class="row card-title"><h3>Your instances</h3><button class="btn mini" data-view-link="instances">View all</button></div>${cards(5)}</section><section class="card"><h3>Quick start</h3><ol class="steps"><li><span>1</span><div><strong>Create an instance</strong><p>Give your WhatsApp connection a name.</p></div></li><li><span>2</span><div><strong>Scan the QR code</strong><p>WhatsApp → Linked devices → Link a device.</p></div></li><li><span>3</span><div><strong>Generate an API key</strong><p>Start sending from your application.</p></div></li></ol><button class="btn" data-view-link="docs">${ico("book", 16)}Read API docs</button></section></div>` : `<div class="top"><div><div class="eyebrow">Workspace</div><h1>WhatsApp instances</h1><p>Connect and manage your numbers.</p></div><button id="new" class="btn primary">${ico("plus", 18)}New instance</button></div><section class="card">${cards()}</section>`;
   document.querySelectorAll("[data-view-link]").forEach((b) => (b.onclick = () => document.querySelector('.sidebar [data-view="' + b.dataset.viewLink + '"]').click()));
   w.insertAdjacentHTML(
     "beforeend",
@@ -345,7 +345,7 @@ function instancePage() {
     const method0 = localStorage.getItem("zelonLinkMethod") === "pair" ? "pair" : "qr";
     const linkCard = connected
       ? `<div class="state-ok"><span class="ico-box ok big">${ico("check", 28)}</span><h3>WhatsApp is connected</h3><p class="hint">${x.phone ? "Linked number <strong>+" + esc(x.phone) + "</strong> is" : "Your number is"} online and ready to send and receive messages.</p><div class="actions center"><button id="restart" class="btn">Restart connection</button><button id="disconnect" class="btn danger">Log out number</button></div></div>`
-      : `<h3>Link your WhatsApp number</h3><p class="hint">Choose how you want to link this number. You only need one method.</p><div class="alert" id="linkAlert" hidden></div><div class="seg" role="tablist"><button type="button" class="segbtn ${method0 === "qr" ? "active" : ""}" data-method="qr">${ico("qr", 18)}Scan QR code</button><button type="button" class="segbtn ${method0 === "pair" ? "active" : ""}" data-method="pair">${ico("key", 18)}Pairing code</button></div><div id="methodQr" ${method0 === "qr" ? "" : "hidden"}><ol class="how"><li>Open WhatsApp on your phone</li><li>Go to <b>Linked devices â†’ Link a device</b></li><li>Scan the QR code shown below</li></ol><div id="qrbox" class="qrbox"></div><div class="actions center"><button id="connect" class="btn primary">Generate QR code</button></div></div><div id="methodPair" ${method0 === "pair" ? "" : "hidden"}><ol class="how"><li>Enter the number you want to link</li><li>Open WhatsApp â†’ <b>Linked devices â†’ Link a device</b></li><li>Choose <b>Link with phone number instead</b> and type the code</li></ol><form id="pairForm"><label for="pairPhone">WhatsApp number (with country code)</label><input id="pairPhone" name="pairPhone" type="tel" placeholder="+97450000000" required><div class="actions"><button type="submit" class="btn primary">Get pairing code</button></div></form><div id="pairResult"></div></div>`;
+      : `<h3>Link your WhatsApp number</h3><p class="hint">Choose how you want to link this number. You only need one method.</p><div class="alert" id="linkAlert" hidden></div><div class="seg" role="tablist"><button type="button" class="segbtn ${method0 === "qr" ? "active" : ""}" data-method="qr">${ico("qr", 18)}Scan QR code</button><button type="button" class="segbtn ${method0 === "pair" ? "active" : ""}" data-method="pair">${ico("key", 18)}Pairing code</button></div><div id="methodQr" ${method0 === "qr" ? "" : "hidden"}><ol class="how"><li>Open WhatsApp on your phone</li><li>Go to <b>Linked devices → Link a device</b></li><li>Scan the QR code shown below</li></ol><div id="qrbox" class="qrbox"></div><div class="actions center"><button id="connect" class="btn primary">Generate QR code</button></div></div><div id="methodPair" ${method0 === "pair" ? "" : "hidden"}><ol class="how"><li>Enter the number you want to link</li><li>Open WhatsApp → <b>Linked devices → Link a device</b></li><li>Choose <b>Link with phone number instead</b> and type the code</li></ol><form id="pairForm"><label for="pairPhone">WhatsApp number (with country code)</label><input id="pairPhone" name="pairPhone" type="tel" placeholder="+97450000000" required><div class="actions"><button type="submit" class="btn primary">Get pairing code</button></div></form><div id="pairResult"></div></div>`;
     p.innerHTML = `<div class="split"><section class="card link-card">${linkCard}</section><section class="card"><h3>API access</h3><p class="hint">Generate an API key scoped to this instance. It is shown once. Generating a new key revokes the previous one.</p><div class="actions"><button id="key" class="btn">${ico("key", 16)}Generate API key</button></div><div id="keybox"></div><p class="hint">Instance ID</p><div class="key">${esc(x.id)}</div></section></div>`;
     const swap = (m) => {
       localStorage.setItem("zelonLinkMethod", m);
@@ -410,7 +410,7 @@ function instancePage() {
         if (box)
           box.innerHTML = d.qr
             ? `<img class="qr" src="${esc(d.qr)}" alt="WhatsApp linking QR code">`
-            : `<p class="hint center">${["connecting", "reconnecting", "awaiting_qr"].includes(d.status) ? "Connecting to WhatsAppâ€¦ the QR code will appear here." : "Select Generate QR code to start linking."}</p>`;
+            : `<p class="hint center">${["connecting", "reconnecting", "awaiting_qr"].includes(d.status) ? "Connecting to WhatsApp… the QR code will appear here." : "Select Generate QR code to start linking."}</p>`;
         const alert = document.querySelector("#linkAlert");
         if (alert) {
           alert.hidden = !d.error;
@@ -495,7 +495,7 @@ function instancePage() {
           }),
       );
     }
-    p.innerHTML = '<div class="loading">Loading recordsâ€¦</div>';
+    p.innerHTML = '<div class="loading">Loading records…</div>';
     fetchRecords().catch((e) => {
       p.textContent = e.message;
     });
@@ -522,7 +522,7 @@ function instancePage() {
           rows
             .map(
               (r) =>
-                `<p><span class="status ${esc(r.status)}">${esc(r.status)}</span> ${r.attempts} retries Â· ${esc(r.error || r.id)} ${r.status === "failed" ? `<button class="btn" data-hook="${r.id}">Retry</button>` : ""}</p>`,
+                `<p><span class="status ${esc(r.status)}">${esc(r.status)}</span> ${r.attempts} retries · ${esc(r.error || r.id)} ${r.status === "failed" ? `<button class="btn" data-hook="${r.id}">Retry</button>` : ""}</p>`,
             )
             .join("");
         document.querySelectorAll("[data-hook]").forEach(
@@ -544,14 +544,14 @@ function instancePage() {
       .catch((e) => toast(e.message));
   }
   if (tab === "groups") {
-    p.innerHTML = `<section class="card"><div class="row card-title"><h3>Your groups</h3><div class="row"><input id="groupSearch" class="inline-search" placeholder="Search groups" aria-label="Search groups"><button id="groups" class="btn mini">Refresh</button></div></div><div id="groupList"><p class="hint">Loading groupsâ€¦</p></div></section><div class="split spaced"><section class="card"><h3>Check a WhatsApp number</h3><form id="check"><label for="phone">Phone number</label><input name="phone" id="phone" placeholder="+97450000000" required><div class="actions"><button type="submit" class="btn primary">Check number</button></div></form><div id="result"></div></section><section class="card"><h3>Create a group</h3><form id="groupCreate"><label for="groupName">Group name</label><input id="groupName" name="name" required><label for="participants">Participants (one phone number per line)</label><textarea name="participants" id="participants" required></textarea><div class="actions"><button type="submit" class="btn primary">Create group</button></div></form></section></div><section class="card"><h3>Manage group members</h3><form id="members"><label for="groupId">Group</label><input id="groupId" name="groupId" list="groupChoices" placeholder="Pick a group or paste 123456789@g.us" autocomplete="off" required><datalist id="groupChoices"></datalist><label for="memberPhones">Participants (one phone per line)</label><textarea id="memberPhones" name="participants" required></textarea><label for="memberAction">Action</label><select id="memberAction" name="action"><option value="add">Add</option><option value="remove">Remove</option><option value="promote">Promote to admin</option><option value="demote">Remove admin role</option></select><div class="actions"><button class="btn primary" type="submit">Update members</button></div></form></section>`;
+    p.innerHTML = `<section class="card"><div class="row card-title"><h3>Your groups</h3><div class="row"><input id="groupSearch" class="inline-search" placeholder="Search groups" aria-label="Search groups"><button id="groups" class="btn mini">Refresh</button></div></div><div id="groupList"><p class="hint">Loading groups…</p></div></section><div class="split spaced"><section class="card"><h3>Check a WhatsApp number</h3><form id="check"><label for="phone">Phone number</label><input name="phone" id="phone" placeholder="+97450000000" required><div class="actions"><button type="submit" class="btn primary">Check number</button></div></form><div id="result"></div></section><section class="card"><h3>Create a group</h3><form id="groupCreate"><label for="groupName">Group name</label><input id="groupName" name="name" required><label for="participants">Participants (one phone number per line)</label><textarea name="participants" id="participants" required></textarea><div class="actions"><button type="submit" class="btn primary">Create group</button></div></form></section></div><section class="card"><h3>Manage group members</h3><form id="members"><label for="groupId">Group</label><input id="groupId" name="groupId" list="groupChoices" placeholder="Pick a group or paste 123456789@g.us" autocomplete="off" required><datalist id="groupChoices"></datalist><label for="memberPhones">Participants (one phone per line)</label><textarea id="memberPhones" name="participants" required></textarea><label for="memberAction">Action</label><select id="memberAction" name="action"><option value="add">Add</option><option value="remove">Remove</option><option value="promote">Promote to admin</option><option value="demote">Remove admin role</option></select><div class="actions"><button class="btn primary" type="submit">Update members</button></div></form></section>`;
     p.classList.add("stack");
     let groupRows = [];
     const drawGroups = () => {
       const q = document.querySelector("#groupSearch").value.toLowerCase();
       const rows = groupRows.filter((g) => (g.subject || "").toLowerCase().includes(q));
       document.querySelector("#groupList").innerHTML = rows.length
-        ? `<div class="inst-list">${rows.map((g) => `<article class="group-row"><span class="avatar group">${ico("users", 20)}</span><div class="inst-info"><strong>${esc(g.subject || "Unnamed group")}</strong><span class="hint">${g.participants?.length || 0} participants${g.desc ? " Â· " + esc(String(g.desc).slice(0, 60)) : ""}</span></div><button class="btn mini primary" data-open-group="${esc(g.id)}">Open chat</button><button class="btn mini" data-group-info="${esc(g.id)}">Details</button></article>`).join("")}</div>`
+        ? `<div class="inst-list">${rows.map((g) => `<article class="group-row"><span class="avatar group">${ico("users", 20)}</span><div class="inst-info"><strong>${esc(g.subject || "Unnamed group")}</strong><span class="hint">${g.participants?.length || 0} participants${g.desc ? " · " + esc(String(g.desc).slice(0, 60)) : ""}</span></div><button class="btn mini primary" data-open-group="${esc(g.id)}">Open chat</button><button class="btn mini" data-group-info="${esc(g.id)}">Details</button></article>`).join("")}</div>`
         : `<p class="hint">${groupRows.length ? "No groups match your search." : "No groups found for this number."}</p>`;
       document.querySelectorAll("[data-open-group]").forEach((b) => (b.onclick = () => {
         const g = groupRows.find((r) => r.id === b.dataset.openGroup);
@@ -562,7 +562,7 @@ function instancePage() {
       document.querySelectorAll("[data-group-info]").forEach((b) => (b.onclick = async () => {
         try {
           const g = await api(base + "/groups/" + encodeURIComponent(b.dataset.groupInfo) + "/overview");
-          const m = modal(`<h2>${esc(g.subject)}</h2><p class="hint">${g.createdAt ? "Created " + esc(new Date(g.createdAt).toLocaleDateString()) : ""}${g.owner ? " Â· Owner " + esc(g.owner) : ""}</p>${g.description ? `<p>${esc(g.description)}</p>` : ""}<div class="chips"><span class="status ${g.announce ? "queued" : "connected"}">${g.announce ? "Only admins can send" : "Everyone can send"}</span><span class="status ${g.restrict ? "queued" : "connected"}">${g.restrict ? "Only admins edit info" : "Everyone can edit info"}</span></div><h3>${g.participants.length} participants</h3><div class="members">${g.participants.map((u) => `<div class="record row"><div><strong>${esc(u.name || u.phone)}</strong>${u.name ? `<div class="hint">${esc(u.phone)}</div>` : ""}</div>${u.admin ? `<span class="status connected">${u.admin === "superadmin" ? "Owner" : "Admin"}</span>` : ""}</div>`).join("")}</div><div class="actions"><button class="btn" id="closeGroup">Close</button></div>`);
+          const m = modal(`<h2>${esc(g.subject)}</h2><p class="hint">${g.createdAt ? "Created " + esc(new Date(g.createdAt).toLocaleDateString()) : ""}${g.owner ? " · Owner " + esc(g.owner) : ""}</p>${g.description ? `<p>${esc(g.description)}</p>` : ""}<div class="chips"><span class="status ${g.announce ? "queued" : "connected"}">${g.announce ? "Only admins can send" : "Everyone can send"}</span><span class="status ${g.restrict ? "queued" : "connected"}">${g.restrict ? "Only admins edit info" : "Everyone can edit info"}</span></div><h3>${g.participants.length} participants</h3><div class="members">${g.participants.map((u) => `<div class="record row"><div><strong>${esc(u.name || u.phone)}</strong>${u.name ? `<div class="hint">${esc(u.phone)}</div>` : ""}</div>${u.admin ? `<span class="status connected">${u.admin === "superadmin" ? "Owner" : "Admin"}</span>` : ""}</div>`).join("")}</div><div class="actions"><button class="btn" id="closeGroup">Close</button></div>`);
           on("closeGroup", m.close);
         } catch (e) { toast(e.message); }
       }));
@@ -610,7 +610,7 @@ async function boot() {
     landing();
     return;
   }
-  root.innerHTML = '<div class="loading">Opening your workspaceâ€¦</div>';
+  root.innerHTML = '<div class="loading">Opening your workspace…</div>';
   try {
     await load();
   } catch (e) {
