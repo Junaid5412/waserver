@@ -157,6 +157,13 @@ export function gateway(store, encryption, emit, {
               DisconnectReason.connectionReplaced,
               DisconnectReason.forbidden,
             ].includes(code);
+            const isLoggedOut =
+              code === DisconnectReason.loggedOut ||
+              code === DisconnectReason.badSession;
+            if (isLoggedOut) {
+              await store.clearNamespace("auth:" + instance.id).catch(() => {});
+              instance.phone = null;
+            }
             instance.status =
               terminal || stopped.has(instance.id)
                 ? "disconnected"
@@ -180,10 +187,13 @@ export function gateway(store, encryption, emit, {
           }
           const current = await store.get("instances", instance.id);
           if (current) {
+            const isLoggedOut =
+              instance.connectionError?.includes("logged out") ||
+              !instance.phone;
             instance = {
               ...current,
               status: instance.status,
-              phone: instance.phone,
+              phone: isLoggedOut && instance.status === "disconnected" ? null : (instance.phone ?? current.phone),
               connectionError: instance.connectionError,
             };
             await store.patch("instances", instance.id, {
@@ -349,7 +359,7 @@ export function gateway(store, encryption, emit, {
       });
     return s;
   };
-  async function reset(instance) {
+  async function reset(instance, forceClean = false) {
     stopped.add(instance.id);
     clearTimeout(reconnectTimers.get(instance.id));
     reconnectTimers.delete(instance.id);
@@ -360,13 +370,21 @@ export function gateway(store, encryption, emit, {
     if (s) { try { s.end(undefined); } catch {} }
     await new Promise((r) => setTimeout(r, 300));
     let registered = !!s?.authState?.creds?.registered;
-    if (!s) {
+    if (!s && !forceClean) {
       try {
         const r = await store.get("auth:" + instance.id, "creds");
         registered = !!(r && JSON.parse(encryption.open(r.data), BufferJSON.reviver).registered);
       } catch {}
     }
-    if (!registered) await store.clearNamespace("auth:" + instance.id);
+    if (forceClean || !registered) {
+      await store.clearNamespace("auth:" + instance.id).catch(() => {});
+      instance.phone = null;
+      instance.connectionError = null;
+      await store.patch("instances", instance.id, {
+        connectionError: null,
+        phone: null,
+      }).catch(() => {});
+    }
     connecting.delete(instance.id);
     stopped.delete(instance.id);
   }
@@ -379,7 +397,7 @@ export function gateway(store, encryption, emit, {
       if (sockets.get(instance.id)?.authState?.creds?.registered)
         throw Object.assign(Error("This instance is already linked"), { status: 409 });
       // A pairing code only works with the socket that created it, so always start from a clean, unlinked session.
-      await reset(instance);
+      await reset(instance, true);
       await connect(instance);
       const s = sockets.get(instance.id);
       if (!s)

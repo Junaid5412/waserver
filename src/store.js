@@ -349,6 +349,11 @@ export async function openStore() {
       healthy();
       await mutate("DELETE FROM zelon_records WHERE namespace=?", [ns]);
     },
+    async clearInstance(instanceId) {
+      healthy();
+      await mutate("DELETE FROM zelon_records WHERE instance_id=?", [instanceId]);
+      await mutate("DELETE FROM zelon_records WHERE namespace=?", ["auth:" + instanceId]);
+    },
     async delete(ns, key) {
       healthy();
       await mutate(

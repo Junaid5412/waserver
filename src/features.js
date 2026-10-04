@@ -38,7 +38,7 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
   router.use((req, res, next) => {
     if (
       req.apiInstance &&
-      ["/pairing-code", "/archive", "/restart", "/webhook/rotate"].includes(
+      ["/pairing-code", "/archive", "/restart", "/webhook/rotate", "/delete"].includes(
         req.path,
       )
     )
@@ -130,6 +130,26 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
         archived: true,
         activeKeyId: "revoked",
       });
+      res.json({ ok: true });
+    }),
+  );
+  router.delete(
+    "/",
+    wrap(async (req, res) => {
+      try { await wa.disconnect(req.instance, true); } catch {}
+      try { await wa.reset(req.instance, true); } catch {}
+      await store.clearInstance(req.instance.id);
+      await store.delete("instances", req.instance.id);
+      res.json({ ok: true });
+    }),
+  );
+  router.post(
+    "/delete",
+    wrap(async (req, res) => {
+      try { await wa.disconnect(req.instance, true); } catch {}
+      try { await wa.reset(req.instance, true); } catch {}
+      await store.clearInstance(req.instance.id);
+      await store.delete("instances", req.instance.id);
       res.json({ ok: true });
     }),
   );

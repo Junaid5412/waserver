@@ -133,6 +133,7 @@ const ICONS = {
   qr: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v3M14 20h3M20 20v1"/>',
   key: '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M16 7l3 3M14 9l2 2"/>',
   plug: '<path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a6 6 0 0 1-12 0V8z"/>',
+  trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
 };
 const ico = (n, s = 20) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n] || ""}</svg>`;
 function shell() {
@@ -236,7 +237,7 @@ function render() {
       rows
         .map(
           (x) =>
-            `<div class="record row"><strong>${esc(x.name)}</strong><button class="btn" data-restore="${x.id}">Restore</button></div>`,
+            `<div class="record row"><strong>${esc(x.name)}</strong><div style="display:inline-flex;gap:8px;"><button class="btn" data-restore="${x.id}">Restore</button><button class="btn danger" data-delete-archived="${x.id}">${ico("trash", 14)}Delete</button></div></div>`,
         )
         .join("") || "<p>No archived instances.</p>";
     document.querySelectorAll("[data-restore]").forEach(
@@ -252,6 +253,28 @@ function render() {
           } catch (e) {
             toast(e.message);
           }
+        }),
+    );
+    document.querySelectorAll("[data-delete-archived]").forEach(
+      (b) =>
+        (b.onclick = () => {
+          const id = b.dataset.deleteArchived;
+          const inst = rows.find((r) => r.id === id);
+          const m = modal(
+            '<h2>Permanently delete instance?</h2><p>This completely removes <strong>' + esc(inst?.name || "this instance") + '</strong> and all of its records from the server. This action cannot be undone.</p><div class="actions"><button class="btn danger" id="confirmDeleteArchived">Permanently delete</button><button class="btn" id="cancelDeleteArchived">Cancel</button></div>',
+          );
+          on("cancelDeleteArchived", m.close);
+          on("confirmDeleteArchived", async () => {
+            try {
+              await api("/instances/" + id + "/delete", "POST", {});
+              m.close();
+              toast("Instance permanently deleted");
+              await load();
+              document.querySelector("#showArchived")?.click();
+            } catch (e) {
+              toast(e.message);
+            }
+          });
         }),
     );
   });
@@ -323,7 +346,7 @@ function instancePage() {
   ];
   const activeGroup = groups.find(([, , items]) => items.some(([id]) => id === tab)) || groups[0];
   w.innerHTML = `<nav class="crumbs" aria-label="Breadcrumb"><button class="crumb" id="back">${ico("arrowLeft", 16)}Instances</button><span>/</span><strong>${esc(x.name)}</strong></nav>
-  <section class="card inst-head"><div class="inst-id"><span class="inst-avatar">${ico("phone", 24)}</span><div><h1>${esc(x.name)}</h1><div class="inst-meta"><span class="status ${esc(x.status)}">${esc(x.status.replaceAll("_", " "))}</span>${x.phone ? "<span>" + esc(x.phone) + "</span>" : ""}</div></div></div><div class="inst-actions"><button class="btn" id="rename">${ico("edit", 16)}Rename</button><button class="btn danger" id="archiveInstance">${ico("archive", 16)}Archive</button></div></section>
+  <section class="card inst-head"><div class="inst-id"><span class="inst-avatar">${ico("phone", 24)}</span><div><h1>${esc(x.name)}</h1><div class="inst-meta"><span class="status ${esc(x.status)}">${esc(x.status.replaceAll("_", " "))}</span>${x.phone ? "<span>" + esc(x.phone) + "</span>" : ""}</div></div></div><div class="inst-actions"><button class="btn" id="rename">${ico("edit", 16)}Rename</button><button class="btn" id="archiveInstance">${ico("archive", 16)}Archive</button><button class="btn danger" id="deleteInstance">${ico("trash", 16)}Delete</button></div></section>
   <nav class="gtabs" aria-label="Instance sections">${groups.map(([title, icon, items]) => `<button class="gtab ${title === activeGroup[0] ? "active" : ""}" data-tab="${items[0][0]}">${ico(icon, 18)}<span>${title}</span></button>`).join("")}</nav>
   <nav class="ptabs" aria-label="Instance tools">${activeGroup[2].map(([id, label]) => `<button class="ptab ${tab === id ? "active" : ""}" data-tab="${id}" ${tab === id ? 'aria-current="page"' : ""}>${label}</button>`).join("")}</nav>
   <section id="panel" class="panel"></section>`;
@@ -342,6 +365,23 @@ function instancePage() {
       selected = null;
       m.close();
       await load();
+    });
+  });
+  on("deleteInstance", () => {
+    const m = modal(
+      '<h2>Permanently delete instance?</h2><p>This completely removes <strong>' + esc(x.name) + '</strong> and all of its chats, message logs, contacts, and credentials from the server. This action cannot be undone.</p><div class="actions"><button class="btn danger" id="confirmDelete">Permanently delete</button><button class="btn" id="cancelDelete">Cancel</button></div>',
+    );
+    on("cancelDelete", m.close);
+    on("confirmDelete", async () => {
+      try {
+        await api(base + "/delete", "POST", {});
+        selected = null;
+        m.close();
+        toast("Instance permanently deleted");
+        await load();
+      } catch (err) {
+        toast(err.message || "Failed to delete instance");
+      }
     });
   });
   document.querySelectorAll("[data-tab]").forEach(

@@ -563,6 +563,32 @@ app.post(
     res.json({ ok: true });
   }),
 );
+app.post(
+  "/api/instances/:id/delete",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const x = await store.get("instances", req.params.id);
+    if (!x || x.userId !== req.user.id) fail(404, "Instance not found");
+    try { await wa.disconnect(x, true); } catch {}
+    try { await wa.reset(x, true); } catch {}
+    await store.clearInstance(x.id);
+    await store.delete("instances", x.id);
+    res.json({ ok: true });
+  }),
+);
+app.delete(
+  "/api/instances/:id",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const x = await store.get("instances", req.params.id);
+    if (!x || x.userId !== req.user.id) fail(404, "Instance not found");
+    try { await wa.disconnect(x, true); } catch {}
+    try { await wa.reset(x, true); } catch {}
+    await store.clearInstance(x.id);
+    await store.delete("instances", x.id);
+    res.json({ ok: true });
+  }),
+);
 app.get(
   "/api/archived-instances",
   consoleOnly,
@@ -697,7 +723,7 @@ app.post(
   "/api/instances/:id/connect",
   consoleOnly,
   wrap(async (req, res) => {
-    if (req.instance.status !== "connected") await wa.reset(req.instance);
+    if (req.instance.status !== "connected") await wa.reset(req.instance, true);
     await wa.connect(req.instance);
     res.json({ ok: true });
   }),

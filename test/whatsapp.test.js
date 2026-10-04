@@ -9,6 +9,11 @@ function fixture(versionFetcher) {
     async get(ns, key) { return records.get(ns + ":" + key); },
     async set(ns, key, value) { records.set(ns + ":" + key, value); },
     async patch(ns, key, value) { Object.assign(records.get(ns + ":" + key), value); },
+    async clearNamespace(ns) {
+      for (const k of Array.from(records.keys())) {
+        if (k.startsWith(ns + ":")) records.delete(k);
+      }
+    },
   };
   let options;
   const handlers = {};
@@ -16,7 +21,7 @@ function fixture(versionFetcher) {
   const wa = gateway(store, { seal: value => value, open: value => value }, async () => {}, {
     versionFetcher, socketFactory(config) { options = config; return socket; },
   });
-  return { wa, instance, handlers, get options() { return options; } };
+  return { wa, instance, handlers, records, store, get options() { return options; } };
 }
 test("WhatsApp uses fetched protocol, publishes QR and clears it on open", async () => {
   const f = fixture(async () => ({ isLatest: true, version: [2, 3000, 123456] }));
@@ -36,4 +41,26 @@ test("Version fetch failure is visible and does not silently use stale protocol"
   assert.equal(f.options, undefined);
   assert.equal(f.instance.status, "disconnected");
   assert.match(f.instance.connectionError, /outbound HTTPS/);
+});
+test("Logged out disconnect clears auth namespace so new QR can be requested", async () => {
+  const f = fixture(async () => ({ isLatest: true, version: [2, 3000, 123456] }));
+  await f.wa.connect(f.instance);
+  await f.handlers["connection.update"]({ connection: "open" });
+  f.instance.phone = "123456789";
+  f.records.set("auth:" + f.instance.id + ":creds", { data: JSON.stringify({ registered: true }) });
+  
+  // Simulate WhatsApp 401 logged out
+  await f.handlers["connection.update"]({
+    connection: "close",
+    lastDisconnect: { error: { output: { statusCode: 401 } } },
+  });
+  assert.equal(f.instance.status, "disconnected");
+  assert.equal(f.instance.phone, null);
+  assert.match(f.instance.connectionError, /logged out/i);
+  assert.equal(f.records.has("auth:" + f.instance.id + ":creds"), false);
+
+  // Calling reset with forceClean clears any remnant auth and error
+  await f.wa.reset(f.instance, true);
+  assert.equal(f.instance.connectionError, null);
+  await f.wa.shutdown();
 });

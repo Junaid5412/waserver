@@ -193,6 +193,20 @@ test("API authentication, origin protection, instance persistence and scoped key
       ).status,
       403,
     );
+    const toDelete = await (await call("/api/instances", "POST", { name: "To Delete" })).json();
+    assert.equal(
+      (
+        await call(
+          "/api/instances/" + toDelete.id + "/delete",
+          "POST",
+          {},
+          { Authorization: "Bearer " + key.key },
+        )
+      ).status,
+      403,
+    );
+    assert.equal((await call("/api/instances/" + toDelete.id + "/delete", "POST", {})).status, 200);
+    assert.equal((await call("/api/instances/" + toDelete.id + "/delete", "POST", {})).status, 404);
     const oldKey = key.key;
     await call("/api/instances/" + id + "/key", "POST", {});
     assert.equal(
