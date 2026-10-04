@@ -86,7 +86,7 @@
         <div class="cta"><a class="sbtn primary lg" href="/console">Open the console</a><a class="sbtn ghost lg" href="/api-reference.html">Read the API docs</a></div>
         <div class="trust"><span>${I.check}Link by QR or pairing code</span><span>${I.check}Real-time webhooks</span><span>${I.check}Encrypted sessions</span></div></div>
       <div>${codeWindow()}</div></div></section>
-    <div class="stats2"><div class="wrap"><div><strong>30s</strong><span>from sign-in to first message</span></div><div><strong>10+</strong><span>message types supported</span></div><div><strong>3</strong><span>ready-made SDKs</span></div><div><strong>24/7</strong><span>sessions with auto-recovery</span></div></div></div>
+    <div class="stats2"><div class="wrap"><div><strong>30s</strong><span>from sign-in to first message</span></div><div><strong>10+</strong><span>message types supported</span></div><div><strong>100 MB</strong><span>media uploads supported</span></div><div><strong>24/7</strong><span>sessions with auto-recovery</span></div></div></div>
     <section class="blk" id="features"><div class="wrap"><div class="head-c"><div class="kicker">Everything you need</div><h2>One connection. A whole messaging platform.</h2><p class="sub">From a single API call to a full customer-conversation workflow, every building block is already here.</p></div>
       <div class="fgrid">${FEATURES.map(([i, h, p]) => `<article class="fcard"><span class="fico">${I[i]}</span><h3>${esc(h)}</h3><p>${esc(p)}</p></article>`).join("")}</div></div></section>
     <section class="blk dark" id="how"><div class="wrap"><div class="head-c"><div class="kicker">How it works</div><h2>Go live in three steps.</h2><p class="sub">No approvals, no waiting lists. Create a connection, link your number and start sending.</p></div>
@@ -111,14 +111,12 @@
   }
 }
 <span class="tk-c">// X-Zelon-Signature: sha256=…</span></pre></div></div></div></section>
-    <section class="blk"><div class="wrap"><div class="head-c"><div class="kicker">SDKs</div><h2>Use the language you already know.</h2></div>
-      <div class="sdkgrid" style="--x:0"><div class="sdk" style="background:#fff;border-color:#e3e9ef"><b style="color:#0f172a">Node.js</b><p style="color:#5b6b7c">Zero-dependency ES module client.</p><a style="color:#0a8f62" href="/sdk/zelon.mjs">Download zelon.mjs →</a></div><div class="sdk" style="background:#fff;border-color:#e3e9ef"><b style="color:#0f172a">Python</b><p style="color:#5b6b7c">Single-file client built on requests.</p><a style="color:#0a8f62" href="/sdk/zelon.py">Download zelon.py →</a></div><div class="sdk" style="background:#fff;border-color:#e3e9ef"><b style="color:#0f172a">PHP</b><p style="color:#5b6b7c">Drop-in class using cURL.</p><a style="color:#0a8f62" href="/sdk/zelon.php">Download zelon.php →</a></div></div></div></section>
     <section class="blk alt" id="faq"><div class="wrap"><div class="head-c"><div class="kicker">FAQ</div><h2>Good questions, straight answers.</h2></div>
       <div class="faq">${FAQ.map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join("")}</div></div></section>
     <section class="band"><div class="wrap"><h2>Ready to put WhatsApp to work?</h2><p>Open the console, link your number and send your first message today.</p><div class="cta"><a class="sbtn primary lg" href="/console">Get started</a><a class="sbtn ghost lg" href="/api-reference.html">View documentation</a></div></div></section>
     <div class="sfoot"><div class="wrap"><div class="fcols"><div>${brand()}<p>WhatsApp messaging infrastructure for developers and growing teams.</p></div>
       <div><h4>Product</h4><a href="#features">Features</a><a href="#how">How it works</a><a href="/console">Console</a></div>
-      <div><h4>Developers</h4><a href="/api-reference.html">API documentation</a><a href="/openapi.json">OpenAPI spec</a><a href="/sdk/zelon.mjs">Node.js SDK</a><a href="/sdk/zelon.py">Python SDK</a></div>
+      <div><h4>Developers</h4><a href="/api-reference.html">API documentation</a><a href="/openapi.json">OpenAPI spec</a></div>
       <div><h4>Company</h4><a href="#faq">FAQ</a><a href="/console">Sign in</a><a href="/health">Service status</a></div></div>
       <div class="fbot"><span>© ${year} Zelon API. All Rights Reserved.</span><span>Zelon API is an independent product and is not affiliated with WhatsApp or Meta.</span></div></div></div>`;
     const nav = root.querySelector("#snavMenu");
