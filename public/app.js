@@ -116,50 +116,64 @@ async function load() {
   if (selected) selected = instances.find((x) => x.id === selected.id) || null;
   shell();
 }
+const ICONS = {
+  home: '<path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/>',
+  phone: '<rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/>',
+  book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  check: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/>',
+  alert: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  arrowLeft: '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
+  chevron: '<path d="m9 18 6-6-6-6"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  archive: '<rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  chat: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  bolt: '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
+  plug: '<path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a6 6 0 0 1-12 0V8z"/>',
+};
+const ico = (n, s = 20) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n] || ""}</svg>`;
 function shell() {
   clearInterval(timer);
-  const menuButton = (id, title) => `<button data-view="${id}" class="${view === id ? "active" : ""}">${title}</button>`;
-  root.innerHTML = `<div class="shell"><div class="mobilebar"><button id="menuToggle" aria-label="Open navigation" aria-expanded="false" aria-controls="consoleSidebar">☰</button>${brand}<span class="mobile-account">${esc(user.email.split("@")[0])}</span></div><button class="menu-scrim" id="menuScrim" aria-label="Close navigation" hidden></button><aside class="sidebar" id="consoleSidebar">${brand}<div class="sidebar-caption">YOUR WORKSPACE</div><nav aria-label="Console navigation"><details open><summary>Workspace</summary>${menuButton("overview", "Overview")}${menuButton("instances", "WhatsApp instances")}</details><details open><summary>Developer tools</summary>${menuButton("docs", "API documentation")}</details>${user.role === "admin" ? `<details open><summary>Administration</summary>${menuButton("users", "User accounts")}${menuButton("system", "System health")}</details>` : ""}<details open><summary>Preferences</summary>${menuButton("account", "Account & security")}</details><button id="logout">Sign out</button></nav><div class="account"><span class="avatar">${esc(user.email[0].toUpperCase())}</span><div><strong>${esc(user.role === "admin" ? "Administrator" : "Workspace member")}</strong><small>${esc(user.email)}</small></div></div></aside><main class="workspace" id="workspace"></main></div>`;
-  const toggleMenu = (open) => {
-    document.querySelector(".shell").classList.toggle("menu-open", open);
-    document.querySelector("#menuToggle").setAttribute("aria-expanded", String(open));
-    document.querySelector("#menuScrim").hidden = !open;
-    if (open) document.querySelector(".sidebar [data-view]").focus();
-    else document.querySelector("#menuToggle").focus();
-  };
-  on("menuToggle", () => toggleMenu(!document.querySelector(".shell").classList.contains("menu-open")));
-  on("menuScrim", () => toggleMenu(false));
-  root.onkeydown = (event) => {
-    if (event.key === "Escape" && document.querySelector(".shell").classList.contains("menu-open")) toggleMenu(false);
-    if (event.key === "Tab" && document.querySelector(".shell").classList.contains("menu-open")) {
-      const controls = [...document.querySelectorAll(".sidebar summary,.sidebar button")].filter(el => !el.closest("details:not([open])") || el.tagName === "SUMMARY");
-      const first = controls[0], last = controls.at(-1);
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-    }
-  };
+  const items = [
+    ["Main", [["overview", "Overview", "home"], ["instances", "WhatsApp instances", "phone"], ["docs", "API docs", "book"]]],
+    ...(user.role === "admin" ? [["Admin", [["users", "User accounts", "users"], ["system", "System health", "activity"]]]] : []),
+    ["Account", [["account", "Account & security", "shield"]]],
+  ];
+  const navButton = ([id, title, icon]) => `<button class="nav-item ${view === id ? "active" : ""}" data-view="${id}" title="${title}">${ico(icon)}<span class="nav-text">${title}</span></button>`;
+  const short = { overview: "Home", instances: "Numbers", docs: "Docs", users: "Users", system: "Health", account: "Account" };
+  const bottom = items.flatMap(([, list]) => list).map(([id, , icon]) => `<button class="bn-item ${view === id ? "active" : ""}" data-view="${id}">${ico(icon, 22)}<span>${short[id]}</span></button>`).join("");
+  root.innerHTML = `<div class="shell"><aside class="sidebar" id="consoleSidebar">${brand}<nav aria-label="Console navigation">${items.map(([label, list]) => `<div class="nav-group"><div class="nav-label">${label}</div>${list.map(navButton).join("")}</div>`).join("")}</nav><button class="nav-item signout" id="logout" title="Sign out">${ico("logout")}<span class="nav-text">Sign out</span></button></aside><div class="main-col"><header class="topbar">${brand}<div class="topbar-title">Developer console</div><div class="topbar-user"><span class="avatar">${esc(user.email[0].toUpperCase())}</span><div class="who"><strong>${esc(user.role === "admin" ? "Administrator" : "Workspace member")}</strong><small>${esc(user.email)}</small></div><button class="icon-btn" id="logout2" aria-label="Sign out" title="Sign out">${ico("logout", 18)}</button></div></header><main class="workspace" id="workspace"></main></div><nav class="bottomnav" aria-label="Console navigation">${bottom}</nav></div>`;
+  root.onkeydown = null;
   document.querySelectorAll("[data-view]").forEach(
     (b) =>
       (b.onclick = () => {
-        toggleMenu(false);
         view = b.dataset.view;
         selected = null;
         render();
         document
           .querySelectorAll("[data-view]")
-          .forEach((x) => x.classList.toggle("active", x === b));
+          .forEach((x) => x.classList.toggle("active", x.dataset.view === view));
+        window.scrollTo({ top: 0 });
       }),
   );
-  on("logout", async () => {
+  const out = async () => {
     await api("/logout", "POST");
     login();
-  });
+  };
+  on("logout", out);
+  on("logout2", out);
   render();
 }
-function cards() {
-  return instances.length
-    ? `<div class="instancegrid">${instances.map((x) => `<article class="card"><div class="row"><h3>${esc(x.name)}</h3><span class="status ${esc(x.status)}">${esc(x.status.replaceAll("_", " "))}</span></div><p class="hint">${esc(x.phone || "No number linked yet")}</p><p class="hint">${esc(x.id)}</p><button class="btn" data-instance="${x.id}">Manage instance</button></article>`).join("")}</div>`
-    : `<div class="empty"><h2>Your first connection starts here.</h2><p>Create an instance, then link your WhatsApp number.</p><button id="first" class="btn primary">Create instance</button></div>`;
+function cards(limit) {
+  const list = limit ? instances.slice(0, limit) : instances;
+  return list.length
+    ? `<div class="inst-list">${list.map((x) => `<article class="inst-row"><span class="inst-avatar">${ico("phone", 20)}</span><div class="inst-info"><strong>${esc(x.name)}</strong><span class="hint">${esc(x.phone || "No number linked yet")}</span></div><span class="status ${esc(x.status)}">${esc(x.status.replaceAll("_", " "))}</span><button class="btn" data-instance="${x.id}">Manage${ico("chevron", 16)}</button></article>`).join("")}</div>`
+    : `<div class="empty"><span class="ico-box big">${ico("phone", 28)}</span><h2>Your first connection starts here.</h2><p>Create an instance, then link your WhatsApp number.</p><button id="first" class="btn primary">${ico("plus", 18)}Create instance</button></div>`;
 }
 function render() {
   clearInterval(timer);
@@ -198,7 +212,12 @@ function render() {
     accountPage();
     return;
   }
-  w.innerHTML = `<div class="top"><div><div class="eyebrow">Your messaging workspace</div><h1>${view === "overview" ? "Overview" : "WhatsApp instances"}</h1><p>Connect and manage your numbers.</p></div><button id="new" class="btn primary">+ New instance</button></div>${view === "overview" ? `<div class="metrics"><div class="card metric"><div class="hint">Instances</div><div class="value">${instances.length}</div></div><div class="card metric"><div class="hint">Connected</div><div class="value">${instances.filter((x) => x.status === "connected").length}</div></div><div class="card metric"><div class="hint">Needs setup</div><div class="value">${instances.filter((x) => x.status !== "connected").length}</div></div></div>` : ""}${cards()}`;
+  const connected = instances.filter((x) => x.status === "connected").length;
+  const name = user.email.split("@")[0];
+  w.innerHTML = view === "overview" ? `<section class="welcome"><div><div class="eyebrow">Overview</div><h1>Welcome back, ${esc(name)}</h1><p>Connect numbers, send messages and manage everything from one place.</p></div><button id="new" class="btn bright">${ico("plus", 18)}New instance</button></section>
+  <div class="metrics"><div class="card metric"><span class="ico-box">${ico("phone")}</span><div><div class="value">${instances.length}</div><div class="hint">Instances</div></div></div><div class="card metric"><span class="ico-box ok">${ico("check")}</span><div><div class="value">${connected}</div><div class="hint">Connected</div></div></div><div class="card metric"><span class="ico-box warn">${ico("alert")}</span><div><div class="value">${instances.length - connected}</div><div class="hint">Needs setup</div></div></div></div>
+  <div class="dash-grid"><section class="card"><div class="row card-title"><h3>Your instances</h3><button class="btn mini" data-view-link="instances">View all</button></div>${cards(5)}</section><section class="card"><h3>Quick start</h3><ol class="steps"><li><span>1</span><div><strong>Create an instance</strong><p>Give your WhatsApp connection a name.</p></div></li><li><span>2</span><div><strong>Scan the QR code</strong><p>WhatsApp → Linked devices → Link a device.</p></div></li><li><span>3</span><div><strong>Generate an API key</strong><p>Start sending from your application.</p></div></li></ol><button class="btn" data-view-link="docs">${ico("book", 16)}Read API docs</button></section></div>` : `<div class="top"><div><div class="eyebrow">Workspace</div><h1>WhatsApp instances</h1><p>Connect and manage your numbers.</p></div><button id="new" class="btn primary">${ico("plus", 18)}New instance</button></div><section class="card">${cards()}</section>`;
+  document.querySelectorAll("[data-view-link]").forEach((b) => (b.onclick = () => document.querySelector('.sidebar [data-view="' + b.dataset.viewLink + '"]').click()));
   w.insertAdjacentHTML(
     "beforeend",
     '<div class="actions"><button class="btn" id="showArchived">Archived instances</button></div><div id="archivedRows"></div>',
@@ -259,13 +278,19 @@ function instancePage() {
   const x = selected,
     base = "/instances/" + x.id,
     w = document.querySelector("#workspace");
-  w.innerHTML = `<div class="top"><div><button class="btn" id="back">All instances</button><h1>${esc(x.name)}</h1><button class="btn" id="rename">Rename</button><button class="btn danger" id="archiveInstance">Archive</button><p><span class="status ${esc(x.status)}">${esc(x.status.replaceAll("_", " "))}</span> ${esc(x.phone || "")}</p></div></div><nav class="tabs" aria-label="Instance tools">${[
-    ["Connect", [["connection", "Connection"], ["tools", "Profile & settings"]]],
-    ["Messaging", [["inbox", "Chats"], ["send", "Compose message"], ["history", "Message history"], ["contacts", "Contacts"], ["media", "Media library"], ["statuses", "Statuses"]]],
-    ["Automation", [["campaigns", "Campaigns"], ["automation", "Auto replies"], ["analytics", "Analytics"]]],
-    ["Integration", [["webhooks", "Webhooks"], ["events", "Incoming events"]]],
-    ["Groups", [["groups", "Groups & numbers"], ["group-tools", "Group settings"]]],
-  ].map(([title, items]) => `<details class="tool-menu" ${items.some(([id]) => id === tab) ? "open" : ""}><summary>${title}</summary><div>${items.map(([id, label]) => `<button class="btn ${tab === id ? "active" : ""}" data-tab="${id}" ${tab === id ? 'aria-current="page"' : ""}>${label}</button>`).join("")}</div></details>`).join("")}</nav><section id="panel" class="panel"></section>`;
+  const groups = [
+    ["Connect", "link", [["connection", "Connection"], ["tools", "Profile & settings"]]],
+    ["Messaging", "chat", [["inbox", "Chats"], ["send", "Compose message"], ["history", "Message history"], ["contacts", "Contacts"], ["media", "Media library"], ["statuses", "Statuses"]]],
+    ["Automation", "bolt", [["campaigns", "Campaigns"], ["automation", "Auto replies"], ["analytics", "Analytics"]]],
+    ["Integration", "plug", [["webhooks", "Webhooks"], ["events", "Incoming events"]]],
+    ["Groups", "users", [["groups", "Groups & numbers"], ["group-tools", "Group settings"]]],
+  ];
+  const activeGroup = groups.find(([, , items]) => items.some(([id]) => id === tab)) || groups[0];
+  w.innerHTML = `<nav class="crumbs" aria-label="Breadcrumb"><button class="crumb" id="back">${ico("arrowLeft", 16)}Instances</button><span>/</span><strong>${esc(x.name)}</strong></nav>
+  <section class="card inst-head"><div class="inst-id"><span class="inst-avatar">${ico("phone", 24)}</span><div><h1>${esc(x.name)}</h1><div class="inst-meta"><span class="status ${esc(x.status)}">${esc(x.status.replaceAll("_", " "))}</span>${x.phone ? "<span>" + esc(x.phone) + "</span>" : ""}</div></div></div><div class="inst-actions"><button class="btn" id="rename">${ico("edit", 16)}Rename</button><button class="btn danger" id="archiveInstance">${ico("archive", 16)}Archive</button></div></section>
+  <nav class="gtabs" aria-label="Instance sections">${groups.map(([title, icon, items]) => `<button class="gtab ${title === activeGroup[0] ? "active" : ""}" data-tab="${items[0][0]}">${ico(icon, 18)}<span>${title}</span></button>`).join("")}</nav>
+  <nav class="ptabs" aria-label="Instance tools">${activeGroup[2].map(([id, label]) => `<button class="ptab ${tab === id ? "active" : ""}" data-tab="${id}" ${tab === id ? 'aria-current="page"' : ""}>${label}</button>`).join("")}</nav>
+  <section id="panel" class="panel"></section>`;
   on("back", () => {
     selected = null;
     render();
