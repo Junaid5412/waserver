@@ -467,4 +467,178 @@ test("receipt handles secretEncryptedMessage update for counterparty message", a
   assert.equal(dto.originalText, "Receipt original message");
 });
 
+test("persist handles incoming counterparty edit where messageSecret is unpacked as a base64 string", async () => {
+  const store = mockStore();
+  const inbox = createInbox(store, enc);
+  const instance = { id: "inst-1", userId: "user-1" };
+  const targetId = "MSG_BASE64_SECRET";
+  const counterpartyJid = "923001234567@s.whatsapp.net";
+  const rawSecret = crypto.randomBytes(32);
+  const base64Secret = rawSecret.toString("base64");
+
+  // Initial message stored with messageSecret as base64 string (typical when deserialized from JSON/store)
+  const initialMsg = {
+    key: { id: targetId, remoteJid: counterpartyJid, fromMe: false },
+    message: {
+      conversation: "Original base64 text",
+      messageContextInfo: { messageSecret: base64Secret },
+    },
+    messageTimestamp: Math.floor(Date.now() / 1000),
+  };
+  await inbox.persist(instance, initialMsg);
+
+  // Incoming edit encrypted with raw 32-byte secret
+  const sign = Buffer.concat([
+    Buffer.from(targetId),
+    Buffer.from(counterpartyJid),
+    Buffer.from(counterpartyJid),
+    Buffer.from("Message Edit"),
+    new Uint8Array([1]),
+  ]);
+  const key = hmacSign(rawSecret, new Uint8Array(32));
+  const encKey = hmacSign(sign, key);
+  const iv = crypto.randomBytes(12);
+  const editedProto = proto.Message.encode({ conversation: "Decrypted with base64 secret!" }).finish();
+  const encPayload = aesEncryptGCM(editedProto, encKey, iv, Buffer.from(""));
+
+  const editMsgStanza = {
+    key: { id: "STANZA_BASE64_EDIT", remoteJid: counterpartyJid, fromMe: false },
+    message: {
+      secretEncryptedMessage: {
+        targetMessageKey: { id: targetId, remoteJid: counterpartyJid, fromMe: false },
+        encPayload,
+        encIv: iv,
+      },
+    },
+    messageTimestamp: Math.floor(Date.now() / 1000) + 2,
+  };
+
+  const persistResult = await inbox.persist(instance, editMsgStanza);
+  assert.equal(persistResult, false);
+
+  const rows = await store.query("inbox", { instanceId: instance.id, lookupKey: targetId });
+  assert.equal(rows.length, 1);
+  const dto = inbox.dto(rows[0]);
+  assert.equal(dto.edited, true);
+  assert.equal(dto.text, "Decrypted with base64 secret!");
+  assert.equal(dto.originalText, "Original base64 text");
+});
+
+test("persist handles incoming counterparty edit across PN and LID JID variations", async () => {
+  const store = mockStore();
+  const inbox = createInbox(store, enc);
+  const instance = { id: "inst-1", userId: "user-1" };
+  const targetId = "MSG_PN_LID_1";
+  const pnJid = "923009999999@s.whatsapp.net";
+  const lidJid = "555555555555555@lid";
+  const secret = crypto.randomBytes(32);
+
+  // Original was received with PN
+  const initialMsg = {
+    key: { id: targetId, remoteJid: pnJid, fromMe: false },
+    message: {
+      conversation: "Before cross-JID edit",
+      messageContextInfo: { messageSecret: secret },
+    },
+    messageTimestamp: Math.floor(Date.now() / 1000),
+  };
+  await inbox.persist(instance, initialMsg);
+
+  // WhatsApp derives HKDF with origSender = PN, modSender = LID
+  const sign = Buffer.concat([
+    Buffer.from(targetId),
+    Buffer.from(pnJid),
+    Buffer.from(lidJid),
+    Buffer.from("Message Edit"),
+    new Uint8Array([1]),
+  ]);
+  const key = hmacSign(secret, new Uint8Array(32));
+  const encKey = hmacSign(sign, key);
+  const iv = crypto.randomBytes(12);
+  const editedProto = proto.Message.encode({ conversation: "Cross-JID edit succeeded!" }).finish();
+  const encPayload = aesEncryptGCM(editedProto, encKey, iv, Buffer.from(""));
+
+  // Edit arrives from LID
+  const editMsgStanza = {
+    key: { id: "STANZA_LID_EDIT", remoteJid: lidJid, fromMe: false },
+    message: {
+      secretEncryptedMessage: {
+        targetMessageKey: { id: targetId, remoteJid: pnJid, fromMe: false },
+        encPayload,
+        encIv: iv,
+      },
+    },
+    messageTimestamp: Math.floor(Date.now() / 1000) + 3,
+  };
+
+  const persistResult = await inbox.persist(instance, editMsgStanza);
+  assert.equal(persistResult, false);
+
+  const rows = await store.query("inbox", { instanceId: instance.id, lookupKey: targetId });
+  assert.equal(rows.length, 1);
+  const dto = inbox.dto(rows[0]);
+  assert.equal(dto.edited, true);
+  assert.equal(dto.text, "Cross-JID edit succeeded!");
+  assert.equal(dto.originalText, "Before cross-JID edit");
+});
+
+test("persist handles incoming edit wrapped in deviceSentMessage", async () => {
+  const store = mockStore();
+  const inbox = createInbox(store, enc);
+  const instance = { id: "inst-1", userId: "user-1" };
+  const targetId = "MSG_WRAPPED_DEVICE_1";
+  const counterpartyJid = "11223344@s.whatsapp.net";
+  const secret = crypto.randomBytes(32);
+
+  const initialMsg = {
+    key: { id: targetId, remoteJid: counterpartyJid, fromMe: false },
+    message: {
+      conversation: "Original text before device edit",
+      messageContextInfo: { messageSecret: secret },
+    },
+    messageTimestamp: Math.floor(Date.now() / 1000),
+  };
+  await inbox.persist(instance, initialMsg);
+
+  const sign = Buffer.concat([
+    Buffer.from(targetId),
+    Buffer.from(counterpartyJid),
+    Buffer.from(counterpartyJid),
+    Buffer.from("Message Edit"),
+    new Uint8Array([1]),
+  ]);
+  const key = hmacSign(secret, new Uint8Array(32));
+  const encKey = hmacSign(sign, key);
+  const iv = crypto.randomBytes(12);
+  const editedProto = proto.Message.encode({ conversation: "Edited from another device!" }).finish();
+  const encPayload = aesEncryptGCM(editedProto, encKey, iv, Buffer.from(""));
+
+  const editMsgStanza = {
+    key: { id: "STANZA_DEVICE_EDIT_1", remoteJid: counterpartyJid, fromMe: false },
+    message: {
+      deviceSentMessage: {
+        message: {
+          secretEncryptedMessage: {
+            targetMessageKey: { id: targetId, remoteJid: counterpartyJid, fromMe: false },
+            encPayload,
+            encIv: iv,
+          },
+        },
+      },
+    },
+    messageTimestamp: Math.floor(Date.now() / 1000) + 4,
+  };
+
+  const persistResult = await inbox.persist(instance, editMsgStanza);
+  assert.equal(persistResult, false);
+
+  const rows = await store.query("inbox", { instanceId: instance.id, lookupKey: targetId });
+  assert.equal(rows.length, 1);
+  const dto = inbox.dto(rows[0]);
+  assert.equal(dto.edited, true);
+  assert.equal(dto.text, "Edited from another device!");
+  assert.equal(dto.originalText, "Original text before device edit");
+});
+
+
 

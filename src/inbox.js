@@ -74,27 +74,72 @@ export function unwrapEdited(m) {
   }
   return cur || m;
 }
+export function unwrapMessage(msg) {
+  let cur = msg;
+  for (let i = 0; i < 5 && cur; i++) {
+    if (cur.deviceSentMessage?.message) { cur = cur.deviceSentMessage.message; continue; }
+    if (cur.ephemeralMessage?.message) { cur = cur.ephemeralMessage.message; continue; }
+    if (cur.viewOnceMessage?.message) { cur = cur.viewOnceMessage.message; continue; }
+    if (cur.viewOnceMessageV2?.message) { cur = cur.viewOnceMessageV2.message; continue; }
+    if (cur.viewOnceMessageV2Extension?.message) { cur = cur.viewOnceMessageV2Extension.message; continue; }
+    if (cur.documentWithCaptionMessage?.message) { cur = cur.documentWithCaptionMessage.message; continue; }
+    break;
+  }
+  return cur || msg;
+}
+export function extractMessageSecret(obj) {
+  if (!obj || typeof obj !== "object") return null;
+  if (obj.messageSecret) return obj.messageSecret;
+  if (obj.messageContextInfo?.messageSecret) return obj.messageContextInfo.messageSecret;
+  if (obj.message) {
+    const s = extractMessageSecret(obj.message);
+    if (s) return s;
+  }
+  for (const k of Object.keys(obj)) {
+    const val = obj[k];
+    if (val && typeof val === "object") {
+      if (val.messageSecret) return val.messageSecret;
+      if (val.contextInfo?.messageSecret) return val.contextInfo.messageSecret;
+    }
+  }
+  return null;
+}
 function toBuf(val) {
   if (!val) return Buffer.alloc(0);
   if (Buffer.isBuffer(val)) return val;
   if (val instanceof Uint8Array) return Buffer.from(val.buffer, val.byteOffset, val.byteLength);
   if (val?.type === "Buffer" && Array.isArray(val?.data)) return Buffer.from(val.data);
   if (Array.isArray(val)) return Buffer.from(val);
+  if (typeof val === "string") {
+    const trimmed = val.trim();
+    if (/^[0-9a-fA-F]+$/.test(trimmed) && trimmed.length % 2 === 0 && trimmed.length >= 24) {
+      return Buffer.from(trimmed, "hex");
+    }
+    if (/^[A-Za-z0-9+/=_-]+$/.test(trimmed) && (trimmed.length % 4 === 0 || trimmed.includes("=") || trimmed.length >= 16)) {
+      try {
+        const decoded = Buffer.from(trimmed, "base64");
+        if (decoded.length > 0) return decoded;
+      } catch {}
+    }
+    return Buffer.from(val, "utf8");
+  }
   return Buffer.from(val);
 }
 export function decryptSecretEncryptedMessage(secretEnc, targetInfo) {
-  if (!secretEnc?.encPayload || !secretEnc?.encIv || !targetInfo?.secret || !targetInfo?.id) return null;
+  const encPayload = toBuf(secretEnc?.encPayload || secretEnc?.encPayloadBytes || secretEnc?.payload || secretEnc?.ciphertext);
+  const encIv = toBuf(secretEnc?.encIv || secretEnc?.encIV || secretEnc?.iv);
+  const secret = toBuf(targetInfo?.secret);
+  const id = String(targetInfo?.id || "");
+  if (!encPayload.length || !encIv.length || !secret.length || !id) return null;
   const toBinary = (txt) => (Buffer.isBuffer(txt) ? txt : Buffer.from(txt || ""));
-  const encPayload = toBuf(secretEnc.encPayload);
-  const encIv = toBuf(secretEnc.encIv);
-  const secret = toBuf(targetInfo.secret);
-  const id = String(targetInfo.id);
 
   const candidates = [
+    ...(Array.isArray(targetInfo.candidates) ? targetInfo.candidates : []),
+    targetInfo.origSender,
     targetInfo.sender,
     targetInfo.remoteJid,
     targetInfo.participant,
-    targetInfo.origSender,
+    targetInfo.targetSender,
   ].filter(Boolean);
 
   const jidVariants = new Set();
@@ -106,26 +151,39 @@ export function decryptSecretEncryptedMessage(secretEnc, targetInfo) {
     if (user) {
       jidVariants.add(user);
       jidVariants.add(`${user}@s.whatsapp.net`);
+      jidVariants.add(`${user}@lid`);
     }
   }
 
-  for (const senderJid of jidVariants) {
-    try {
-      const senderBuf = toBinary(senderJid);
-      const sign = Buffer.concat([
-        toBinary(id),
-        senderBuf,
-        senderBuf,
-        toBinary("Message Edit"),
-        new Uint8Array([1]),
-      ]);
-      const key = hmacSign(secret, new Uint8Array(32));
-      const decKey = hmacSign(sign, key);
-      const decrypted = aesDecryptGCM(encPayload, decKey, encIv, Buffer.from(""));
-      if (decrypted) {
-        return proto.Message.decode(decrypted);
+  const editTypes = ["Message Edit", "Event Edit", "Poll Edit"];
+  for (const origJid of jidVariants) {
+    for (const modJid of jidVariants) {
+      for (const editType of editTypes) {
+        try {
+          const sign = Buffer.concat([
+            toBinary(id),
+            toBinary(origJid),
+            toBinary(modJid),
+            toBinary(editType),
+            new Uint8Array([1]),
+          ]);
+          const key = hmacSign(secret, new Uint8Array(32));
+          const decKey = hmacSign(sign, key);
+          let decrypted = null;
+          try {
+            decrypted = aesDecryptGCM(encPayload, decKey, encIv, Buffer.from(""));
+          } catch {
+            try {
+              const aad = toBinary(`${id}\u0000${modJid}`);
+              decrypted = aesDecryptGCM(encPayload, decKey, encIv, aad);
+            } catch {}
+          }
+          if (decrypted) {
+            return proto.Message.decode(decrypted);
+          }
+        } catch {}
       }
-    } catch {}
+    }
   }
   return null;
 }
@@ -295,22 +353,34 @@ export function createInbox(store, enc, notify = () => {}) {
   }
   async function persist(instance, m, { notify = false } = {}) {
     if (!m.key?.id || !m.key.remoteJid || !m.message) return false;
-    const raw = normalizeMessageContent(m.message) || {},
+    const unwrappedMsg = unwrapMessage(m.message);
+    const raw = normalizeMessageContent(unwrappedMsg) || unwrappedMsg || {},
       rawKind = getContentType(raw);
-    const sem = raw.secretEncryptedMessage || m.message?.secretEncryptedMessage;
+    const sem = raw.secretEncryptedMessage ||
+                m.message?.secretEncryptedMessage ||
+                unwrappedMsg?.secretEncryptedMessage;
     if (sem) {
       const targetId = sem.targetMessageKey?.id;
       if (targetId) {
         const orig = await load(instance.id, targetId);
         const origRows = orig ? [] : await rowsFor(instance, targetId);
         const origData = orig || (origRows[0]?.data ? unpack(enc, origRows[0].data) : null);
-        const secret = origData?.message?.messageContextInfo?.messageSecret ||
-                       origData?.messageContextInfo?.messageSecret ||
-                       origData?.message?.extendedTextMessage?.contextInfo?.messageSecret;
+        const secret = extractMessageSecret(origData) ||
+                       extractMessageSecret(origRows[0]) ||
+                       extractMessageSecret(m);
         if (secret) {
-          const sender = sem.targetMessageKey?.participant || sem.targetMessageKey?.remoteJid || m.key.participant || m.key.remoteJid;
-          const origSender = origData?.key?.participant || origData?.key?.remoteJid || origRows[0]?.chatId;
-          const decrypted = decryptSecretEncryptedMessage(sem, { secret, id: targetId, sender, origSender });
+          const candidates = [
+            sem.targetMessageKey?.participant,
+            sem.targetMessageKey?.remoteJid,
+            m.key.participant,
+            m.key.remoteJid,
+            m.key.participantAlt,
+            m.key.remoteJidAlt,
+            origData?.key?.participant,
+            origData?.key?.remoteJid,
+            origRows[0]?.chatId,
+          ].filter(Boolean);
+          const decrypted = decryptSecretEncryptedMessage(sem, { secret, id: targetId, candidates });
           if (decrypted) {
             await applyEdit(instance, targetId, decrypted);
             return false;
@@ -469,35 +539,61 @@ export function createInbox(store, enc, notify = () => {}) {
         await store.patch("receipts", receiptId, apply);
       }
       if (update.messageStubType === WAMessageStubType.REVOKE) await markDeleted(instance, key.id);
-      if (update.message?.secretEncryptedMessage) {
-        const sem = update.message.secretEncryptedMessage;
+      const unwrappedUpdateMsg = unwrapMessage(update.message || update.update?.message);
+      const sem = unwrappedUpdateMsg?.secretEncryptedMessage ||
+                  update.message?.secretEncryptedMessage ||
+                  update.update?.message?.secretEncryptedMessage;
+      let editHandled = false;
+      if (sem) {
         const targetId = sem.targetMessageKey?.id || key.id;
         const orig = await load(instance.id, targetId);
         const origRows = orig ? [] : await rowsFor(instance, targetId);
         const origData = orig || (origRows[0]?.data ? unpack(enc, origRows[0].data) : null);
-        const secret = origData?.message?.messageContextInfo?.messageSecret ||
-                       origData?.messageContextInfo?.messageSecret ||
-                       origData?.message?.extendedTextMessage?.contextInfo?.messageSecret;
+        const secret = extractMessageSecret(origData) ||
+                       extractMessageSecret(origRows[0]);
         if (secret) {
-          const sender = sem.targetMessageKey?.participant || sem.targetMessageKey?.remoteJid || key.participant || key.remoteJid;
-          const origSender = origData?.key?.participant || origData?.key?.remoteJid || origRows[0]?.chatId;
-          const decrypted = decryptSecretEncryptedMessage(sem, { secret, id: targetId, sender, origSender });
-          if (decrypted) await applyEdit(instance, targetId, decrypted);
+          const candidates = [
+            sem.targetMessageKey?.participant,
+            sem.targetMessageKey?.remoteJid,
+            key.participant,
+            key.remoteJid,
+            key.participantAlt,
+            key.remoteJidAlt,
+            origData?.key?.participant,
+            origData?.key?.remoteJid,
+            origRows[0]?.chatId,
+          ].filter(Boolean);
+          const decrypted = decryptSecretEncryptedMessage(sem, { secret, id: targetId, candidates });
+          if (decrypted) {
+            await applyEdit(instance, targetId, decrypted);
+            editHandled = true;
+          }
         }
       }
-      const isEdit = update.messageStubType === WAMessageStubType.MESSAGE_EDIT ||
-                     update.messageStubType === 14 ||
+      const isEdit = (update.messageStubType && (update.messageStubType === 14 || update.messageStubType === "MESSAGE_EDIT")) ||
                      !!update.message?.editedMessage ||
+                     !!update.update?.message?.editedMessage ||
+                     !!unwrappedUpdateMsg?.editedMessage ||
                      !!update.message?.protocolMessage?.editedMessage ||
-                     (update.message?.protocolMessage?.type === 14 || update.message?.protocolMessage?.type === "MESSAGE_EDIT");
-      if (isEdit) {
-        const targetId = update.message?.protocolMessage?.key?.id || key.id;
+                     !!unwrappedUpdateMsg?.protocolMessage?.editedMessage ||
+                     (update.message?.protocolMessage?.type === 14 || update.message?.protocolMessage?.type === "MESSAGE_EDIT") ||
+                     (unwrappedUpdateMsg?.protocolMessage?.type === 14 || unwrappedUpdateMsg?.protocolMessage?.type === "MESSAGE_EDIT");
+      if (!editHandled && isEdit) {
+        const targetId = update.message?.protocolMessage?.key?.id ||
+                         unwrappedUpdateMsg?.protocolMessage?.key?.id ||
+                         sem?.targetMessageKey?.id ||
+                         key.id;
         const payload = update.message?.editedMessage?.message ||
                         update.message?.editedMessage ||
+                        unwrappedUpdateMsg?.editedMessage?.message ||
+                        unwrappedUpdateMsg?.editedMessage ||
                         update.message?.protocolMessage?.editedMessage ||
+                        unwrappedUpdateMsg?.protocolMessage?.editedMessage ||
+                        unwrappedUpdateMsg ||
                         update.message;
         await applyEdit(instance, targetId, payload);
-      } else if (update.message) {
+        editHandled = true;
+      } else if (!editHandled && update.message) {
         const info = describeMessage(update.message);
         if (entries.length) {
           for (const row of entries) {

@@ -224,20 +224,22 @@ export function gateway(store, encryption, emit, {
               : true;
             if (inbox && fresh && automation)
               await automation(instance, m, { notify: type === "notify" });
-            await emit(instance, "message", {
-              id: m.key.id,
-              chatId: m.key.remoteJid,
-              fromMe: m.key.fromMe,
-              type,
-              text:
-                m.message.conversation ||
-                m.message.extendedTextMessage?.text ||
-                m.message.imageMessage?.caption ||
-                m.message.videoMessage?.caption ||
-                m.message.documentMessage?.caption ||
-                "",
-              message: m.message,
-            });
+            if (fresh) {
+              await emit(instance, "message", {
+                id: m.key.id,
+                chatId: m.key.remoteJid,
+                fromMe: m.key.fromMe,
+                type,
+                text:
+                  m.message.conversation ||
+                  m.message.extendedTextMessage?.text ||
+                  m.message.imageMessage?.caption ||
+                  m.message.videoMessage?.caption ||
+                  m.message.documentMessage?.caption ||
+                  "",
+                message: m.message,
+              });
+            }
           } catch {
             logger.error("Message persistence failed");
           }
