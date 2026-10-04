@@ -640,7 +640,8 @@ const wa = gateway(
   store,
   enc,
   async (instance, type, data) => {
-    if (type === "presence" || type === "connection") bus.publish(instance.id, { type, data });
+    if (["presence", "connection", "message", "receipt", "group", "group-participants", "history"].includes(type))
+      bus.publish(instance.id, { type, data });
     const current = await store.get("instances", instance.id);
     if (!current) return;
     instance = { ...instance, webhookUrl: current.webhookUrl };

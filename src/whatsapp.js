@@ -4,6 +4,7 @@ import makeWASocket, {
   proto,
   DisconnectReason,
   fetchLatestWaWebVersion,
+  makeCacheableSignalKeyStore,
 } from "@whiskeysockets/baileys";
 import pino from "pino";
 import QRCode from "qrcode";
@@ -63,36 +64,54 @@ export function gateway(store, encryption, emit, {
         logger,
         auth: {
           creds,
-          keys: {
+          keys: makeCacheableSignalKeyStore({
             async get(type, ids) {
               const result = {};
-              for (const id of ids) {
-                let v = await read(type + "-" + id);
-                if (type === "app-state-sync-key" && v)
-                  v = proto.Message.AppStateSyncKeyData.fromObject(v);
-                result[id] = v;
-              }
+              await Promise.all(
+                ids.map(async (id) => {
+                  let v = await read(type + "-" + id);
+                  if (type === "app-state-sync-key" && v)
+                    v = proto.Message.AppStateSyncKeyData.fromObject(v);
+                  result[id] = v;
+                }),
+              );
               return result;
             },
             async set(data) {
+              const tasks = [];
               for (const type in data)
                 for (const id in data[type]) {
                   const key = type + "-" + id;
-                  if (data[type][id]) await write(key, data[type][id]);
-                  else await store.delete("auth:" + instance.id, key);
+                  if (data[type][id]) tasks.push(write(key, data[type][id]));
+                  else tasks.push(store.delete("auth:" + instance.id, key));
                 }
+              await Promise.all(tasks);
             },
-          },
+          }, logger),
         },
         getMessage: async (key) => {
-          const row = await store.get("wa-message:" + instance.id, key.id);
-          if (!row) return undefined;
-          const parsed = JSON.parse(
-            encryption.open(row.data),
-            BufferJSON.reviver,
-          );
-          return parsed.key ? parsed.message : parsed;
+          let row = await store.get("wa-message:" + instance.id, key.id);
+          if (!row) {
+            const rows = await store.query("inbox", { instanceId: instance.id, lookupKey: key.id, limit: 1 });
+            if (rows[0]) row = rows[0];
+          }
+          if (!row) {
+            const rows = await store.query("messages", { instanceId: instance.id, lookupKey: key.id, limit: 1 });
+            if (rows[0]) row = rows[0];
+          }
+          if (!row?.data) return undefined;
+          try {
+            const parsed = JSON.parse(
+              encryption.open(row.data),
+              BufferJSON.reviver,
+            );
+            return parsed.key ? parsed.message : (parsed.message || parsed);
+          } catch {
+            return undefined;
+          }
         },
+        retryRequestDelayMs: 250,
+        maxMsgRetryCount: 5,
         markOnlineOnConnect: false,
         syncFullHistory: false,
         shouldSyncHistoryMessage: () => true,
@@ -180,14 +199,21 @@ export function gateway(store, encryption, emit, {
       });
       socket.ev.on("messages.upsert", async ({ messages, type }) => {
         for (const m of messages) {
-          if (!m.message || !m.key.id) continue;
+          if (!m.key?.id) continue;
+          if (!m.message || m.messageStubType === 2) {
+            try {
+              if (socket.requestPlaceholderResend) {
+                await socket.requestPlaceholderResend(m.key);
+              }
+            } catch {}
+          }
+          if (!m.message) continue;
           try {
             const fresh = inbox
               ? await inbox.persist(instance, m, { notify: type === "notify" })
               : true;
             if (inbox && fresh && automation)
               await automation(instance, m, { notify: type === "notify" });
-            if (!fresh) continue;
             await emit(instance, "message", {
               id: m.key.id,
               chatId: m.key.remoteJid,
@@ -196,6 +222,9 @@ export function gateway(store, encryption, emit, {
               text:
                 m.message.conversation ||
                 m.message.extendedTextMessage?.text ||
+                m.message.imageMessage?.caption ||
+                m.message.videoMessage?.caption ||
+                m.message.documentMessage?.caption ||
                 "",
               message: m.message,
             });

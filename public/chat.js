@@ -25,6 +25,7 @@ window.ZelonChat = (() => {
     archive: S('<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><path d="M10 12h4"/>', 17),
     mute: S('<path d="M13.7 21a2 2 0 0 1-3.4 0"/><path d="M18 8a6 6 0 0 0-9.3-5M6.3 6.3A6 6 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="m2 2 20 20"/>', 17),
     check: S('<path d="m5 12 5 5 9-10"/>', 17),
+    doubleCheck: S('<path d="m2 12 5 5L18 6"/><path d="m13 12 4 4 5-5"/>', 19),
     block: S('<circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/>', 17),
     group: S('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>', 22),
     file: S('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>', 26),
@@ -233,7 +234,36 @@ window.ZelonChat = (() => {
       layer = $("#waLayer");
 
     /* ---------- chat list ---------- */
-    const preview = (c) => (c.lastPreview ? esc(cleanPreview(c.lastPreview)) : '<span class="muted">No messages yet</span>');
+    const typingMap = new Map();
+    const preview = (c) => {
+      const typ = typingMap.get(c.chatId);
+      if (typ && typ.until > Date.now()) {
+        return `<span class="live" style="color:var(--wa-green);font-weight:600;">${esc(typ.label)}</span>`;
+      }
+      return c.lastPreview ? esc(cleanPreview(c.lastPreview)) : '<span class="muted">No messages yet</span>';
+    };
+    function setChatTyping(id, label) {
+      if (!id) return;
+      const n = norm(id);
+      if (label) {
+        typingMap.set(n, { label, until: Date.now() + 7000 });
+      } else {
+        typingMap.delete(n);
+      }
+      const chatRow = p.querySelector(`#chatRows [data-chat="${CSS.escape(n)}"]`) ||
+        p.querySelector(`#chatRows [data-chat="${CSS.escape(id)}"]`);
+      if (chatRow) {
+        const pv = chatRow.querySelector(".wa-pv");
+        if (pv) {
+          if (label) {
+            pv.innerHTML = `<span class="live" style="color:var(--wa-green);font-weight:600;">${esc(label)}</span>`;
+          } else {
+            const c = chats.find((x) => x.chatId === n || (x.aliases || []).includes(n));
+            if (c) pv.innerHTML = preview(c);
+          }
+        }
+      }
+    }
     function drawList(force) {
       const q = query.trim().toLowerCase();
       let rows = chats.filter((c) => {
@@ -274,9 +304,20 @@ window.ZelonChat = (() => {
 
     /* ---------- messages ---------- */
     const sameChat = (id) => {
-      if (!current || !id) return false;
+      if (!current) return false;
+      if (!id) return true;
       const n = norm(id);
-      return current.chatId === n || (current.aliases || []).includes(n);
+      if (current.chatId === n || (current.aliases || []).includes(n)) return true;
+      const p1 = isPnJid(current.chatId) ? current.chatId.split("@")[0] : (current.phone ? String(current.phone).replace(/\D/g, "") : "");
+      const p2 = isPnJid(n) ? n.split("@")[0] : "";
+      if (p1 && p2 && p1 === p2) return true;
+      const match = chats.find((c) => c.chatId === n || (c.aliases || []).includes(n));
+      if (match) {
+        if (match.chatId === current.chatId || (match.aliases || []).includes(current.chatId)) return true;
+        const mp = isPnJid(match.chatId) ? match.chatId.split("@")[0] : (match.phone ? String(match.phone).replace(/\D/g, "") : "");
+        if (p1 && mp && p1 === mp) return true;
+      }
+      return false;
     };
     const sigOf = (list) => JSON.stringify(list.map((m) => [m.waId, m.status, m.text, m.edited, m.deleted, m.starred, m.reactions, m.pending, m.late]));
     const allMsgs = () => [...pending.map((m) => ({ ...m })), ...msgs].filter((m) => !isJunk(m.type)).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
@@ -314,7 +355,13 @@ window.ZelonChat = (() => {
       if (m.pollOptions?.length)
         h += `<div class="wa-poll"><b>${I.poll} ${esc(m.text || "Poll")}</b>${m.pollOptions.map((o) => `<div>○ ${esc(o)}</div>`).join("")}</div>`;
       else if (m.text) h += `<div class="wa-text">${fmt(m.text)}</div>`;
-      else if (!m.hasMedia && !m.location && !(m.contacts || []).length) h += `<div class="wa-text muted">${esc(cleanPreview("[" + (m.type || "message") + "]") || "Unsupported message")}</div>`;
+      else if (!m.hasMedia && !m.location && !(m.contacts || []).length) {
+        if (["ciphertext", "placeholder", "unknown"].includes(m.type) || !m.text) {
+          h += `<div class="wa-text wa-waiting"><span class="wa-wait-ico">⏳</span><span><strong>Waiting for this message</strong><p>This may take a while. Your phone was asked to sync this message.</p><button type="button" class="wa-resend-btn" data-resend="${esc(m.waId)}">Request from phone</button></span></div>`;
+        } else {
+          h += `<div class="wa-text muted">${esc(cleanPreview("[" + (m.type || "message") + "]") || "Unsupported message")}</div>`;
+        }
+      }
       else if (m.hasMedia && m.text) h += "";
       return h;
     }
@@ -402,7 +449,6 @@ window.ZelonChat = (() => {
       const atBottom = !box || box.scrollHeight - box.scrollTop - box.clientHeight < 90;
       if (!atBottom) unseen += incoming;
       drawMessages({ stick: false });
-      if (incoming && !document.hidden) markRead();
     }
     let readTimer;
     function markRead() {
@@ -429,7 +475,7 @@ window.ZelonChat = (() => {
     function headSub() {
       if (!current) return "";
       if (presence && presence.chatId === current.chatId && presence.until > Date.now()) {
-        return `<span class="live">${presence.state === "recording" ? "recording audio…" : (presence.who ? presence.who + " is " : "") + "typing…"}</span>`;
+        return `<span class="live">${esc(presence.text || (presence.state === "recording" ? "recording audio…" : "typing…"))}</span>`;
       }
       if (current.kind === "group") return esc(current.participants ? current.participants + " participants" : "Group · click for group info");
       return esc(current.phoneFmt || current.phone || "Click for contact info");
@@ -447,6 +493,7 @@ window.ZelonChat = (() => {
           <button class="wa-ib wa-back" id="chatBack" aria-label="Back to conversations">${I.back}</button>
           <button class="wa-who-btn" id="waHeadInfo" title="Contact info">${avatar(current, "md")}<span class="wa-title"><strong>${esc(current.name || current.chatId)}</strong><small id="waSub">${headSub()}</small></span></button>
           <div class="wa-tools">
+            <button class="wa-ib wa-markread-btn ${current.unread ? 'has-unread' : ''}" id="waMarkRead" title="Mark as seen (send blue ticks to other participant)" aria-label="Mark as seen">${I.doubleCheck}${current.unread ? '<span class="wa-mark-dot"></span>' : ''}</button>
             <button class="wa-ib" id="waSearchBtn" title="Search in chat" aria-label="Search in chat">${I.search}</button>
             <button class="wa-ib" id="refreshChat" title="Refresh" aria-label="Refresh chat">${I.refresh}</button>
             <button class="wa-ib" id="fullInbox2" title="Full screen" aria-label="Full screen">${I.expand}</button>
@@ -862,6 +909,23 @@ window.ZelonChat = (() => {
       };
       $("#chatBack").onclick = () => { root.classList.remove("chat-open"); closeInfo(); syncLock(); };
       $("#refreshChat").onclick = () => open(current.chatId, { keep: true }).catch((e) => toast(e.message));
+      $("#waMarkRead").onclick = async () => {
+        if (!current) return;
+        const btn = $("#waMarkRead");
+        btn.disabled = true;
+        try {
+          await api(base + "/chats/" + encodeURIComponent(current.chatId) + "/settings", "PUT", { read: true });
+          const c = chats.find((x) => x.chatId === current.chatId);
+          if (c) { c.unread = 0; drawList(); }
+          unseen = 0;
+          $("#waNew").hidden = true;
+          btn.classList.remove("has-unread");
+          btn.classList.add("seen-active");
+          btn.querySelector(".wa-mark-dot")?.remove();
+          toast("Seen — read receipt sent to other participant ✓");
+        } catch (err) { toast(err.message); }
+        finally { btn.disabled = false; }
+      };
       $("#waHeadInfo").onclick = () => openInfo();
       $("#waSearchBtn").onclick = () => { searchOpen = !searchOpen; $("#waFindBar").hidden = !searchOpen; if (searchOpen) $("#waFind").focus(); else { $("#waFind").value = ""; applySearch(); } };
       $("#waFindClose").onclick = () => { searchOpen = false; $("#waFindBar").hidden = true; $("#waFind").value = ""; applySearch(); };
@@ -905,7 +969,6 @@ window.ZelonChat = (() => {
       msgSig = sigOf(allMsgs());
       drawMessages({ stick: true });
       api(base + "/chats/" + encodeURIComponent(chatId) + "/subscribe", "POST", {}).catch(() => {});
-      if (current.unread) markRead();
       if (mm("(min-width: 761px)").matches) $("#replyText")?.focus();
     }
 
@@ -945,6 +1008,7 @@ window.ZelonChat = (() => {
         if (m.pollOptions?.length) items.push(["votes", I.poll, "Poll results"]);
         if (m.hasMedia && isPdf(m)) items.push(["view", I.doc, "View PDF"]);
         if (!m.fromMe && (current?.kind === "group" || /@g\.us$/.test(current?.chatId || "")) && senderJid(m)) { items.push(["private", I.reply, "Reply privately"]); items.push(["chat", I.msg, "Message " + senderName(m)]); }
+        if (!m.fromMe) items.push(["seen", I.doubleCheck, "Mark as seen"]);
         items.push(["info", I.info, "Message info"]);
       }
       items.push(["delete", I.trash, "Delete", "danger"]);
@@ -981,6 +1045,10 @@ window.ZelonChat = (() => {
           msgSig = ""; drawMessages({ stick: false });
         }
         else if (act === "download") window.location.href = mediaUrl(m, false);
+        else if (act === "seen") {
+          await api(base + "/inbox/" + encodeURIComponent(m.waId) + "/read", "POST", {});
+          toast("Message marked as seen ✓ (blue ticks sent to sender)");
+        }
         else if (act === "forward") forwardDialog(m);
         else if (act === "delete") deleteDialog(m);
         else if (act === "info") infoDialog(m);
@@ -1175,6 +1243,16 @@ window.ZelonChat = (() => {
         if (m) modal("Photo", `<img class="wa-zoom" src="${esc(mediaUrl(m, true))}" alt="Photo"><div class="wa-dactions"><a class="btn" href="${esc(mediaUrl(m, false))}">Download</a></div>`, { wide: true });
         return;
       }
+      const rsb = t.closest("[data-resend]");
+      if (rsb) {
+        rsb.disabled = true;
+        rsb.textContent = "Requesting…";
+        api(base + "/inbox/" + encodeURIComponent(rsb.dataset.resend) + "/retry", "POST", {})
+          .then(() => toast("Resend requested from phone. Message will decrypt as soon as received."))
+          .catch((err) => toast(err.message))
+          .finally(() => { setTimeout(() => { if (rsb.isConnected) { rsb.disabled = false; rsb.textContent = "Request from phone"; } }, 8000); });
+        return;
+      }
       const row = t.closest("[data-chat]");
       if (row && row.closest("#chatRows")) return void open(row.dataset.chat).catch((err) => toast(err.message));
       const start = t.closest("[data-start]");
@@ -1259,20 +1337,82 @@ window.ZelonChat = (() => {
     const teardown = () => { es?.close(); es = null; clearInterval(beat); document.removeEventListener("visibilitychange", onVisible); };
     const onVisible = () => { if (!document.hidden && root.isConnected) scheduleRefresh(current?.chatId); };
     document.addEventListener("visibilitychange", onVisible);
+
+    /* ---- in-place tick patch: avoids full re-fetch for receipt updates ---- */
+    function applyReceipts(updates) {
+      if (!current || !Array.isArray(updates)) return;
+      const STATUS = { 2: "sent", 3: "delivered", 4: "read", 5: "played" };
+      let changed = false;
+      for (const u of updates) {
+        const id = u?.key?.id;
+        const newStatus = STATUS[u?.update?.status];
+        if (!id || !newStatus) continue;
+        const m = msgs.find((x) => x.waId === id);
+        const rank = { sent: 1, delivered: 2, read: 3, played: 4 };
+        if (m && (rank[newStatus] || 0) > (rank[m.status] || 0)) { m.status = newStatus; m.pending = false; changed = true; }
+      }
+      if (changed) {
+        msgSig = sigOf(allMsgs());
+        drawMessages({ stick: false });
+      }
+    }
+
     function onEvent(ev) {
-      if (ev.type === "message" || ev.type === "update") scheduleRefresh(ev.chatId);
-      else if (ev.type === "connection") { state.status = ev.data?.status || state.status; banner(); }
-      else if (ev.type === "presence" && current && sameChat(ev.data?.id)) {
-        const entries = Object.entries(ev.data?.presences || {});
+      if (ev.type === "message" || ev.type === "history") {
+        /* New message arrived — refresh immediately.
+           inbox events: { type, chatId, waId }
+           whatsapp emit events: { type, data: { chatId, ... } } */
+        const chatId = ev.chatId || ev.data?.chatId;
+        refreshList().catch(() => {});
+        if (!chatId || sameChat(chatId)) refreshCurrent().catch(() => {});
+      } else if (ev.type === "receipt") {
+        /* Delivery/read receipts — patch ticks in-place, then do a lazy full sync.
+           whatsapp.messages.update: ev.data = { updates: [{key,update:{status}}] }
+           whatsapp.message-receipt.update: ev.data = { userReceipts: [{key,receipt}] } */
+        const updates = ev.data?.updates || ev.data?.userReceipts?.map?.(({ key, receipt }) => ({
+          key, update: { status: receipt?.playedTimestamp ? 5 : receipt?.readTimestamp ? 4 : 3 },
+        }));
+        if (updates) applyReceipts(updates);
+        /* Also schedule a soft refresh so any edge case is caught */
+        clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(() => refreshCurrent().catch(() => {}), 1500);
+      } else if (ev.type === "update") {
+        scheduleRefresh(ev.chatId);
+      } else if (ev.type === "connection") {
+        state.status = ev.data?.status || state.status;
+        banner();
+      } else if (ev.type === "presence" && ev.data) {
+        const rawId = ev.data.id;
+        const entries = Object.entries(ev.data.presences || {});
         const hit = entries.find(([, v]) => ["composing", "recording"].includes(v?.lastKnownPresence)) || entries[0];
         if (!hit) return;
         const live = ["composing", "recording"].includes(hit[1]?.lastKnownPresence);
-        const nameOf = (j) => { const c = chats.find((x) => x.aliases?.includes(norm(j))); return current.kind === "group" ? (c?.name || "+" + norm(j).split("@")[0]) : ""; };
-        presence = live ? { chatId: current.chatId, state: hit[1].lastKnownPresence, who: nameOf(hit[0]), until: Date.now() + 7000 } : null;
-        const sub = $("#waSub");
-        if (sub) sub.innerHTML = presence ? headSub() : !live && hit[1]?.lastKnownPresence === "available" ? '<span class="live">online</span>' : headSub();
-        clearTimeout(presenceTimer);
-        if (presence) presenceTimer = setTimeout(() => { presence = null; const s2 = $("#waSub"); if (s2) s2.innerHTML = headSub(); }, 7500);
+        const sender = norm(hit[0] || rawId);
+        const myPhone = String(state.phone || "").replace(/\D/g, "");
+        const isMe = myPhone && (sender.includes(myPhone) || norm(rawId).includes(myPhone));
+
+        let who = "";
+        if (isMe) {
+          who = "You (phone)";
+        } else if (current && (current.kind === "group" || /@g\.us$/.test(current.chatId))) {
+          const c = chats.find((x) => x.aliases?.includes(sender) || x.chatId === sender);
+          who = c?.name || (isPnJid(sender) ? fmtPhone(sender) : "");
+        }
+
+        const stateLabel = hit[1]?.lastKnownPresence === "recording" ? "recording audio…" : "typing…";
+        const text = isMe
+          ? (hit[1]?.lastKnownPresence === "recording" ? "You are recording on phone…" : "You are typing on phone…")
+          : (who ? `${who} is ${stateLabel}` : stateLabel);
+
+        if (current && sameChat(rawId)) {
+          presence = live ? { chatId: current.chatId, state: hit[1].lastKnownPresence, text, until: Date.now() + 7000 } : null;
+          const sub = $("#waSub");
+          if (sub) sub.innerHTML = presence ? `<span class="live">${esc(presence.text)}</span>` : (!live && hit[1]?.lastKnownPresence === "available" ? '<span class="live">online</span>' : headSub());
+          clearTimeout(presenceTimer);
+          if (presence) presenceTimer = setTimeout(() => { presence = null; const s2 = $("#waSub"); if (s2) s2.innerHTML = headSub(); }, 7500);
+        }
+
+        setChatTyping(rawId, live ? text : null);
       }
     }
     if ("EventSource" in window) {
@@ -1281,13 +1421,19 @@ window.ZelonChat = (() => {
         if (!root.isConnected) return teardown();
         try { onEvent(JSON.parse(m.data)); } catch { /* ignore malformed event */ }
       };
+      es.onerror = () => {
+        /* SSE reconnects automatically; schedule a poll to catch up while it recovers */
+        if (!root.isConnected) return teardown();
+        setTimeout(() => { refreshList().catch(() => {}); if (current) refreshCurrent().catch(() => {}); }, 2000);
+      };
       beat = setInterval(() => { if (!root.isConnected) teardown(); }, 4000);
     }
+    /* Background polling — SSE handles real-time; this is a safety net only */
     ctx.startPolling?.(async () => {
       if (!root.isConnected) return teardown();
       if (document.hidden) return;
       try { await refreshList(); if (current) await refreshCurrent(); } catch { /* keep the screen during outages */ }
-    }, 8000);
+    }, 20000);
 
     drawList(true);
     drawConversation();

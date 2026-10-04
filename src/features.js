@@ -333,9 +333,10 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
           ]),
         })
         .parse(req.body);
+      const target = await inbox.resolve(req.instance, chatJid(req.params.chat));
       await wa
         .active(req.instance.id)
-        .sendPresenceUpdate(presence, jid(req.params.chat));
+        .sendPresenceUpdate(presence, target);
       res.json({ ok: true });
     }),
   );
@@ -373,6 +374,17 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
     wrap(async (req, res) => {
       const m = await message(req);
       await wa.active(req.instance.id).readMessages([m.key]);
+      res.json({ ok: true });
+    }),
+  );
+  router.post(
+    "/inbox/:message/retry",
+    wrap(async (req, res) => {
+      const sock = wa.active(req.instance.id);
+      const m = await inbox.load(req.instance.id, req.params.message);
+      if (m?.key && sock?.requestPlaceholderResend) {
+        await sock.requestPlaceholderResend(m.key);
+      }
       res.json({ ok: true });
     }),
   );

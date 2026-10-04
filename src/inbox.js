@@ -197,8 +197,17 @@ export function createInbox(store, enc, notify = () => {}) {
       data: pack(enc, m),
       lookupKey: m.key.id,
     });
-    if (!fresh && previous && m.message)
-      await store.patch("inbox", id, { data: pack(enc, m) });
+    if (!fresh && previous && m.message) {
+      await store.patch("inbox", id, {
+        type: info.type,
+        data: pack(enc, m),
+      });
+      await store.patch("chats", hash(instance.id + ":" + chatId), {
+        lastPreview: enc.seal(previewOf(info)),
+        lastMessageId: m.key.id,
+      });
+      tell(instance, { type: "message", chatId, waId: m.key.id, fromMe: !!m.key.fromMe, notify });
+    }
     const chatKey = hash(instance.id + ":" + chatId);
     await store.insert("chats", chatKey, {
       id: chatKey,
@@ -264,6 +273,26 @@ export function createInbox(store, enc, notify = () => {}) {
       }
       if (update.messageStubType === WAMessageStubType.REVOKE) await markDeleted(instance, key.id);
       if (update.message?.editedMessage?.message) await applyEdit(instance, key.id, update.message.editedMessage.message);
+      else if (update.message) {
+        const info = describeMessage(update.message);
+        if (entries.length) {
+          for (const row of entries) {
+            const raw = unpack(enc, row.data) || {};
+            raw.message = update.message;
+            await store.patch("inbox", row.id, {
+              type: info.type,
+              data: pack(enc, raw),
+            });
+            await store.patch("chats", hash(instance.id + ":" + row.chatId), {
+              lastPreview: enc.seal(previewOf(info)),
+              lastMessageId: key.id,
+            });
+            tell(instance, { type: "message", chatId: row.chatId, waId: key.id, fromMe: !!row.fromMe });
+          }
+        } else if (key.remoteJid) {
+          await persist(instance, { key, message: update.message, messageTimestamp: update.messageTimestamp }, { notify: true });
+        }
+      }
       if (status && entries[0]) tell(instance, { type: "update", chatId: entries[0].chatId, waId: key.id });
       if (update.pollUpdates) {
         const creator = await load(instance.id, key.id);
