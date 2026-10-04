@@ -347,8 +347,16 @@ window.ZelonChat = (() => {
         : `<a class="wa-doc" href="${esc(mediaUrl(m, false))}"><span class="wa-dico">${I.file}<i>${esc(ext)}</i></span><span><b>${esc(m.filename || "Document")}</b><small>${esc(ext)} file · tap to download</small></span></a>`;
     }
     function editHistoryHtml(m) {
-      if (!m.edited || (!m.originalText && (!m.edits || !m.edits.length))) return "";
-      const orig = m.originalText || m.edits[0]?.text || "";
+      if (!m.edited) return "";
+      const orig = m.originalText || (m.edits && m.edits[0]?.text) || "";
+      if (!orig && (!m.edits || !m.edits.length)) {
+        return `<div class="wa-edit-history">
+          <div class="wa-edit-chip" style="cursor:default;" title="Message was edited">
+            ${I.history}
+            <span>Edited${m.editedAt ? ` · ${esc(hhmm(m.editedAt))}` : ""}</span>
+          </div>
+        </div>`;
+      }
       const intermediate = (m.edits || []).slice(1);
       let versions = `
         <div class="wa-diff-item old">
@@ -406,6 +414,9 @@ window.ZelonChat = (() => {
         h += `<div class="wa-poll"><b>${I.poll} ${esc(m.text || "Poll")}</b>${m.pollOptions.map((o) => `<div>○ ${esc(o)}</div>`).join("")}</div>`;
       else if (m.text) {
         h += `<div class="wa-text">${fmt(m.text)}</div>`;
+        h += editHistoryHtml(m);
+      }
+      else if (m.edited) {
         h += editHistoryHtml(m);
       }
       else if (!m.hasMedia && !m.location && !(m.contacts || []).length) {
@@ -928,7 +939,14 @@ window.ZelonChat = (() => {
           try {
             await api(base + "/inbox/" + encodeURIComponent(target.waId) + "/text", "PUT", { text });
             const m = msgs.find((x) => x.waId === target.waId);
-            if (m) { m.text = text; m.edited = true; }
+            if (m) {
+              const oldText = m.text || target.text || "";
+              m.originalText = m.originalText || oldText;
+              m.edits = [...(m.edits || []), { text: oldText, at: new Date().toISOString() }];
+              m.text = text;
+              m.edited = true;
+              m.editedAt = new Date().toISOString();
+            }
             editing = null; ta.value = drafts.get(current.chatId) || ""; grow(); drawContext();
             msgSig = ""; drawMessages({ stick: false });
           } catch (err) { toast(err.message); }
@@ -1185,6 +1203,7 @@ window.ZelonChat = (() => {
         <div class="wa-line"><b>Time</b><span>${esc(t.toLocaleString())}</span></div>
         ${m.deleted ? `<div class="wa-line"><b>Deleted</b><span style="color:#dc2626;font-weight:600;">Yes${m.deletedAt ? ` (${new Date(m.deletedAt).toLocaleString()})` : ""}</span></div>` : ""}
         ${m.edited ? `<div class="wa-line"><b>Edited</b><span style="color:#027eb5;font-weight:600;">Yes${m.editedAt ? ` (${new Date(m.editedAt).toLocaleString()})` : ""}</span></div>` : ""}
+        ${m.originalText ? `<div class="wa-line"><b>Original text</b><span>${esc(m.originalText)}</span></div>` : ""}
         ${m.fromMe ? `<div class="wa-line"><b>Status</b><span class="wa-st ${esc(m.status)}">${esc(m.status)}</span></div>` : ""}
         <div class="wa-line"><b>Message ID</b><span class="mono">${esc(m.waId)}</span></div>`);
     }

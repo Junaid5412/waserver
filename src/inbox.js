@@ -60,6 +60,17 @@ export function previewOf(info) {
   const map = { audio: "\ud83c\udfa4 Voice message", image: "\ud83d\udcf7 Photo", video: "\ud83c\udfa5 Video", document: "\ud83d\udcc4 " + (info.filename || "Document"), location: "\ud83d\udccd Location", liveLocation: "\ud83d\udccd Live location", contact: "\ud83d\udc64 Contact", contacts: "\ud83d\udc64 Contact", poll: "\ud83d\udcca Poll", pollCreation: "\ud83d\udcca Poll", sticker: "Sticker" };
   return map[t] || (t ? t.charAt(0).toUpperCase() + t.slice(1) : "Message");
 }
+export function unwrapEdited(m) {
+  let cur = m;
+  for (let i = 0; i < 5 && cur; i++) {
+    if (cur.protocolMessage?.editedMessage) { cur = cur.protocolMessage.editedMessage; continue; }
+    if (cur.editedMessage?.message) { cur = cur.editedMessage.message; continue; }
+    if (cur.editedMessage) { cur = cur.editedMessage; continue; }
+    if (cur.message) { cur = cur.message; continue; }
+    break;
+  }
+  return cur || m;
+}
 export function createInbox(store, enc, notify = () => {}) {
   const seenNames = new Map();
   const tell = (instance, event) => { try { notify(instance, event); } catch {} };
@@ -87,35 +98,56 @@ export function createInbox(store, enc, notify = () => {}) {
   }
   async function applyEdit(instance, waId, edited) {
     if (!edited) return;
-    if (edited.message) edited = edited.message;
+    edited = unwrapEdited(edited);
     const rows = await rowsFor(instance, waId);
     if (!rows.length) return;
-    const stored = await load(instance.id, waId);
-    if (stored) {
-      const prevInfo = describeMessage(stored.message);
-      const prevText = prevInfo.text || "";
-      const nowIso = new Date().toISOString();
+    let stored = await load(instance.id, waId);
+    if (!stored && rows[0]?.data) {
+      try {
+        const data = unpack(enc, rows[0].data);
+        stored = data?.key
+          ? data
+          : {
+              key: { id: waId, remoteJid: rows[0].chatId, fromMe: !!rows[0].fromMe },
+              message: data?.message || data,
+            };
+      } catch {}
+    }
+    const newInfo = describeMessage(edited);
+    const prevInfo = stored?.message ? describeMessage(stored.message) : { text: rows[0].text || "", type: rows[0].type || "text" };
+    const prevText = prevInfo.text || "";
+    const newText = newInfo.text || "";
 
+    if (prevText && newText && prevText === newText && rows[0].edited) {
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+
+    if (stored) {
       stored.message = edited;
       await store.set("wa-message:" + instance.id, waId, {
         id: waId, chatId: rows[0].chatId, fromMe: !!stored.key?.fromMe, data: pack(enc, stored),
       });
-      for (const row of rows) {
-        const existingEdits = Array.isArray(row.edits) ? row.edits : [];
-        const originalText = row.originalText || prevText;
-        const edits = [...existingEdits, { text: prevText, at: nowIso }];
-        await store.patch("inbox", row.id, {
-          data: pack(enc, stored),
-          edited: true,
-          editedAt: nowIso,
-          originalText,
-          edits,
-        });
-      }
-      const newInfo = describeMessage(edited);
-      const chat = await store.get("chats", hash(instance.id + ":" + rows[0].chatId));
-      if (chat?.lastMessageId === waId) await store.patch("chats", chat.id, { lastPreview: enc.seal(previewOf(newInfo)) });
     }
+
+    for (const row of rows) {
+      const existingEdits = Array.isArray(row.edits) ? row.edits : [];
+      const originalText = row.originalText || prevText || "";
+      const edits = (prevText && prevText !== newText)
+        ? [...existingEdits, { text: prevText, at: nowIso }]
+        : (existingEdits.length ? existingEdits : (prevText ? [{ text: prevText, at: nowIso }] : []));
+      await store.patch("inbox", row.id, {
+        type: newInfo.type || row.type,
+        data: stored ? pack(enc, stored) : row.data,
+        edited: true,
+        editedAt: nowIso,
+        originalText,
+        edits,
+      });
+    }
+    const chat = await store.get("chats", hash(instance.id + ":" + rows[0].chatId));
+    if (chat?.lastMessageId === waId) await store.patch("chats", chat.id, { lastPreview: enc.seal(previewOf(newInfo)) });
     tell(instance, { type: "update", chatId: rows[0].chatId, waId });
   }
   async function react(instance, reactions) {
@@ -138,18 +170,38 @@ export function createInbox(store, enc, notify = () => {}) {
       t = pm?.type;
     if (!target) return;
     if (t === 0 || t === "REVOKE") await markDeleted(instance, target);
-    else if (t === 14 || t === "MESSAGE_EDIT") await applyEdit(instance, target, pm.editedMessage);
+    else if (t === 14 || t === "MESSAGE_EDIT" || pm?.editedMessage) await applyEdit(instance, target, pm.editedMessage);
   }
   async function load(instanceId, waId) {
-    const row = await store.get("wa-message:" + instanceId, waId);
-    if (!row) return null;
-    const data = unpack(enc, row.data);
-    return data.key
-      ? data
-      : {
-          key: { id: waId, remoteJid: row.chatId, fromMe: row.fromMe },
-          message: data,
-        };
+    let row = await store.get("wa-message:" + instanceId, waId);
+    if (!row) {
+      const rows = await store.query("inbox", {
+        instanceId,
+        lookupKey: waId,
+        limit: 1,
+      });
+      if (rows[0]) row = rows[0];
+    }
+    if (!row) {
+      const rows = await store.query("messages", {
+        instanceId,
+        lookupKey: waId,
+        limit: 1,
+      });
+      if (rows[0]) row = rows[0];
+    }
+    if (!row?.data) return null;
+    try {
+      const data = unpack(enc, row.data);
+      return data?.key
+        ? data
+        : {
+            key: { id: waId, remoteJid: row.chatId || row.to, fromMe: !!row.fromMe },
+            message: data?.message || data,
+          };
+    } catch {
+      return null;
+    }
   }
   async function alias(instance, lid, pn) {
     lid = normalizeJid(lid);
@@ -180,7 +232,14 @@ export function createInbox(store, enc, notify = () => {}) {
     if (!m.key?.id || !m.key.remoteJid || !m.message) return false;
     const raw = normalizeMessageContent(m.message) || {},
       rawKind = getContentType(raw);
+    const pm = raw.protocolMessage || m.message?.protocolMessage || m.message?.editedMessage?.message?.protocolMessage;
+    if (pm) { await protocol(instance, pm); return false; }
     if (rawKind === "protocolMessage") { await protocol(instance, raw.protocolMessage); return false; }
+    if (rawKind === "editedMessage" || m.message?.editedMessage) {
+      const unwrapped = unwrapEdited(m.message);
+      await applyEdit(instance, m.key.id, unwrapped);
+      return false;
+    }
     if (rawKind === "reactionMessage") {
       await react(instance, [{ key: raw.reactionMessage.key, reaction: { text: raw.reactionMessage.text, key: m.key } }]);
       return false;
@@ -302,8 +361,18 @@ export function createInbox(store, enc, notify = () => {}) {
         await store.patch("receipts", receiptId, apply);
       }
       if (update.messageStubType === WAMessageStubType.REVOKE) await markDeleted(instance, key.id);
-      if (update.message?.editedMessage?.message) await applyEdit(instance, key.id, update.message.editedMessage.message);
-      else if (update.message) {
+      const isEdit = update.messageStubType === WAMessageStubType.MESSAGE_EDIT ||
+                     update.messageStubType === 14 ||
+                     !!update.message?.editedMessage ||
+                     !!update.message?.protocolMessage?.editedMessage ||
+                     (update.message?.protocolMessage?.type === 14 || update.message?.protocolMessage?.type === "MESSAGE_EDIT");
+      if (isEdit) {
+        const payload = update.message?.editedMessage?.message ||
+                        update.message?.editedMessage ||
+                        update.message?.protocolMessage?.editedMessage ||
+                        update.message;
+        await applyEdit(instance, key.id, payload);
+      } else if (update.message) {
         const info = describeMessage(update.message);
         if (entries.length) {
           for (const row of entries) {
