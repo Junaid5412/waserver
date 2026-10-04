@@ -41,7 +41,18 @@ window.ZelonAdmin = (() => {
       const ka = d.keepAlive,
         mem = d.memory,
         heapPct = (mem.heapUsed / Math.max(1, mem.heapTotal)) * 100,
-        sysPct = ((mem.systemTotal - mem.systemFree) / Math.max(1, mem.systemTotal)) * 100,
+        rs = d.resources || null,
+        memLimit = rs?.memory?.limit || null,
+        memUsed = rs?.memory?.used ?? mem.rss,
+        memPct = memLimit ? (memUsed / memLimit) * 100 : 0,
+        memLabel = memLimit ? mb(memUsed) + " / " + mb(memLimit) : mb(memUsed) + " used · limit not exposed by host",
+        memBar = memLimit ? bar(memPct, toneFor(memPct)) : "",
+        cpuPct = rs?.cpu?.processPercent ?? 0,
+        cpuLimit = rs?.cpu?.limitCores || null,
+        cpuShown = cpuLimit ? Math.min(100, cpuPct / cpuLimit) : Math.min(100, cpuPct),
+        cpuLabel = cpuPct + "% of one core",
+        cpuBar = bar(cpuShown, toneFor(cpuShown)),
+        cpuNote = cpuLimit ? "Allowed up to " + cpuLimit + " core" + (cpuLimit === 1 ? "" : "s") : "CPU limit not exposed by host",
         sockets = d.instances.sockets,
         total = d.instances.total,
         healthy = d.database === "healthy" && (ka.lastOk !== false);
@@ -79,10 +90,11 @@ window.ZelonAdmin = (() => {
         <p class="hint ka-note">Tip: for extra safety, also add the URL above to a free external monitor (cron-job.org or UptimeRobot) every 5 minutes. It works even if this server restarts.</p></section>
       <div class="sh-two">
         <section class="card"><h3>Resources</h3>
+          <div class="res"><div class="row"><span>App memory (container)</span><b>${memLabel}</b></div>${memBar}</div>
           <div class="res"><div class="row"><span>Node heap</span><b>${mb(mem.heapUsed)} / ${mb(mem.heapTotal)}</b></div>${bar(heapPct, toneFor(heapPct))}</div>
-          <div class="res"><div class="row"><span>Server memory</span><b>${mb(mem.systemTotal - mem.systemFree)} / ${mb(mem.systemTotal)}</b></div>${bar(sysPct, toneFor(sysPct))}</div>
           <div class="res"><div class="row"><span>Process (RSS)</span><b>${mb(mem.rss)}</b></div></div>
-          <div class="res"><div class="row"><span>CPU load (1/5/15 min)</span><b>${d.loadAverage.join(" · ")}</b></div><p class="hint" style="margin:2px 0 0">${d.cpus} CPU core${d.cpus === 1 ? "" : "s"}</p></div></section>
+          <div class="res"><div class="row"><span>CPU used by this app</span><b>${cpuLabel}</b></div>${cpuBar}<p class="hint" style="margin:2px 0 0">${cpuNote}</p></div>
+          <p class="hint" style="margin-top:12px">Figures are for this app only. Server-wide totals are not shown because on shared hosting they include other websites.</p></section>
         <section class="card"><h3>Server</h3><dl class="kv one">
           <div><dt>Environment</dt><dd>${esc(d.environment)}</dd></div><div><dt>Node.js</dt><dd>${esc(d.nodeVersion)}</dd></div><div><dt>Platform</dt><dd>${esc(d.platform)}</dd></div><div><dt>Process ID</dt><dd>${esc(d.pid)}</dd></div><div><dt>Public URL</dt><dd>${esc(d.origin)}</dd></div><div><dt>Storage</dt><dd>${esc(d.storage?.driver || "sqlite")}${d.storage?.directory ? " · local files" : ""}</dd></div></dl></section>
       </div>

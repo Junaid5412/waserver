@@ -11,6 +11,7 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import os from "node:os";
 import { createBus } from "./realtime.js";
+import { resources } from "./resources.js";
 import { createKeepAlive } from "./keepalive.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -399,15 +400,8 @@ app.get(
       platform: os.platform() + " " + os.arch(),
       pid: process.pid,
       environment: production ? "production" : "development",
-      cpus: os.cpus().length,
-      loadAverage: os.loadavg().map((n) => Math.round(n * 100) / 100),
-      memory: {
-        rss: mem.rss,
-        heapUsed: mem.heapUsed,
-        heapTotal: mem.heapTotal,
-        systemTotal: os.totalmem(),
-        systemFree: os.freemem(),
-      },
+      resources: resources(),
+      memory: { rss: mem.rss, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal },
       instances: { total: all.length, byStatus, sockets: all.filter((x) => wa.has(x.id)).length },
       liveStreams: bus.size(),
       counts,
