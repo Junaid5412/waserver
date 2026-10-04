@@ -310,3 +310,9 @@ button.wa-avbtn{padding:0;border:0;cursor:pointer;position:relative}
 .wa-pdfview>footer a{color:#027eb5;font-weight:600}
 @media(max-width:640px){.wa-pdfview .btn.mini span{display:none}.wa-pdfview .btn.mini{padding:0 10px}.wa-pdfview>header{padding:8px 10px}}
 @media(min-width:900px){.wa-pdfwrap{padding:24px!important}.wa-pdfview{max-width:1100px;margin:auto;border-radius:14px;overflow:hidden}}.wa-pdfwrap{position:fixed!important;inset:0}
+
+/* composer must always be a single row */
+.wa .wa-compose-wrap .wa-compose{display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-end;gap:6px}
+.wa .wa-compose>*{margin:0}
+.wa .wa-compose .wa-ib,.wa .wa-compose .wa-send{flex:none}
+.wa .wa-compose textarea{width:auto;flex:1 1 auto}
