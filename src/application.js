@@ -382,12 +382,16 @@ app.get(
   adminOnly,
   wrap(async (req, res) => {
     const t = Date.now();
-    await store.health();
-    const databaseMs = Date.now() - t;
+    const ns = ["users", "instances", "messages", "hooks", "media"];
+    const [, databaseMs, ...rest] = [
+      0,
+      await store.health().then(() => Date.now() - t),
+      ...(await Promise.all([...ns.map((n) => store.stats(n)), store.all("instances"), keepAlive.boots()])),
+    ];
     const counts = {};
-    for (const ns of ["users", "instances", "messages", "hooks", "media"])
-      counts[ns] = await store.stats(ns);
-    const all = (await store.all("instances")).filter((x) => !x.archived),
+    ns.forEach((n, i) => (counts[n] = rest[i]));
+    const all = rest[ns.length].filter((x) => !x.archived),
+      restarts = rest[ns.length + 1],
       byStatus = {};
     for (const x of all) byStatus[x.status || "disconnected"] = (byStatus[x.status || "disconnected"] || 0) + 1;
     const mem = process.memoryUsage();
@@ -408,7 +412,7 @@ app.get(
       liveStreams: bus.size(),
       counts,
       keepAlive: keepAlive.status(),
-      restarts: await keepAlive.boots(),
+      restarts,
       origin,
     });
   }),

@@ -32,9 +32,20 @@ window.ZelonAdmin = (() => {
   async function system(c) {
     const { api, esc, ico, toast, on, getView, startPolling } = c;
     const w = document.querySelector("#workspace");
-    w.innerHTML = '<div class="loading">Checking system…</div>';
+    const skel = '<div class="sh-skel-card"><i></i><div><b></b><u></u></div></div>';
+    w.innerHTML = '<div class="top"><div><div class="eyebrow">Administration</div><h1>System health</h1><p>Live status of the server, database, WhatsApp connections and the keep-alive cron.</p></div></div>' +
+      '<div class="sh-loading" role="status" aria-live="polite"><span class="sh-spin" aria-hidden="true"></span><div><b>Checking system…</b><small id="shSlow">Reading server, database and connection status</small></div></div>' +
+      '<div class="sh-grid sh-skel">' + skel.repeat(6) + "</div>";
+    const slow = setTimeout(() => { const s = document.querySelector("#shSlow"); if (s) s.textContent = "Still working — the database is responding slowly"; }, 4000);
     let d;
-    try { d = await api("/admin/system"); } catch (e) { w.textContent = e.message; return; }
+    try { d = await api("/admin/system"); } catch (e) {
+      clearTimeout(slow);
+      if (getView() !== "system") return;
+      w.innerHTML = '<div class="sh-loading err"><div><b>Could not load system health</b><small>' + esc(e.message) + '</small></div><button class="btn" id="shRetry">Try again</button></div>';
+      document.querySelector("#shRetry").onclick = () => system(c);
+      return;
+    }
+    clearTimeout(slow);
     if (getView() !== "system") return;
     let tick;
     const draw = () => {

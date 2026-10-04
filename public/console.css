@@ -361,3 +361,17 @@ body:has(.shell){background:#f4f6fa;font-size:14.5px;color:var(--ink)}
 .status::first-letter{text-transform:uppercase}
 .nav-text,.nav-item,.bn-item span{text-transform:none}
 
+
+/* system health loading state */
+.sh-loading{display:flex;align-items:center;gap:14px;padding:16px 18px;margin:0 0 16px;border:1px solid var(--line,#e3e8ef);border-radius:14px;background:#fff}
+.sh-loading b{display:block;font-size:15px;color:#101828}
+.sh-loading small{display:block;color:#667085;font-size:13px;margin-top:2px}
+.sh-loading.err{justify-content:space-between;border-color:#fecaca;background:#fef2f2}
+.sh-spin{flex:none;width:28px;height:28px;border-radius:50%;border:3px solid #d0d5dd;border-top-color:#16a34a;animation:shSpin .8s linear infinite}
+@keyframes shSpin{to{transform:rotate(360deg)}}
+.sh-skel-card{display:flex;align-items:center;gap:12px;padding:18px;border:1px solid var(--line,#e3e8ef);border-radius:14px;background:#fff}
+.sh-skel-card i,.sh-skel-card b,.sh-skel-card u{display:block;border-radius:8px;background:linear-gradient(90deg,#eef1f5 25%,#f8fafc 50%,#eef1f5 75%);background-size:200% 100%;animation:shShim 1.2s infinite}
+.sh-skel-card i{width:42px;height:42px;border-radius:12px}
+.sh-skel-card b{width:90px;height:18px;margin-bottom:8px}
+.sh-skel-card u{width:140px;height:12px;text-decoration:none}
+@keyframes shShim{to{background-position:-200% 0}}
