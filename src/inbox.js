@@ -9,6 +9,8 @@ import { hash } from "./security.js";
 export const pack = (enc, v) =>
   enc.seal(JSON.stringify(v, BufferJSON.replacer));
 export const unpack = (enc, v) => JSON.parse(enc.open(v), BufferJSON.reviver);
+export const normalizeJid = (value) =>
+  typeof value === "string" ? value.replace(/:\d+@/, "@") : value;
 export function timestampSeconds(value) {
   if (typeof value === "object" && value !== null && "low" in value)
     return (value.high >>> 0) * 4294967296 + (value.low >>> 0);
@@ -60,9 +62,37 @@ export function createInbox(store, enc) {
           message: data,
         };
   }
+  async function alias(instance, lid, pn) {
+    lid = normalizeJid(lid);
+    pn = normalizeJid(pn);
+    if (!lid?.endsWith("@lid") || !pn?.endsWith("@s.whatsapp.net")) return;
+    const id = hash(instance.id + ":" + lid),
+      previous = await store.get("wa-alias", id);
+    if (previous?.pn === pn) return;
+    await store.set("wa-alias", id, {
+      id,
+      instanceId: instance.id,
+      userId: instance.userId,
+      lid,
+      pn,
+      lookupKey: lid,
+      createdAt: previous?.createdAt || new Date().toISOString(),
+    });
+  }
+  async function resolve(instance, value) {
+    const j = normalizeJid(value);
+    if (j?.endsWith("@lid")) {
+      const a = await store.get("wa-alias", hash(instance.id + ":" + j));
+      if (a?.pn) return a.pn;
+    }
+    return j;
+  }
   async function persist(instance, m, { notify = false } = {}) {
     if (!m.key?.id || !m.key.remoteJid || !m.message) return false;
-    const chatId = m.key.remoteJid,
+    const remote = normalizeJid(m.key.remoteJid),
+      altJid = m.key.remoteJidAlt || m.key.senderPn || m.key.participantPn;
+    if (remote.endsWith("@lid") && altJid) await alias(instance, remote, altJid);
+    const chatId = await resolve(instance, remote),
       ts = timestampSeconds(m.messageTimestamp);
     const createdAt = new Date(
       (ts || Math.floor(Date.now() / 1000)) * 1000,
@@ -171,6 +201,11 @@ export function createInbox(store, enc) {
     }
   }
   async function contact(instance, c) {
+    if (c.lid && c.id) await alias(instance, c.lid, c.id);
+    if (c.id?.endsWith("@lid") && (c.phoneNumber || c.jid)) {
+      const pn = c.phoneNumber || c.jid;
+      await alias(instance, c.id, pn.includes("@") ? pn : pn + "@s.whatsapp.net");
+    }
     const id = hash(instance.id + ":" + c.id),
       previous = await store.get("contacts", id);
     await store.set("contacts", id, {
@@ -185,20 +220,21 @@ export function createInbox(store, enc) {
       consent: previous?.consent || false,
       optedOut: previous?.optedOut || false,
     });
-    const existingChat = await store.get("chats", id);
+    const chatKey = hash(instance.id + ":" + (await resolve(instance, c.id)));
+    const existingChat = await store.get("chats", chatKey);
     if (existingChat && (c.name || c.notify))
-      await store.patch("chats", id, { name: c.name || c.notify });
+      await store.patch("chats", chatKey, { name: c.name || c.notify });
   }
   async function chat(instance, c) {
     if (!c.id) return;
-    const id = hash(instance.id + ":" + c.id);
-    const previous = await store.get("chats", id);
+    const chatId = await resolve(instance, c.id);
+    const id = hash(instance.id + ":" + chatId);
     await store.insert("chats", id, {
       id,
       instanceId: instance.id,
       userId: instance.userId,
-      chatId: c.id,
-      name: c.name || c.id,
+      chatId,
+      name: c.name || chatId,
       unread: 0,
       createdAt: new Date(
         timestampSeconds(c.conversationTimestamp || 0) * 1000,
@@ -231,6 +267,8 @@ export function createInbox(store, enc) {
     contact,
     chat,
     dto,
+    alias,
+    resolve,
     async votes(instance, id) {
       const m = await load(instance.id, id);
       return m

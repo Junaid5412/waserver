@@ -7,7 +7,8 @@ import {
   jidNormalizedUser,
 } from "@whiskeysockets/baileys";
 import pino from "pino";
-import { timestampSeconds, describeMessage } from "./inbox.js";
+import { timestampSeconds, describeMessage, normalizeJid } from "./inbox.js";
+import { createChatResolver } from "./chat-resolver.js";
 import { hash, jid, token } from "./security.js";
 import { fail } from "./errors.js";
 import { messageSchema, validateMessage } from "./content.js";
@@ -24,8 +25,14 @@ const groupId = (v) => {
   if (!id.endsWith("@g.us")) fail(400, "Group JID required");
   return id;
 };
+const chatJid = (value) => {
+  const v = normalizeJid(String(value ?? ""));
+  if (/^\d{5,20}(-\d{5,20})?@(g\.us|lid|broadcast|newsletter)$/.test(v) || v === "status@broadcast") return v;
+  return jid(v);
+};
 export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
   const router = express.Router({ mergeParams: true });
+  const resolver = createChatResolver({ store, wa });
   router.use((req, res, next) => {
     if (
       req.apiInstance &&
@@ -184,17 +191,26 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
   router.get(
     "/chats",
     wrap(async (req, res) => {
-      let rows = await store.query("chats", {
+      const paging = page(req.query);
+      const rows = await store.query("chats", {
         instanceId: req.instance.id,
-        ...page(req.query),
+        ...paging,
+      });
+      const last = rows.at(-1);
+      res.set({
+        "X-Has-More": String(rows.length === paging.limit),
+        "X-Cursor-Created": last?.createdAt || "",
+        "X-Cursor-Id": last?.id || "",
+        "Access-Control-Expose-Headers": "X-Has-More, X-Cursor-Created, X-Cursor-Id",
       });
       const search = String(req.query.search || "").toLowerCase();
+      const merged = await resolver.list(req.instance, rows);
       res.json(
-        rows
+        merged
           .filter(
             (c) =>
               !search ||
-              (c.name + " " + c.chatId).toLowerCase().includes(search),
+              (c.name + " " + c.chatId + " " + c.phone).toLowerCase().includes(search),
           )
           .map((c) => ({
             ...c,
@@ -206,22 +222,38 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
   router.get(
     "/chats/:chat/messages",
     wrap(async (req, res) => {
-      const chat = jid(req.params.chat);
+      const chat = chatJid(req.params.chat),
+        paging = page(req.query),
+        ctx = await resolver.context(req.instance),
+        aliases = await resolver.aliasesOf(req.instance, chat);
+      const seen = new Set(),
+        rows = (
+          await Promise.all(
+            aliases.map((chatId) =>
+              store.query("inbox", { instanceId: req.instance.id, chatId, ...paging }),
+            ),
+          )
+        )
+          .flat()
+          .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || (a.id < b.id ? 1 : -1))
+          .filter((r) => !seen.has(r.waId) && seen.add(r.waId))
+          .slice(0, paging.limit);
       res.json(
-        (
-          await store.query("inbox", {
-            instanceId: req.instance.id,
-            chatId: chat,
-            ...page(req.query),
-          })
-        ).map(inbox.dto),
+        rows.map((row) => {
+          const m = inbox.dto(row),
+            who = m.participant || row.chatId;
+          return {
+            ...m,
+            name: row.fromMe ? "You" : ctx.nameFor(who) || m.name || ctx.labelFor(who),
+          };
+        }),
       );
     }),
   );
   router.put(
     "/chats/:chat/settings",
     wrap(async (req, res) => {
-      const chat = jid(req.params.chat),
+      const chat = chatJid(req.params.chat),
         d = z
           .object({
             archive: z.boolean().optional(),
@@ -231,7 +263,12 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
           })
           .parse(req.body),
         s = wa.active(req.instance.id);
-      const c = await store.get("chats", hash(req.instance.id + ":" + chat));
+      const related = [];
+      for (const alias of await resolver.aliasesOf(req.instance, chat)) {
+        const row = await store.get("chats", hash(req.instance.id + ":" + alias));
+        if (row) related.push(row);
+      }
+      const c = related.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
       if (!c) fail(404, "Chat not found");
       const last = c.lastMessageId
         ? await inbox.load(req.instance.id, c.lastMessageId)
@@ -245,22 +282,23 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
           ]
         : [];
       if (d.archive !== undefined)
-        await s.chatModify({ archive: d.archive, lastMessages }, chat);
-      if (d.pin !== undefined) await s.chatModify({ pin: d.pin }, chat);
+        await s.chatModify({ archive: d.archive, lastMessages }, c.chatId);
+      if (d.pin !== undefined) await s.chatModify({ pin: d.pin }, c.chatId);
       if (d.muteUntil !== undefined)
         await s.chatModify(
           { mute: d.muteUntil ? Date.parse(d.muteUntil) : null },
-          chat,
+          c.chatId,
         );
       if (d.read) {
         if (last) await s.readMessages([last.key]);
-        await store.patch("chats", c.id, { unread: 0 });
+        for (const row of related) await store.patch("chats", row.id, { unread: 0 });
       }
-      await store.patch("chats", c.id, {
-        ...(d.archive !== undefined ? { archived: d.archive } : {}),
-        ...(d.pin !== undefined ? { pinned: d.pin } : {}),
-        ...(d.muteUntil !== undefined ? { muteUntil: d.muteUntil } : {}),
-      });
+      for (const row of related)
+        await store.patch("chats", row.id, {
+          ...(d.archive !== undefined ? { archived: d.archive } : {}),
+          ...(d.pin !== undefined ? { pinned: d.pin } : {}),
+          ...(d.muteUntil !== undefined ? { muteUntil: d.muteUntil } : {}),
+        });
       res.json({ ok: true });
     }),
   );
@@ -566,6 +604,29 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
           await media.buffer(req.instance, d.pictureMediaId),
         );
       res.json({ ok: true });
+    }),
+  );
+  router.get(
+    "/groups/:group/overview",
+    wrap(async (req, res) => {
+      const id = groupId(req.params.group),
+        ctx = await resolver.context(req.instance),
+        meta = await wa.active(req.instance.id).groupMetadata(id);
+      res.json({
+        id,
+        subject: meta.subject || "",
+        description: meta.desc || "",
+        owner: meta.owner ? ctx.nameFor(meta.owner) || ctx.labelFor(meta.owner) : "",
+        createdAt: meta.creation ? new Date(meta.creation * 1000).toISOString() : null,
+        announce: !!meta.announce,
+        restrict: !!meta.restrict,
+        participants: (meta.participants || []).map((p) => ({
+          id: p.id,
+          name: ctx.nameFor(p.id),
+          phone: ctx.labelFor(p.id),
+          admin: p.admin || null,
+        })),
+      });
     }),
   );
   router.get(

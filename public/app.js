@@ -134,6 +134,8 @@ const ICONS = {
   link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
   chat: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   bolt: '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
+  qr: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v3M14 20h3M20 20v1"/>',
+  key: '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M16 7l3 3M14 9l2 2"/>',
   plug: '<path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a6 6 0 0 1-12 0V8z"/>',
 };
 const ico = (n, s = 20) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n] || ""}</svg>`;
@@ -169,6 +171,23 @@ function shell() {
   on("logout2", out);
   render();
 }
+function summarize(data) {
+  if (!data || typeof data !== "object") return "";
+  return Object.entries(data)
+    .filter(([k, v]) => v != null && v !== "" && k !== "message")
+    .map(([k, v]) => {
+      const label = k.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase());
+      const val = typeof v === "object" ? (Array.isArray(v) ? v.length + " items" : Object.keys(v).length + " fields") : String(v);
+      return label + ": " + (val.length > 80 ? val.slice(0, 77) + "…" : val);
+    })
+    .join(" · ");
+}
+const uptime = (s) => {
+  s = Number(s) || 0;
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+  return d ? d + "d " + h + "h" : h ? h + "h " + m + "m" : m + "m";
+};
+const flat = (v) => (v && typeof v === "object" ? Object.entries(v).map(([k, n]) => k + ": " + n).join(", ") : String(v));
 function cards(limit) {
   const list = limit ? instances.slice(0, limit) : instances;
   return list.length
@@ -190,16 +209,7 @@ function render() {
     w.innerHTML = '<div class="loading">Checking system…</div>';
     api("/admin/system")
       .then((d) => {
-        w.innerHTML =
-          '<h1>System health</h1><div class="card"><p>Database: ' +
-          esc(d.database) +
-          "</p><p>Uptime: " +
-          d.uptimeSeconds +
-          " seconds · Node " +
-          esc(d.nodeVersion) +
-          '</p><pre class="doccode">' +
-          esc(JSON.stringify(d.counts, null, 2)) +
-          "</pre></div>";
+        w.innerHTML = `<div class="top"><div><div class="eyebrow">Administration</div><h1>System health</h1><p>Live status of the server and database.</p></div></div><div class="metrics"><div class="card metric"><span class="ico-box ok">${ico("check")}</span><div><div class="value">${esc(d.database)}</div><div class="hint">Database</div></div></div><div class="card metric"><span class="ico-box">${ico("activity")}</span><div><div class="value">${uptime(d.uptimeSeconds)}</div><div class="hint">Uptime</div></div></div><div class="card metric"><span class="ico-box warn">${ico("home")}</span><div><div class="value">${esc(d.nodeVersion)}</div><div class="hint">Node.js</div></div></div></div><section class="card"><h3>Records</h3><div class="tablewrap"><table><thead><tr><th>Type</th><th>Count</th></tr></thead><tbody>${Object.entries(d.counts || {}).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(flat(v))}</td></tr>`).join("")}</tbody></table></div></section>`;
       })
       .catch((e) => (w.textContent = e.message));
     return;
@@ -333,15 +343,51 @@ function instancePage() {
     return;
   }
   if (tab === "connection") {
-    p.innerHTML = `<div class="split"><div class="card"><h3>Link your WhatsApp number</h3><p class="hint">Open WhatsApp → Linked devices → Link a device. Scan the QR code displayed here.</p><div id="qrbox"></div><div class="actions"><button id="connect" class="btn primary">Connect number</button><button id="disconnect" class="btn danger">Log out number</button></div></div><div class="card"><h3>API access</h3><p class="hint">Generate an API key scoped to this instance. It is shown once. Generating a new key revokes the previous one.</p><button id="key" class="btn">Generate API key</button><div id="keybox"></div><p class="hint">Instance ID</p><div class="key">${esc(x.id)}</div></div></div>`;
+    const connected = x.status === "connected";
+    const method0 = localStorage.getItem("zelonLinkMethod") === "pair" ? "pair" : "qr";
+    const linkCard = connected
+      ? `<div class="state-ok"><span class="ico-box ok big">${ico("check", 28)}</span><h3>WhatsApp is connected</h3><p class="hint">${x.phone ? "Linked number <strong>+" + esc(x.phone) + "</strong> is" : "Your number is"} online and ready to send and receive messages.</p><div class="actions center"><button id="restart" class="btn">Restart connection</button><button id="disconnect" class="btn danger">Log out number</button></div></div>`
+      : `<h3>Link your WhatsApp number</h3><p class="hint">Choose how you want to link this number. You only need one method.</p><div class="alert" id="linkAlert" hidden></div><div class="seg" role="tablist"><button type="button" class="segbtn ${method0 === "qr" ? "active" : ""}" data-method="qr">${ico("qr", 18)}Scan QR code</button><button type="button" class="segbtn ${method0 === "pair" ? "active" : ""}" data-method="pair">${ico("key", 18)}Pairing code</button></div><div id="methodQr" ${method0 === "qr" ? "" : "hidden"}><ol class="how"><li>Open WhatsApp on your phone</li><li>Go to <b>Linked devices → Link a device</b></li><li>Scan the QR code shown below</li></ol><div id="qrbox" class="qrbox"></div><div class="actions center"><button id="connect" class="btn primary">Generate QR code</button></div></div><div id="methodPair" ${method0 === "pair" ? "" : "hidden"}><ol class="how"><li>Enter the number you want to link</li><li>Open WhatsApp → <b>Linked devices → Link a device</b></li><li>Choose <b>Link with phone number instead</b> and type the code</li></ol><form id="pairForm"><label for="pairPhone">WhatsApp number (with country code)</label><input id="pairPhone" name="pairPhone" type="tel" placeholder="+97450000000" required><div class="actions"><button type="submit" class="btn primary">Get pairing code</button></div></form><div id="pairResult"></div></div>`;
+    p.innerHTML = `<div class="split"><section class="card link-card">${linkCard}</section><section class="card"><h3>API access</h3><p class="hint">Generate an API key scoped to this instance. It is shown once. Generating a new key revokes the previous one.</p><div class="actions"><button id="key" class="btn">${ico("key", 16)}Generate API key</button></div><div id="keybox"></div><p class="hint">Instance ID</p><div class="key">${esc(x.id)}</div></section></div>`;
+    const swap = (m) => {
+      localStorage.setItem("zelonLinkMethod", m);
+      document.querySelectorAll("[data-method]").forEach((b) => b.classList.toggle("active", b.dataset.method === m));
+      document.querySelector("#methodQr")?.toggleAttribute("hidden", m !== "qr");
+      document.querySelector("#methodPair")?.toggleAttribute("hidden", m !== "pair");
+    };
+    document.querySelectorAll("[data-method]").forEach((b) => (b.onclick = () => swap(b.dataset.method)));
     on("connect", async () => {
       await api(base + "/connect", "POST", {});
       toast("Connection started. Waiting for QR code.");
       await poll();
     });
-    on("disconnect", async () => {
-      await api(base + "/disconnect", "POST", {});
-      await load();
+    form("pairForm", async (d) => {
+      const r = await api(base + "/pairing-code", "POST", { phone: d.pairPhone });
+      const code = String(r.code || "").replace(/(.{4})(?=.)/, "$1-");
+      document.querySelector("#pairResult").innerHTML = `<div class="paircode"><span>Your pairing code</span><strong>${esc(code)}</strong><button type="button" class="btn mini" id="copyCode">Copy code</button><p class="hint">Enter it in WhatsApp within about a minute.</p></div>`;
+      on("copyCode", async () => {
+        await navigator.clipboard?.writeText(String(r.code));
+        toast("Code copied");
+      });
+    });
+    on("restart", async () => {
+      await api(base + "/restart", "POST", {});
+      toast("Connection restarting");
+      setTimeout(load, 2500);
+    });
+    on("disconnect", () => {
+      const m = modal(
+        '<h2>Log out this number?</h2><p>The WhatsApp session will be removed from this server. You will need to link the number again to send or receive messages.</p><div class="actions"><button class="btn danger" id="confirmLogout">Log out number</button><button class="btn" id="cancelLogout">Cancel</button></div>',
+      );
+      on("cancelLogout", m.close);
+      on("confirmLogout", async () => {
+        m.close();
+        let failure;
+        try { await api(base + "/disconnect", "POST", {}); } catch (e) { failure = e; }
+        await load(); // WhatsApp can drop the socket mid-logout; trust the real state.
+        if (selected?.status === "connected") toast(failure?.message || "Could not log out. Try again.");
+        else toast("Number logged out");
+      });
     });
     on("key", async () => {
       const d = await api(base + "/key", "POST", {});
@@ -352,14 +398,25 @@ function instancePage() {
       try {
         const d = await api(base + "/qr");
         if (selected?.id !== x.id || tab !== "connection") return;
-        const box = document.querySelector("#qrbox");
-        box.innerHTML = d.qr
-          ? `<img class="qr" src="${esc(d.qr)}" alt="WhatsApp linking QR code">`
-          : `<p class="hint">${esc(d.error || (d.status === "connected" ? "Your number is connected." : ["connecting", "reconnecting"].includes(d.status) ? "Connecting to WhatsApp. Waiting for QR code…" : "Select Connect number to generate a QR code."))}</p>`;
+        const wasConnected = x.status === "connected";
         if (d.status !== x.status) {
           instances = await api("/instances");
-          selected = instances.find((i) => i.id === x.id);
-          if (d.status === "connected") render();
+          selected = instances.find((i) => i.id === x.id) || selected;
+          x.status = d.status;
+          if ((d.status === "connected") !== wasConnected) {
+            render();
+            return;
+          }
+        }
+        const box = document.querySelector("#qrbox");
+        if (box)
+          box.innerHTML = d.qr
+            ? `<img class="qr" src="${esc(d.qr)}" alt="WhatsApp linking QR code">`
+            : `<p class="hint center">${["connecting", "reconnecting", "awaiting_qr"].includes(d.status) ? "Connecting to WhatsApp… the QR code will appear here." : "Select Generate QR code to start linking."}</p>`;
+        const alert = document.querySelector("#linkAlert");
+        if (alert) {
+          alert.hidden = !d.error;
+          alert.textContent = d.error || "";
         }
       } catch (e) {
         toast(e.message);
@@ -420,7 +477,7 @@ function instancePage() {
       const rows = await api(endpoint + query);
       if (selected?.id !== x.id || tab !== currentTab) return;
       records = older ? [...records, ...rows] : rows;
-      p.innerHTML = `<div class="card"><div class="row"><h3>${currentTab === "history" ? "Outgoing messages" : "Incoming events"}</h3><button id="refresh" class="btn">Refresh</button></div><p class="hint">Newest records first.</p>${records.length ? `<div class="tablewrap"><table><thead><tr><th>Time</th><th>${currentTab === "history" ? "Recipient" : "Event"}</th><th>Details</th><th>Status</th><th>Action</th></tr></thead><tbody>${records.map((r) => `<tr><td>${esc(new Date(r.createdAt).toLocaleString())}</td><td>${esc(r.to || r.type)}</td><td>${esc(r.text || JSON.stringify(r.data || {}))}</td><td><span class="status ${esc(r.status || "")}">${esc(r.status || "received")}</span></td><td>${r.status === "queued" ? `<button class="btn" data-cancel="${esc(r.id)}">Cancel</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : '<p class="hint">No records yet.</p>'}${rows.length === 25 ? '<div class="actions"><button class="btn" id="older">Load older records</button></div>' : ""}</div>`;
+      p.innerHTML = `<div class="card"><div class="row"><h3>${currentTab === "history" ? "Outgoing messages" : "Incoming events"}</h3><button id="refresh" class="btn">Refresh</button></div><p class="hint">Newest records first.</p>${records.length ? `<div class="tablewrap"><table><thead><tr><th>Time</th><th>${currentTab === "history" ? "Recipient" : "Event"}</th><th>Details</th><th>Status</th><th>Action</th></tr></thead><tbody>${records.map((r) => `<tr><td>${esc(new Date(r.createdAt).toLocaleString())}</td><td>${esc(r.to || r.type)}</td><td>${esc(r.text || summarize(r.data))}</td><td><span class="status ${esc(r.status || "")}">${esc(r.status || "received")}</span></td><td>${r.status === "queued" ? `<button class="btn" data-cancel="${esc(r.id)}">Cancel</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : '<p class="hint">No records yet.</p>'}${rows.length === 25 ? '<div class="actions"><button class="btn" id="older">Load older records</button></div>' : ""}</div>`;
       on("refresh", () => fetchRecords());
       on("older", () => fetchRecords(true));
       document.querySelectorAll("[data-cancel]").forEach(
@@ -489,44 +546,59 @@ function instancePage() {
       .catch((e) => toast(e.message));
   }
   if (tab === "groups") {
-    p.innerHTML = `<div class="split"><div class="card"><h3>Check a WhatsApp number</h3><form id="check"><label for="phone">Phone number</label><input name="phone" id="phone" placeholder="+97450000000" required><div class="actions"><button type="submit" class="btn primary">Check number</button></div></form><div id="result"></div></div><div class="card"><h3>Your groups</h3><button id="groups" class="btn">Load groups</button><div id="groupList"></div></div></div><div class="card"><h3>Create a group</h3><form id="groupCreate"><label for="groupName">Group name</label><input id="groupName" name="name" required><label for="participants">Participants (one phone number per line)</label><textarea name="participants" id="participants" required></textarea><div class="actions"><button type="submit" class="btn primary">Create group</button></div></form></div><div class="card"><h3>Manage group members</h3><form id="members"><label for="groupId">Group JID</label><input id="groupId" name="groupId" placeholder="123456789@g.us" required><label for="memberPhones">Participants (one phone per line)</label><textarea id="memberPhones" name="participants" required></textarea><label for="memberAction">Action</label><select id="memberAction" name="action"><option value="add">Add</option><option value="remove">Remove</option><option value="promote">Promote to admin</option><option value="demote">Remove admin role</option></select><div class="actions"><button class="btn primary" type="submit">Update members</button></div></form></div>`;
+    p.innerHTML = `<section class="card"><div class="row card-title"><h3>Your groups</h3><div class="row"><input id="groupSearch" class="inline-search" placeholder="Search groups" aria-label="Search groups"><button id="groups" class="btn mini">Refresh</button></div></div><div id="groupList"><p class="hint">Loading groups…</p></div></section><div class="split spaced"><section class="card"><h3>Check a WhatsApp number</h3><form id="check"><label for="phone">Phone number</label><input name="phone" id="phone" placeholder="+97450000000" required><div class="actions"><button type="submit" class="btn primary">Check number</button></div></form><div id="result"></div></section><section class="card"><h3>Create a group</h3><form id="groupCreate"><label for="groupName">Group name</label><input id="groupName" name="name" required><label for="participants">Participants (one phone number per line)</label><textarea name="participants" id="participants" required></textarea><div class="actions"><button type="submit" class="btn primary">Create group</button></div></form></section></div><section class="card"><h3>Manage group members</h3><form id="members"><label for="groupId">Group</label><input id="groupId" name="groupId" list="groupChoices" placeholder="Pick a group or paste 123456789@g.us" autocomplete="off" required><datalist id="groupChoices"></datalist><label for="memberPhones">Participants (one phone per line)</label><textarea id="memberPhones" name="participants" required></textarea><label for="memberAction">Action</label><select id="memberAction" name="action"><option value="add">Add</option><option value="remove">Remove</option><option value="promote">Promote to admin</option><option value="demote">Remove admin role</option></select><div class="actions"><button class="btn primary" type="submit">Update members</button></div></form></section>`;
+    p.classList.add("stack");
+    let groupRows = [];
+    const drawGroups = () => {
+      const q = document.querySelector("#groupSearch").value.toLowerCase();
+      const rows = groupRows.filter((g) => (g.subject || "").toLowerCase().includes(q));
+      document.querySelector("#groupList").innerHTML = rows.length
+        ? `<div class="inst-list">${rows.map((g) => `<article class="group-row"><span class="avatar group">${ico("users", 20)}</span><div class="inst-info"><strong>${esc(g.subject || "Unnamed group")}</strong><span class="hint">${g.participants?.length || 0} participants${g.desc ? " · " + esc(String(g.desc).slice(0, 60)) : ""}</span></div><button class="btn mini primary" data-open-group="${esc(g.id)}">Open chat</button><button class="btn mini" data-group-info="${esc(g.id)}">Details</button></article>`).join("")}</div>`
+        : `<p class="hint">${groupRows.length ? "No groups match your search." : "No groups found for this number."}</p>`;
+      document.querySelectorAll("[data-open-group]").forEach((b) => (b.onclick = () => {
+        const g = groupRows.find((r) => r.id === b.dataset.openGroup);
+        window.__zelonChatMeta = { id: g.id, chatId: g.id, name: g.subject, kind: "group", participants: g.participants?.length || 0 };
+        tab = "inbox";
+        render();
+      }));
+      document.querySelectorAll("[data-group-info]").forEach((b) => (b.onclick = async () => {
+        try {
+          const g = await api(base + "/groups/" + encodeURIComponent(b.dataset.groupInfo) + "/overview");
+          const m = modal(`<h2>${esc(g.subject)}</h2><p class="hint">${g.createdAt ? "Created " + esc(new Date(g.createdAt).toLocaleDateString()) : ""}${g.owner ? " · Owner " + esc(g.owner) : ""}</p>${g.description ? `<p>${esc(g.description)}</p>` : ""}<div class="chips"><span class="status ${g.announce ? "queued" : "connected"}">${g.announce ? "Only admins can send" : "Everyone can send"}</span><span class="status ${g.restrict ? "queued" : "connected"}">${g.restrict ? "Only admins edit info" : "Everyone can edit info"}</span></div><h3>${g.participants.length} participants</h3><div class="members">${g.participants.map((u) => `<div class="record row"><div><strong>${esc(u.name || u.phone)}</strong>${u.name ? `<div class="hint">${esc(u.phone)}</div>` : ""}</div>${u.admin ? `<span class="status connected">${u.admin === "superadmin" ? "Owner" : "Admin"}</span>` : ""}</div>`).join("")}</div><div class="actions"><button class="btn" id="closeGroup">Close</button></div>`);
+          on("closeGroup", m.close);
+        } catch (e) { toast(e.message); }
+      }));
+    };
+    const loadGroups = async () => {
+      try {
+        const r = await api(base + "/groups");
+        groupRows = Object.values(r).sort((a, b) => (a.subject || "").localeCompare(b.subject || ""));
+        document.querySelector("#groupChoices").innerHTML = groupRows.map((g) => `<option value="${esc(g.id)}">${esc(g.subject)}</option>`).join("");
+        drawGroups();
+      } catch (e) {
+        document.querySelector("#groupList").innerHTML = `<p class="hint">${esc(e.message)}. Connect your number to load groups.</p>`;
+      }
+    };
+    document.querySelector("#groupSearch").oninput = drawGroups;
+    on("groups", loadGroups);
+    loadGroups();
     form("members", async (d) => {
       const group = d.groupId;
       delete d.groupId;
-      d.participants = d.participants
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      await api(
-        base + "/groups/" + encodeURIComponent(group) + "/participants",
-        "PUT",
-        d,
-      );
+      d.participants = d.participants.split("\n").map((s) => s.trim()).filter(Boolean);
+      await api(base + "/groups/" + encodeURIComponent(group) + "/participants", "PUT", d);
       toast("Group members updated");
     });
     form("check", async (d) => {
       const r = await api(base + "/check-number", "POST", d);
-      document.querySelector("#result").textContent = r[0]?.exists
-        ? "This number is on WhatsApp."
-        : "No WhatsApp account found.";
-    });
-    on("groups", async () => {
-      const r = await api(base + "/groups");
-      document.querySelector("#groupList").innerHTML =
-        Object.values(r)
-          .map(
-            (g) =>
-              `<p><strong>${esc(g.subject)}</strong><br><span class="hint">${esc(g.id)} · ${g.participants.length} participants</span></p>`,
-          )
-          .join("") || "<p>No groups found.</p>";
+      const ok = r[0]?.exists;
+      document.querySelector("#result").innerHTML = `<p class="resultline ${ok ? "ok" : "no"}">${ok ? "This number is on WhatsApp." : "No WhatsApp account found."}</p>`;
     });
     form("groupCreate", async (d) => {
-      d.participants = d.participants
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean);
+      d.participants = d.participants.split("\n").map((s) => s.trim()).filter(Boolean);
       const r = await api(base + "/groups", "POST", d);
-      toast("Group created: " + r.id);
+      toast("Group created: " + (r.subject || r.id));
+      await loadGroups();
     });
   }
 }

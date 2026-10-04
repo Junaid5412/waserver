@@ -61,16 +61,17 @@ function setup(role = "admin") {
   vm.runInContext(script, dom.getInternalVMContext());
   return { dom, requests, document: dom.window.document };
 }
-test("Console escapes user content and keeps sign-out outside hidden mobile account details", async () => {
+test("Console escapes user content and keeps sign-out reachable on desktop and mobile", async () => {
   const { dom, document } = setup();
   try {
     await wait(() => document.querySelector("[data-instance]"));
     assert.equal(document.querySelectorAll("script").length, 0);
     assert(
-      document.querySelector(".instancegrid").textContent.includes("<script>"),
+      document.querySelector(".inst-list").textContent.includes("<script>"),
     );
-    assert(document.querySelector("#logout").closest("nav"));
-    assert(!document.querySelector("#logout").closest(".account"));
+    assert(document.querySelector("#logout"));
+    assert(document.querySelector("#logout2"));
+    assert(document.querySelector(".bottomnav [data-view]"));
     document.querySelector('[data-view="account"]').click();
     assert(document.querySelector("#passwordForm"));
   } finally {
@@ -125,6 +126,8 @@ test("Queued message cancellation uses the selected instance and safely renders 
   try {
     await wait(() => document.querySelector("[data-instance]"));
     document.querySelector("[data-instance]").click();
+    document.querySelector('[data-tab="inbox"]').click();
+    await wait(() => document.querySelector('[data-tab="history"]'));
     document.querySelector('[data-tab="history"]').click();
     await wait(() => document.querySelector("[data-cancel]"));
     assert.equal(document.querySelector("#panel img"), null);

@@ -126,7 +126,11 @@ export function gateway(store, encryption, emit, {
             qrs.delete(instance.id);
             const code = update.lastDisconnect?.error?.output?.statusCode;
             if (code === 405) protocol = undefined;
-            instance.connectionError = "WhatsApp connection closed" + (code ? " (code " + code + ")" : "") + ". Retry the connection; if it persists, check server outbound WebSocket access.";
+            instance.connectionError = stopped.has(instance.id)
+              ? null
+              : code === DisconnectReason.loggedOut
+                ? "This number was logged out of WhatsApp. Link it again to continue."
+                : "WhatsApp connection closed" + (code ? " (code " + code + ")" : "") + ". Retry the connection; if it persists, check server outbound WebSocket access.";
             logger.error({ instanceId: instance.id, disconnectCode: code }, "WhatsApp connection closed");
             const terminal = [
               DisconnectReason.loggedOut,
@@ -265,7 +269,17 @@ export function gateway(store, encryption, emit, {
           await emit(instance, "presence", data);
         } catch {}
       });
+      if (inbox) {
+        socket.ev.on("groups.upsert", async (groups) => {
+          try { for (const g of groups) if (g.subject) await inbox.chat(instance, { id: g.id, name: g.subject }); } catch {}
+        });
+        socket.ev.on("lid-mapping.update", async (m) => {
+          try { if (m?.lid && m?.pn) await inbox.alias(instance, m.lid, m.pn); } catch {}
+        });
+      }
       socket.ev.on("groups.update", async (data) => {
+        if (inbox)
+          try { for (const g of data) if (g.id && g.subject) await inbox.chat(instance, { id: g.id, name: g.subject }); } catch {}
         try {
           await emit(instance, "group", data);
         } catch {}
@@ -326,17 +340,25 @@ export function gateway(store, encryption, emit, {
       clearTimeout(reconnectTimers.get(instance.id));
       reconnectTimers.delete(instance.id);
       const s = sockets.get(instance.id);
-      if (s) {
-        if (logout) await s.logout();
-        else s.end(undefined);
-      }
       sockets.delete(instance.id);
       qrs.delete(instance.id);
+      if (s) {
+        // WhatsApp may close the socket while we log out; that still means success.
+        try {
+          if (logout) await s.logout();
+          else s.end(undefined);
+        } catch {
+          try { s.end(undefined); } catch {}
+        }
+      }
       if (logout) await store.clearNamespace("auth:" + instance.id);
       instance.status = "disconnected";
+      instance.connectionError = null;
+      if (logout) instance.phone = null;
       await store.patch("instances", instance.id, {
         status: instance.status,
         phone: instance.phone,
+        connectionError: null,
       });
     },
     async shutdown() {

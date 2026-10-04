@@ -267,124 +267,201 @@ window.ZelonFeatures = (() => {
       return body;
     }
     if (tab === "inbox") {
-      let chats = await api(base + "/chats?limit=100"),
-        chat = null,
-        messages = [],
-        quotedId;
-      let hasMoreChats = chats.length === 100;
-      let chatCursor = chats.at(-1);
-      p.innerHTML = `<div class="inboxlayout"><section class="card chatlist"><div class="row"><h3>Conversations</h3><button class="btn" id="reloadInbox">Refresh</button></div><input id="chatSearch" aria-label="Search conversations" placeholder="Search conversations"><div id="chatRows"></div><button class="btn" id="moreChats">Load more conversations</button><form id="openChat">${field("newChat", "New conversation", "tel", 'placeholder="+97450000000" required')}${submit("Open chat")}</form></section><section class="card conversation" id="conversation"><div class="empty"><h3>Your shared inbox</h3><p>Select a conversation to read messages and reply.</p></div></section></div>`;
-      const drawChats = (q) => {
-        document.querySelector("#chatRows").innerHTML = list(
-          chats.filter((c) =>
-            (c.name + " " + c.chatId).toLowerCase().includes(q),
-          ),
-          (c) =>
-            `<button class="chatentry ${chat === c.chatId ? "active" : ""}" data-chat="${esc(c.chatId)}"><span class="avatar">${esc((c.name || c.chatId || "C").slice(0, 1).toUpperCase())}</span><div class="chat-copy"><strong>${esc(c.name || c.chatId)}</strong><span>${esc(c.lastPreview || "Start a conversation")}</span><small>${c.unread ? c.unread + " unread · " : ""}${c.archived ? "Archived" : c.pinned ? "Pinned" : "WhatsApp"}</small></div></button>`,
-          "Conversations appear after WhatsApp syncs.",
-        );
-        document
-          .querySelectorAll("[data-chat]")
-          .forEach(
-            (b) =>
-              (b.onclick = () =>
-                open(b.dataset.chat).catch((e) => toast(e.message))),
-          );
+      document.body.classList.remove("inbox-lock");
+      const ICON = {
+        group: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+        expand: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>',
+        refresh: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 0-15-6.7L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 15 6.7L21 16"/><path d="M21 21v-5h-5"/></svg>',
+        plus: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
+        back: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>',
+        send: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></svg>',
+        clip: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
       };
+      const initial = (n) => (String(n || "?").replace(/^[^\p{L}\p{N}]+/u, "")[0] || "?").toUpperCase();
+      const fmtTime = (iso) => {
+        const d = new Date(iso);
+        if (!iso || isNaN(d)) return "";
+        const now = new Date();
+        if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        if (d.toDateString() === new Date(now - 864e5).toDateString()) return "Yesterday";
+        return d.toLocaleDateString([], { day: "numeric", month: "short" });
+      };
+      const fmtDay = (iso) => {
+        const d = new Date(iso);
+        if (isNaN(d)) return "";
+        const now = new Date();
+        if (d.toDateString() === now.toDateString()) return "Today";
+        if (d.toDateString() === new Date(now - 864e5).toDateString()) return "Yesterday";
+        return d.toLocaleDateString([], { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+      };
+      const avatarFor = (c, cls = "") =>
+        `<span class="avatar ${c?.kind === "group" ? "group" : ""} ${cls}">${c?.kind === "group" ? ICON.group : esc(initial(c?.name || c?.chatId))}</span>`;
+      async function getChats(cursor) {
+        const q = "?limit=100" + (cursor ? "&before=" + encodeURIComponent(cursor.createdAt) + "&beforeId=" + encodeURIComponent(cursor.id) : "");
+        const r = await fetch("/api" + base + "/chats" + q);
+        const rows = await r.json();
+        if (!r.ok) throw Error(rows.error || "Could not load conversations");
+        const header = (k) => r.headers?.get?.(k);
+        return {
+          rows,
+          more: header("X-Has-More") != null ? header("X-Has-More") === "true" : rows.length === 100,
+          cursor: header("X-Cursor-Created") ? { createdAt: header("X-Cursor-Created"), id: header("X-Cursor-Id") } : rows.at(-1),
+        };
+      }
+      const mergeChats = (current, incoming) => {
+        const byId = new Map(current.map((c) => [c.chatId, c]));
+        for (const c of incoming) byId.set(c.chatId, c);
+        return [...byId.values()].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
+      };
+      const first = await getChats();
+      let chats = mergeChats([], first.rows),
+        hasMoreChats = first.more,
+        chatCursor = first.cursor,
+        chat = null,
+        meta = null,
+        messages = [],
+        quotedId,
+        filter = "all";
+      p.innerHTML = `<div class="inboxlayout"><section class="card chatlist"><div class="inbox-bar"><h3>Chats</h3><div class="inbox-tools"><button class="icon-btn flat" id="newChatBtn" title="New conversation" aria-label="New conversation">${ICON.plus}</button><button class="icon-btn flat" id="reloadInbox" title="Refresh" aria-label="Refresh conversations">${ICON.refresh}</button><button class="icon-btn flat" id="fullInbox" title="Full screen" aria-label="Full screen">${ICON.expand}</button></div></div><form id="openChat" hidden>${field("newChat", "New conversation", "tel", 'placeholder="+97450000000" required')}${submit("Open chat")}</form><input id="chatSearch" aria-label="Search conversations" placeholder="Search name or number"><div class="chat-filters" role="tablist"><button class="chip active" data-filter="all">All</button><button class="chip" data-filter="unread">Unread</button><button class="chip" data-filter="groups">Groups</button></div><div id="chatRows"></div><button class="btn mini" id="moreChats">Load more conversations</button></section><section class="card conversation" id="conversation"><div class="empty"><h3>Your shared inbox</h3><p>Select a conversation to read messages and reply.</p></div></section></div>`;
+      const layout = () => document.querySelector(".inboxlayout");
+      const drawChats = () => {
+        const q = document.querySelector("#chatSearch").value.toLowerCase();
+        const rows = chats.filter(
+          (c) =>
+            ((c.name || "") + " " + (c.chatId || "") + " " + (c.phone || "")).toLowerCase().includes(q) &&
+            (filter === "all" || (filter === "unread" && c.unread > 0) || (filter === "groups" && c.kind === "group")),
+        );
+        document.querySelector("#chatRows").innerHTML = list(
+          rows,
+          (c) =>
+            `<button class="chatentry ${chat === c.chatId ? "active" : ""}" data-chat="${esc(c.chatId)}">${avatarFor(c)}<div class="chat-copy"><div class="chat-top"><strong>${esc(c.name || c.chatId)}</strong><time>${esc(fmtTime(c.createdAt))}</time></div><div class="chat-bottom"><span class="chat-preview">${esc(c.lastPreview || "No messages yet")}</span>${c.unread ? `<b class="badge">${c.unread > 99 ? "99+" : c.unread}</b>` : c.pinned ? '<span class="pin">Pinned</span>' : ""}</div></div></button>`,
+          "No conversations match.",
+        );
+        document.querySelectorAll("[data-chat]").forEach((b) => (b.onclick = () => open(b.dataset.chat).catch((e) => toast(e.message))));
+      };
+      document.querySelectorAll("[data-filter]").forEach((b) => (b.onclick = () => {
+        filter = b.dataset.filter;
+        document.querySelectorAll("[data-filter]").forEach((x) => x.classList.toggle("active", x === b));
+        drawChats();
+      }));
       const moreButton = document.querySelector("#moreChats");
       moreButton.hidden = !hasMoreChats;
       moreButton.onclick = async () => {
         moreButton.disabled = true;
         try {
-          const next = await api(base + "/chats?limit=100&before=" + encodeURIComponent(chatCursor.createdAt) + "&beforeId=" + encodeURIComponent(chatCursor.id));
-          const known = new Set(chats.map(row => row.id));
-          chats.push(...next.filter(row => !known.has(row.id)));
-          chatCursor = next.at(-1) || chatCursor;
-          hasMoreChats = next.length === 100;
+          const next = await getChats(chatCursor);
+          chats = mergeChats(chats, next.rows);
+          chatCursor = next.cursor || chatCursor;
+          hasMoreChats = next.more;
           moreButton.hidden = !hasMoreChats;
-          drawChats(document.querySelector("#chatSearch").value.toLowerCase());
+          drawChats();
         } catch (error) { toast(error.message); }
         finally { moreButton.disabled = false; }
       };
-      drawChats("");
-      document.querySelector("#chatSearch").oninput = (e) =>
-        drawChats(e.target.value.toLowerCase());
+      drawChats();
+      document.querySelector("#chatSearch").oninput = drawChats;
+      document.querySelector("#newChatBtn").onclick = () => {
+        const f = document.querySelector("#openChat");
+        f.hidden = !f.hidden;
+        if (!f.hidden) document.querySelector("#newChat").focus();
+      };
+      const setFull = (on) => {
+        const el = layout();
+        if (!el) return;
+        el.classList.toggle("inbox-full", on);
+        document.body.classList.toggle("inbox-lock", on);
+        for (const b of document.querySelectorAll("#fullInbox,#fullInbox2")) {
+          b.title = on ? "Exit full screen" : "Full screen";
+          b.classList.toggle("on", on);
+        }
+        if (on) el.requestFullscreen?.().catch(() => {});
+        else if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+      };
+      const toggleFull = () => setFull(!layout()?.classList.contains("inbox-full"));
+      document.querySelector("#fullInbox").onclick = toggleFull;
+      const onFsChange = () => {
+        if (!p.isConnected) return document.removeEventListener("fullscreenchange", onFsChange);
+        if (!document.fullscreenElement && layout()?.classList.contains("inbox-full") && layout().dataset.native === "1") setFull(false);
+        if (document.fullscreenElement) layout().dataset.native = "1";
+      };
+      document.addEventListener("fullscreenchange", onFsChange);
+      const onEsc = (e) => {
+        if (!p.isConnected) return document.removeEventListener("keydown", onEsc);
+        if (e.key === "Escape" && layout()?.classList.contains("inbox-full")) setFull(false);
+      };
+      document.addEventListener("keydown", onEsc);
       let polling = false;
       ctx.startPolling?.(async () => {
         if (polling || !p.isConnected || document.hidden) return;
         polling = true;
         try {
-          const freshChats = await api(base + "/chats?limit=100");
-          const freshIds = new Set(freshChats.map(row => row.id));
-          chats = [...freshChats, ...chats.filter(row => !freshIds.has(row.id))];
+          chats = mergeChats(chats, (await getChats()).rows);
           if (!p.isConnected) return;
-          drawChats(document.querySelector("#chatSearch").value.toLowerCase());
+          drawChats();
           if (chat && messages.length <= 50) {
             const recent = await api(base + "/chats/" + encodeURIComponent(chat) + "/messages?limit=50");
             if (!p.isConnected || JSON.stringify(recent) === JSON.stringify(messages)) return;
             const draft = document.querySelector("#replyText")?.value || "";
             const attachment = document.querySelector("#replyAttachment")?.files.length;
             const actionOpen = document.querySelector("#inboxAction")?.textContent;
-            if (!draft && !attachment && !quotedId && !actionOpen) await open(chat);
-            else document.querySelector("#refreshChat").textContent = "New updates · Refresh";
+            if (!draft && !attachment && !quotedId && !actionOpen) await open(chat, false, true);
+            else document.querySelector("#refreshChat").textContent = "New messages";
           }
         } catch { /* Keep the current conversation and draft during outages. */ }
         finally { polling = false; }
       }, 5000);
-      on("reloadInbox", refresh);
-      form("openChat", async (d) => open(d.newChat));
-      async function open(id, older = false) {
+      on("reloadInbox", async () => {
+        chats = mergeChats(chats, (await getChats()).rows);
+        drawChats();
+        toast("Conversations refreshed");
+      });
+      form("openChat", async (d) => {
+        document.querySelector("#openChat").hidden = true;
+        await open(d.newChat);
+      });
+      async function open(id, older = false, keepScroll = false) {
         chat = id;
+        meta = chats.find((x) => x.chatId === id) || window.__zelonChatMeta?.id === id && window.__zelonChatMeta || { chatId: id, name: id };
         const last = messages.at(-1),
-          suffix =
-            older && last
-              ? "&before=" +
-                encodeURIComponent(last.createdAt) +
-                "&beforeId=" +
-                encodeURIComponent(last.id)
-              : "";
-        const rows = await api(
-          base +
-            "/chats/" +
-            encodeURIComponent(id) +
-            "/messages?limit=50" +
-            suffix,
-        );
+          suffix = older && last ? "&before=" + encodeURIComponent(last.createdAt) + "&beforeId=" + encodeURIComponent(last.id) : "";
+        const rows = await api(base + "/chats/" + encodeURIComponent(id) + "/messages?limit=50" + suffix);
         messages = older ? [...messages, ...rows] : rows;
         quotedId = undefined;
+        const isGroup = meta.kind === "group" || /@g\.us$/.test(id);
         const c = document.querySelector("#conversation");
-        c.innerHTML = `<div class="row"><button class="btn" id="chatBack" aria-label="Back to conversations">←</button><span class="avatar">${esc((chats.find(x => x.chatId === id)?.name || "C").slice(0, 1).toUpperCase())}</span><h3>${esc(chats.find((x) => x.chatId === id)?.name || id)}</h3><button class="btn" id="refreshChat">Refresh</button></div><div class="actions"><button class="btn" id="readChat">Mark read</button><button class="btn" id="archiveChat">Archive</button><button class="btn" id="pinChat">Pin</button></div><div class="messages">${list([...messages].reverse(), (m) => `<article class="bubble ${m.fromMe ? "outgoing" : ""}"><div class="hint">${esc(m.name || m.participant || (m.fromMe ? "You" : "Contact"))}</div><div class="messagebody">${messageBody(m)}</div><small>${esc(new Date(m.createdAt).toLocaleString())} · ${esc(m.status)}</small><div class="actions"><button class="btn mini" data-quote="${esc(m.waId)}">Reply</button><button class="btn mini" data-react="${esc(m.waId)}">React</button><button class="btn mini" data-forward="${esc(m.waId)}">Forward</button>${m.fromMe ? `<button class="btn mini" data-edit="${esc(m.waId)}">Edit</button><button class="btn mini" data-delete="${esc(m.waId)}">Delete</button>` : ""}${m.hasMedia ? `<a class="btn mini" href="/api${base}/inbox/${encodeURIComponent(m.waId)}/media">Download</a>` : ""}${m.pollOptions?.length ? `<button class="btn mini" data-votes="${esc(m.waId)}">Poll votes</button>` : ""}</div></article>`, "No local messages in this conversation yet.")}</div>${rows.length === 50 ? '<button class="btn" id="olderMessages">Load older messages</button>' : ""}<div id="quoteHint" class="hint"></div><form id="replyForm">${text("replyText", "Reply", 'maxlength="20000" placeholder="Type a message…"')}${submit("Send")}${field("replyAttachment", "Attach file", "file", 'aria-label="Attach an image, video, audio or document"')}</form><div id="inboxAction"></div>`;
-        document.querySelector(".inboxlayout").classList.add("chat-open");
-        document.querySelectorAll("[data-chat]").forEach(button => button.classList.toggle("active", button.dataset.chat === id));
-        on("chatBack", () => document.querySelector(".inboxlayout").classList.remove("chat-open"));
+        const keep = c.querySelector(".messages");
+        const prevScroll = keep ? keep.scrollHeight - keep.scrollTop : 0;
+        let day = "";
+        const bubbles = [...messages].reverse().map((m) => {
+          const d = fmtDay(m.createdAt);
+          const sep = d && d !== day ? `<div class="daysep"><span>${esc(d)}</span></div>` : "";
+          day = d || day;
+          return sep + `<article class="bubble ${m.fromMe ? "outgoing" : ""}"><div class="hint">${!m.fromMe && (isGroup || m.name) ? esc(m.name || m.participant || "Contact") : ""}</div><div class="messagebody">${messageBody(m)}</div><small>${esc(new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}${m.fromMe ? " · " + esc(m.status) : ""}</small><div class="actions"><button class="btn mini" data-quote="${esc(m.waId)}">Reply</button><button class="btn mini" data-react="${esc(m.waId)}">React</button><button class="btn mini" data-forward="${esc(m.waId)}">Forward</button>${m.fromMe ? `<button class="btn mini" data-edit="${esc(m.waId)}">Edit</button><button class="btn mini" data-delete="${esc(m.waId)}">Delete</button>` : ""}${m.hasMedia ? `<a class="btn mini" href="/api${base}/inbox/${encodeURIComponent(m.waId)}/media">Download</a>` : ""}${m.pollOptions?.length ? `<button class="btn mini" data-votes="${esc(m.waId)}">Poll votes</button>` : ""}</div></article>`;
+        }).join("");
+        c.innerHTML = `<div class="row conv-head"><button class="btn" id="chatBack" aria-label="Back to conversations">${ICON.back}</button>${avatarFor(meta)}<div class="conv-title"><h3>${esc(meta.name || id)}</h3><span class="hint">${esc(isGroup ? (meta.participants ? meta.participants + " participants" : "Group") : meta.phone || "")}</span></div><button class="icon-btn flat" id="refreshChat" title="Refresh" aria-label="Refresh chat">${ICON.refresh}</button><button class="icon-btn flat" id="fullInbox2" title="Full screen" aria-label="Full screen">${ICON.expand}</button></div><div class="actions chat-actions"><button class="btn" id="readChat">Mark read</button><button class="btn" id="archiveChat">Archive</button><button class="btn" id="pinChat">Pin</button></div><div class="messages">${rows.length === 50 ? '<button class="btn mini" id="olderMessages">Load older messages</button>' : ""}${bubbles || '<p class="hint center">No local messages in this conversation yet.</p>'}</div><div id="quoteHint" class="hint"></div><form id="replyForm"><label class="attach" title="Attach a file">${ICON.clip}<input id="replyAttachment" name="replyAttachment" type="file" aria-label="Attach an image, video, audio or document"></label>${text("replyText", "Reply", 'maxlength="20000" placeholder="Type a message…" rows="1"')}<button type="submit" class="btn primary send-btn" aria-label="Send">${ICON.send}</button></form><div id="inboxAction"></div>`;
+        layout().classList.add("chat-open");
+        document.querySelectorAll("[data-chat]").forEach((button) => button.classList.toggle("active", button.dataset.chat === id));
+        on("chatBack", () => layout().classList.remove("chat-open"));
+        document.querySelector("#fullInbox2").onclick = toggleFull;
+        document.querySelector("#fullInbox2").classList.toggle("on", layout().classList.contains("inbox-full"));
         bindPreviews(c);
-        if (!older) { const timeline = c.querySelector(".messages"); timeline.scrollTop = timeline.scrollHeight; }
+        const timeline = c.querySelector(".messages");
+        if (older) timeline.scrollTop = timeline.scrollHeight - prevScroll;
+        else if (!keepScroll || prevScroll < 600) timeline.scrollTop = timeline.scrollHeight;
+        else timeline.scrollTop = timeline.scrollHeight - prevScroll;
+        const replyText = document.querySelector("#replyText");
+        replyText.onkeydown = (e) => {
+          if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); document.querySelector("#replyForm").requestSubmit(); }
+        };
         on("refreshChat", () => open(id));
         on("olderMessages", () => open(id, true));
-        on("readChat", async () => {
-          await api(
-            base + "/chats/" + encodeURIComponent(chat) + "/settings",
-            "PUT",
-            { read: true },
-          );
-          toast("Marked read");
+        const setting = (id2, body, done) => on(id2, async () => {
+          await api(base + "/chats/" + encodeURIComponent(chat) + "/settings", "PUT", body);
+          toast(done);
         });
-        on("archiveChat", async () => {
-          await api(
-            base + "/chats/" + encodeURIComponent(chat) + "/settings",
-            "PUT",
-            { archive: true },
-          );
-          toast("Chat archived");
-        });
-        on("pinChat", async () => {
-          await api(
-            base + "/chats/" + encodeURIComponent(chat) + "/settings",
-            "PUT",
-            { pin: true },
-          );
-          toast("Chat pinned");
-        });
+        setting("readChat", { read: true }, "Marked read");
+        setting("archiveChat", { archive: true }, "Chat archived");
+        setting("pinChat", { pin: true }, "Chat pinned");
         const replyForm = document.querySelector("#replyForm");
         replyForm.dataset.key = crypto.randomUUID();
         replyForm.oninput = () => (replyForm.dataset.key = crypto.randomUUID());
@@ -398,104 +475,54 @@ window.ZelonFeatures = (() => {
             payload.caption = d.replyText || undefined;
             delete payload.text;
           }
-          await api(
-            base + "/messages",
-            "POST",
-            payload,
-            { "Idempotency-Key": replyForm.dataset.key },
-          );
-          toast("Reply queued");
+          await api(base + "/messages", "POST", payload, { "Idempotency-Key": replyForm.dataset.key });
+          toast("Message queued");
           replyForm.reset();
           replyForm.dataset.key = crypto.randomUUID();
           quotedId = undefined;
           document.querySelector("#quoteHint").textContent = "";
         });
-        document.querySelectorAll("[data-quote]").forEach(
-          (b) =>
-            (b.onclick = () => {
-              quotedId = b.dataset.quote;
-              document.querySelector("#quoteHint").textContent =
-                "Replying to " + quotedId;
-              document.querySelector("#replyText").focus();
-            }),
-        );
+        document.querySelectorAll("[data-quote]").forEach((b) => (b.onclick = () => {
+          quotedId = b.dataset.quote;
+          const original = messages.find((m) => m.waId === quotedId);
+          document.querySelector("#quoteHint").textContent = "Replying to: " + (original?.text || original?.type || quotedId).slice(0, 80);
+          document.querySelector("#replyText").focus();
+        }));
         const action = (attr, label, fn) =>
-          document.querySelectorAll("[data-" + attr + "]").forEach(
-            (b) =>
-              (b.onclick = () => {
-                const id = b.dataset[attr],
-                  target = document.querySelector("#inboxAction");
-                target.innerHTML = box(
-                  label,
-                  `<form id="actionForm">${field("value", label, "text", "required")}${submit("Confirm")}</form>`,
-                );
-                form("actionForm", async (d) => {
-                  await fn(id, d.value);
-                  target.innerHTML = "";
-                  toast("Request completed");
-                });
-              }),
-          );
-        action("react", "Reaction emoji (e.g. 👍)", (id, value) =>
-          api(base + "/inbox/" + encodeURIComponent(id) + "/reaction", "POST", {
-            emoji: value,
-          }),
-        );
-        action("edit", "New message text", (id, value) =>
-          api(base + "/inbox/" + encodeURIComponent(id) + "/text", "PUT", {
-            text: value,
-          }),
-        );
-        action("forward", "Forward to phone or group JID", (id, value) =>
-          api(
-            base + "/messages",
-            "POST",
-            { to: value, type: "forward", forwardId: id },
-            { "Idempotency-Key": crypto.randomUUID() },
-          ),
-        );
-        document.querySelectorAll("[data-delete]").forEach(
-          (b) =>
-            (b.onclick = () => {
-              const target = document.querySelector("#inboxAction");
-              target.innerHTML = box(
-                "Delete message for everyone",
-                '<p>WhatsApp time and group permissions apply.</p><button class="btn danger" id="confirmDelete">Delete message</button>',
-              );
-              on("confirmDelete", async () => {
-                await api(
-                  base +
-                    "/inbox/" +
-                    encodeURIComponent(b.dataset.delete) +
-                    "/delete",
-                  "POST",
-                  {},
-                );
-                toast("Delete submitted");
-                target.innerHTML = "";
-              });
-            }),
-        );
-        document.querySelectorAll("[data-votes]").forEach(
-          (b) =>
-            (b.onclick = async () => {
-              try {
-                document.querySelector("#inboxAction").textContent =
-                  JSON.stringify(
-                    await api(
-                      base +
-                        "/polls/" +
-                        encodeURIComponent(b.dataset.votes) +
-                        "/votes",
-                    ),
-                    null,
-                    2,
-                  );
-              } catch (e) {
-                toast(e.message);
-              }
-            }),
-        );
+          document.querySelectorAll("[data-" + attr + "]").forEach((b) => (b.onclick = () => {
+            const mid = b.dataset[attr],
+              target = document.querySelector("#inboxAction");
+            target.innerHTML = box(label, `<form id="actionForm">${field("value", label, "text", "required")}${submit("Confirm")}</form>`);
+            form("actionForm", async (d) => {
+              await fn(mid, d.value);
+              target.innerHTML = "";
+              toast("Request completed");
+            });
+          }));
+        action("react", "Reaction emoji (e.g. 👍)", (mid, value) => api(base + "/inbox/" + encodeURIComponent(mid) + "/reaction", "POST", { emoji: value }));
+        action("edit", "New message text", (mid, value) => api(base + "/inbox/" + encodeURIComponent(mid) + "/text", "PUT", { text: value }));
+        action("forward", "Forward to phone or group JID", (mid, value) =>
+          api(base + "/messages", "POST", { to: value, type: "forward", forwardId: mid }, { "Idempotency-Key": crypto.randomUUID() }));
+        document.querySelectorAll("[data-delete]").forEach((b) => (b.onclick = () => {
+          const target = document.querySelector("#inboxAction");
+          target.innerHTML = box("Delete message for everyone", '<p>WhatsApp time and group permissions apply.</p><button class="btn danger" id="confirmDelete">Delete message</button>');
+          on("confirmDelete", async () => {
+            await api(base + "/inbox/" + encodeURIComponent(b.dataset.delete) + "/delete", "POST", {});
+            toast("Delete submitted");
+            target.innerHTML = "";
+          });
+        }));
+        document.querySelectorAll("[data-votes]").forEach((b) => (b.onclick = async () => {
+          try {
+            const votes = await api(base + "/polls/" + encodeURIComponent(b.dataset.votes) + "/votes");
+            const rows2 = Array.isArray(votes) ? votes : Object.entries(votes || {}).map(([name, voters]) => ({ name, voters }));
+            document.querySelector("#inboxAction").innerHTML = box("Poll results", list(rows2, (v) => `<div class="record row"><strong>${esc(v.name)}</strong><span class="status">${(v.voters || []).length} vote${(v.voters || []).length === 1 ? "" : "s"}</span></div>`, "No votes yet."));
+          } catch (e) { toast(e.message); }
+        }));
+      }
+      const pending = window.__zelonChatMeta;
+      if (pending) {
+        open(pending.id).catch((e) => toast(e.message)).finally(() => { window.__zelonChatMeta = undefined; });
       }
     }
     if (tab === "campaigns") {
@@ -690,7 +717,7 @@ window.ZelonFeatures = (() => {
       p.innerHTML =
         box(
           "Group administration",
-          `<form id="groupSettings">${field("groupJid", "Group JID", "text", "required")}${field("subject", "New subject")}${text("description", "New description")}<label for="announcement">Who can send</label><select name="announcement" id="announcement"><option value="">Keep current setting</option><option value="true">Administrators only</option><option value="false">All members</option></select><label for="locked">Who can edit settings</label><select name="locked" id="locked"><option value="">Keep current setting</option><option value="true">Administrators only</option><option value="false">All members</option></select><label for="ephemeralSeconds">Disappearing messages</label><select name="ephemeralSeconds" id="ephemeralSeconds"><option value="">Keep current setting</option><option value="0">Disabled</option><option value="86400">24 hours</option><option value="604800">7 days</option><option value="7776000">90 days</option></select>${submit("Update group")}</form><div class="actions"><button class="btn" id="groupInfo">Read group details</button><button class="btn" id="groupInvite">Get invite</button><button class="btn" id="revokeInvite">Replace invite</button></div><pre id="groupOutput" class="doccode"></pre>`,
+          `<form id="groupSettings">${field("groupJid", "Group", "text", 'required list="groupOptions" placeholder="Pick a group or paste its JID" autocomplete="off"')}<datalist id="groupOptions"></datalist>${field("subject", "New subject")}${text("description", "New description")}<label for="announcement">Who can send</label><select name="announcement" id="announcement"><option value="">Keep current setting</option><option value="true">Administrators only</option><option value="false">All members</option></select><label for="locked">Who can edit settings</label><select name="locked" id="locked"><option value="">Keep current setting</option><option value="true">Administrators only</option><option value="false">All members</option></select><label for="ephemeralSeconds">Disappearing messages</label><select name="ephemeralSeconds" id="ephemeralSeconds"><option value="">Keep current setting</option><option value="0">Disabled</option><option value="86400">24 hours</option><option value="604800">7 days</option><option value="7776000">90 days</option></select>${submit("Update group")}</form><div class="actions"><button class="btn" id="groupInfo">Read group details</button><button class="btn" id="groupInvite">Get invite</button><button class="btn" id="revokeInvite">Replace invite</button></div><div id="groupOutput" class="group-output"></div>`,
         ) +
         box(
           "Join a group",
@@ -698,7 +725,7 @@ window.ZelonFeatures = (() => {
         ) +
         box(
           "Leave a group",
-          `<form id="leaveGroup">${field("leaveJid", "Group JID", "text", "required")}<label class="checkbox"><input type="checkbox" required>I want this number to leave the group</label>${submit("Leave group")}</form>`,
+          `<form id="leaveGroup">${field("leaveJid", "Group", "text", 'required list="groupOptions" placeholder="Pick a group or paste its JID" autocomplete="off"')}<label class="checkbox"><input type="checkbox" required>I want this number to leave the group</label>${submit("Leave group")}</form>`,
         );
       form("groupSettings", async (d) => {
         const body = {};
@@ -717,17 +744,20 @@ window.ZelonFeatures = (() => {
       });
       const group = () =>
         encodeURIComponent(document.querySelector("#groupJid").value);
+      api(base + "/groups").then((all) => {
+        document.querySelector("#groupOptions").innerHTML = Object.values(all || {}).map((g) => `<option value="${esc(g.id)}">${esc(g.subject)}</option>`).join("");
+      }).catch(() => {});
+      const showLink = (code) => {
+        const url = "https://chat.whatsapp.com/" + code;
+        document.querySelector("#groupOutput").innerHTML = `<div class="paircode"><span>Invite link</span><a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a><button type="button" class="btn mini" id="copyInvite">Copy link</button></div>`;
+        on("copyInvite", async () => { await navigator.clipboard?.writeText(url); toast("Link copied"); });
+      };
       on("groupInfo", async () => {
-        document.querySelector("#groupOutput").textContent = JSON.stringify(
-          await api(base + "/groups/" + group()),
-          null,
-          2,
-        );
+        const g = await api(base + "/groups/" + group() + "/overview");
+        document.querySelector("#groupOutput").innerHTML = `<div class="group-card"><h4>${esc(g.subject)}</h4><p class="hint">${g.createdAt ? "Created " + esc(new Date(g.createdAt).toLocaleDateString()) : ""}${g.owner ? " · Owner " + esc(g.owner) : ""}</p>${g.description ? `<p>${esc(g.description)}</p>` : ""}<div class="chips"><span class="status ${g.announce ? "queued" : "connected"}">${g.announce ? "Only admins can send" : "Everyone can send"}</span><span class="status ${g.restrict ? "queued" : "connected"}">${g.restrict ? "Only admins edit info" : "Everyone can edit info"}</span></div><h4>${g.participants.length} participants</h4>${g.participants.map((u) => `<div class="record row"><div><strong>${esc(u.name || u.phone)}</strong>${u.name ? `<div class="hint">${esc(u.phone)}</div>` : ""}</div>${u.admin ? `<span class="status connected">${u.admin === "superadmin" ? "Owner" : "Admin"}</span>` : ""}</div>`).join("")}</div>`;
       });
       on("groupInvite", async () => {
-        const r = await api(base + "/groups/" + group() + "/invite");
-        document.querySelector("#groupOutput").textContent =
-          "https://chat.whatsapp.com/" + r.code;
+        showLink((await api(base + "/groups/" + group() + "/invite")).code);
       });
       on("revokeInvite", async () => {
         const r = await api(
@@ -735,8 +765,7 @@ window.ZelonFeatures = (() => {
           "POST",
           {},
         );
-        document.querySelector("#groupOutput").textContent =
-          "https://chat.whatsapp.com/" + r.code;
+        showLink(r.code);
       });
       form("joinGroup", async (d) => {
         const r = await api(base + "/groups/join", "POST", {
@@ -755,61 +784,63 @@ window.ZelonFeatures = (() => {
     }
     if (tab === "tools") {
       const settings = await api(base + "/settings");
-      p.innerHTML =
-        `<div class="split">${box("Connection tools", `<form id="pairForm">${field("pairPhone", "WhatsApp number", "tel", "required")}${submit("Request pairing code")}</form><div id="pairCode" class="key"></div><button class="btn" id="restartInstance">Restart connection</button><p class="hint">Pairing codes are for an unlinked number. Use WhatsApp → Linked devices → Link with phone number.</p>`)}${box("Profile", `<button class="btn" id="loadProfile">Read profile</button><div id="profileDetails"></div><form id="profileForm">${field("profileName", "Display name")}${field("profileAbout", "About (139 characters)", "text", 'maxlength="139"')}${submit("Update profile")}</form>`)}</div>` +
-        box(
-          "Delivery settings",
-          `<form id="settingsForm">${field("sendIntervalMs", "Minimum interval between sends (milliseconds)", "number", `min="0" max="60000" value="${settings.sendIntervalMs}"`)}${text("webhookEvents", "Webhook events, comma separated (blank = all)")}${submit("Save settings")}</form><p class="hint">Events: message, receipt, connection, group, group-participants, presence, call, history, error.</p>`,
-        ) +
-        box(
-          "Blocklist",
-          `<button id="loadBlocklist" class="btn">Load blocked contacts</button><div id="blocklist"></div><form id="unblockForm">${field("unblockPhone", "Phone or contact JID", "text", "required")}${submit("Unblock contact")}</form>`,
-        );
-      document.querySelector("#webhookEvents").value =
-        settings.webhookEvents.join(", ");
-      form("pairForm", async (d) => {
-        const r = await api(base + "/pairing-code", "POST", {
-          phone: d.pairPhone,
+      let prof = null,
+        blocked = null;
+      try { prof = await api(base + "/profile"); } catch { /* not connected */ }
+      if (prof) try { blocked = await api(base + "/blocklist"); } catch { /* optional */ }
+      const phone = (id) => (id ? "+" + String(id).split("@")[0].split(":")[0] : "");
+      const aboutOf = (a) => {
+        const v = Array.isArray(a) ? a[0]?.status : a;
+        return String((typeof v === "string" ? v : v?.status) || "").trim();
+      };
+      const dayNames = { sun: "Sunday", mon: "Monday", tue: "Tuesday", wed: "Wednesday", thu: "Thursday", fri: "Friday", sat: "Saturday" };
+      const hhmm = (m) => String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
+      const hoursRow = (key) => {
+        const h = (prof?.business?.business_hours?.business_config || []).find((x) => x.day_of_week === key);
+        const label = !h ? "Closed" : h.mode === "open_24h" ? "Open 24 hours" : h.mode === "appointment_only" ? "By appointment" : h.open_time !== undefined ? hhmm(h.open_time) + " – " + hhmm(h.close_time) : h.mode;
+        return `<li><span>${dayNames[key]}</span><b class="${!h ? "muted" : ""}">${esc(label)}</b></li>`;
+      };
+      const row = (label, value) => (value ? `<div><dt>${label}</dt><dd>${esc(value)}</dd></div>` : "");
+      const b = prof?.business;
+      const profileCard = prof
+        ? `<div class="profile-head"><span class="avatar xl">${esc((prof.name || "W")[0].toUpperCase())}</span><div><h3>${esc(prof.name || "WhatsApp account")}</h3><div class="hint">${esc(phone(prof.id))}</div></div><span class="status connected">Online</span></div><dl class="kv">${row("About", aboutOf(prof.about))}${row("Phone", phone(prof.id))}</dl>${b ? `<h4>Business profile</h4><dl class="kv">${row("Description", b.description)}${row("Category", b.category)}${row("Address", b.address)}${row("Email", b.email)}${row("Website", (b.website || []).join(", "))}</dl>${b.business_hours?.business_config ? `<h4>Opening hours${b.business_hours.timezone ? ` <span class="hint">(${esc(b.business_hours.timezone)})</span>` : ""}</h4><ul class="hours">${Object.keys(dayNames).map(hoursRow).join("")}</ul>` : ""}` : ""}<h4>Edit profile</h4><form id="profileForm">${field("profileName", "Display name", "text", `value="${esc(prof.name || "")}"`)}${field("profileAbout", "About (139 characters)", "text", `maxlength="139" value="${esc(aboutOf(prof.about))}"`)}${submit("Update profile")}</form>`
+        : `<div class="empty compact"><h3>Number not connected</h3><p>Connect your WhatsApp number to view and edit its profile.</p><button class="btn primary" id="goConnect">Go to Connection</button></div>`;
+      const blockList = blocked === null
+        ? '<p class="hint">Connect your number to load blocked contacts.</p>'
+        : list(blocked, (id) => `<div class="record row"><strong>${esc(phone(id))}</strong><button class="btn mini" data-unblock="${esc(id)}">Unblock</button></div>`, "No blocked contacts.");
+      p.innerHTML = box("WhatsApp profile", profileCard) +
+        box("Delivery settings", `<form id="settingsForm">${field("sendIntervalMs", "Minimum interval between sends (milliseconds)", "number", `min="0" max="60000" value="${settings.sendIntervalMs}"`)}${text("webhookEvents", "Webhook events, comma separated (blank = all)")}${submit("Save settings")}</form><p class="hint">Events: message, receipt, connection, group, group-participants, presence, call, history, error.</p>`) +
+        box("Blocked contacts", `<div id="blocklist">${blockList}</div><form id="unblockForm">${field("unblockPhone", "Unblock another number", "text", "required")}${submit("Unblock contact")}</form>`);
+      p.classList.add("stack");
+      document.querySelector("#webhookEvents").value = settings.webhookEvents.join(", ");
+      on("goConnect", () => document.querySelector('[data-tab="connection"]')?.click());
+      document.querySelectorAll("[data-unblock]").forEach((btn) => (btn.onclick = async () => {
+        try {
+          await api(base + "/contacts/block", "PUT", { phone: btn.dataset.unblock, blocked: false });
+          toast("Contact unblocked");
+          await refresh();
+        } catch (e) { toast(e.message); }
+      }));
+      if (prof)
+        form("profileForm", async (d) => {
+          await api(base + "/profile", "PUT", {
+            ...(d.profileName ? { name: d.profileName } : {}),
+            ...(d.profileAbout ? { about: d.profileAbout } : {}),
+          });
+          toast("Profile updated");
+          await refresh();
         });
-        document.querySelector("#pairCode").textContent = r.code;
-      });
-      on("restartInstance", async () => {
-        await api(base + "/restart", "POST", {});
-        toast("Connection restarting");
-      });
-      on("loadProfile", async () => {
-        document.querySelector("#profileDetails").textContent = JSON.stringify(
-          await api(base + "/profile"),
-        );
-      });
-      form("profileForm", async (d) => {
-        await api(base + "/profile", "PUT", {
-          ...(d.profileName ? { name: d.profileName } : {}),
-          ...(d.profileAbout ? { about: d.profileAbout } : {}),
-        });
-        toast("Profile updated");
-      });
       form("settingsForm", async (d) => {
         await api(base + "/settings", "PUT", {
           sendIntervalMs: Number(d.sendIntervalMs),
-          webhookEvents: d.webhookEvents
-            .split(",")
-            .map((x) => x.trim())
-            .filter(Boolean),
+          webhookEvents: d.webhookEvents.split(",").map((x) => x.trim()).filter(Boolean),
         });
         toast("Settings saved");
       });
-      on("loadBlocklist", async () => {
-        document.querySelector("#blocklist").textContent = (
-          await api(base + "/blocklist")
-        ).join(", ");
-      });
       form("unblockForm", async (d) => {
-        await api(base + "/contacts/block", "PUT", {
-          phone: d.unblockPhone,
-          blocked: false,
-        });
+        await api(base + "/contacts/block", "PUT", { phone: d.unblockPhone, blocked: false });
         toast("Contact unblocked");
+        await refresh();
       });
     }
   }

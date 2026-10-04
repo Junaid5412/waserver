@@ -157,24 +157,26 @@ test("CSV parser handles quoted commas/newlines and rejects invalid headers", as
 });
 
 
-test("Console drawer and grouped instance submenus support keyboard and mobile back navigation", async (t) => {
-  const { dom, d } = fixture(t);
-  await wait(() => d.querySelector("#menuToggle"));
-  d.querySelector("#menuToggle").click();
-  assert.equal(d.querySelector("#menuToggle").getAttribute("aria-expanded"), "true");
-  assert(d.querySelector(".shell").classList.contains("menu-open"));
-  d.querySelector("#root").dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-  assert.equal(d.querySelector("#menuToggle").getAttribute("aria-expanded"), "false");
+test("Console navigation, grouped instance tabs and mobile chat back navigation work", async (t) => {
+  const { d } = fixture(t);
+  await wait(() => d.querySelector(".sidebar [data-view]"));
+  assert(d.querySelector(".bottomnav [data-view]"));
+  assert(d.querySelector(".sidebar .nav-item svg"));
   d.querySelector("[data-instance]").click();
-  assert.equal(d.querySelectorAll(".tool-menu").length, 5);
-  assert.equal(d.querySelectorAll("[data-tab]").length, 15);
+  assert.equal(d.querySelectorAll(".gtab").length, 5);
+  assert.equal(d.querySelectorAll(".ptab").length, 2);
   d.querySelector('[data-tab="inbox"]').click();
   await wait(() => d.querySelector("[data-chat]"));
+  assert.equal(d.querySelectorAll(".ptab").length, 6);
   d.querySelector("[data-chat]").click();
   await wait(() => d.querySelector("#chatBack"));
   assert(d.querySelector(".inboxlayout").classList.contains("chat-open"));
   d.querySelector("#chatBack").click();
   assert(!d.querySelector(".inboxlayout").classList.contains("chat-open"));
+  d.querySelector("#fullInbox").click();
+  assert(d.querySelector(".inboxlayout").classList.contains("inbox-full"));
+  d.querySelector("#fullInbox").click();
+  assert(!d.querySelector(".inboxlayout").classList.contains("inbox-full"));
 });
 
 test("Chat shows rich data and securely fetches an inline media preview", async (t) => {

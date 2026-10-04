@@ -445,7 +445,7 @@ app.post(
   consoleOnly,
   wrap(async (req, res) => {
     await wa.disconnect(req.instance, true);
-    res.json({ ok: true });
+    res.json({ ok: true, status: "disconnected" });
   }),
 );
 app.post(
