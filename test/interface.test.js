@@ -3,10 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import { JSDOM } from "jsdom";
-const script = await readFile(
-  new URL("../public/app.js", import.meta.url),
-  "utf8",
-);
+const script = (await readFile(new URL("../public/admin.js", import.meta.url), "utf8")) + "\n" + (await readFile(new URL("../public/app.js", import.meta.url), "utf8"));
 const wait = async (fn) => {
   for (let i = 0; i < 60; i++) {
     if (fn()) return;
@@ -73,7 +70,7 @@ test("Console escapes user content and keeps sign-out reachable on desktop and m
     assert(document.querySelector("#logout2"));
     assert(document.querySelector(".bottomnav [data-view]"));
     document.querySelector('[data-view="account"]').click();
-    assert(document.querySelector("#passwordForm"));
+    await wait(() => document.querySelector("#passwordForm"));
   } finally {
     dom.window.close();
   }

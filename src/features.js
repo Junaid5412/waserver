@@ -235,6 +235,7 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
           )
         )
           .flat()
+          .filter((r) => !r.hidden)
           .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || (a.id < b.id ? 1 : -1))
           .filter((r) => !seen.has(r.waId) && seen.add(r.waId))
           .slice(0, paging.limit);
@@ -407,10 +408,22 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
         options.statusJidList = d.statusAudience;
         options.broadcast = true;
       }
+      const scope = z.object({ scope: z.enum(["everyone", "me"]).default("everyone") }).parse(req.body || {}).scope;
+      if (scope === "me") {
+        for (const row of await store.query("inbox", { instanceId: req.instance.id, lookupKey: m.key.id, limit: 10 }))
+          await store.patch("inbox", row.id, { hidden: true });
+        try {
+          await wa.active(req.instance.id).chatModify(
+            { deleteForMe: { deleteMedia: false, key: m.key, timestamp: timestampSeconds(m.messageTimestamp) } },
+            m.key.remoteJid,
+          );
+        } catch { /* local removal is enough when WhatsApp is unreachable */ }
+        return res.json({ ok: true, scope });
+      }
       await wa
         .active(req.instance.id)
         .sendMessage(m.key.remoteJid, { delete: m.key }, options);
-      res.json({ ok: true });
+      res.json({ ok: true, scope });
     }),
   );
   router.post(
@@ -425,6 +438,8 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
           [{ id: m.key.id, fromMe: !!m.key.fromMe }],
           star,
         );
+      for (const row of await store.query("inbox", { instanceId: req.instance.id, lookupKey: m.key.id, limit: 10 }))
+        await store.patch("inbox", row.id, { starred: star });
       res.json({ ok: true });
     }),
   );
@@ -449,7 +464,8 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
           ] || "";
       res.set({
         "Content-Type": info.mimetype || "application/octet-stream",
-        "Content-Disposition": `attachment; filename="${safeName(info.filename || "whatsapp-" + m.key.id + extension)}"`,
+        "Content-Disposition": `${req.query.inline ? "inline" : "attachment"}; filename="${safeName(info.filename || "whatsapp-" + m.key.id + extension)}"`,
+        ...(req.query.inline ? { "Cache-Control": "private, max-age=86400" } : {}),
       });
       let bytes = 0;
       for await (const chunk of stream) {
@@ -466,6 +482,106 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
           await Promise.race([once(res, "drain"), once(res, "close")]);
       }
       res.end();
+    }),
+  );
+  const pictures = new Map(),
+    waiting = [];
+  let busy = 0;
+  const slot = async (fn) => {
+    if (busy >= 3) await new Promise((resolve) => waiting.push(resolve));
+    busy++;
+    try { return await fn(); }
+    finally { busy--; waiting.shift()?.(); }
+  };
+  const candidates = async (instance, chat) => {
+    const resolved = await inbox.resolve(instance, chat);
+    return [...new Set([resolved, chat])];
+  };
+  router.get(
+    "/chats/:chat/picture",
+    wrap(async (req, res) => {
+      let s;
+      try { s = wa.active(req.instance.id); } catch { return res.status(404).end(); }
+      const raw = String(req.params.chat),
+        own = raw === "me",
+        key = req.instance.id + "|" + raw,
+        hit = pictures.get(key);
+      const send = (p) => {
+        if (!p.buf) return res.set("Cache-Control", "private, max-age=600").status(404).end();
+        res.set({ "Content-Type": p.type, "Cache-Control": "private, max-age=21600" }).send(p.buf);
+      };
+      if (hit && Date.now() - hit.at < (hit.buf ? 6 : 0.5) * 3600000) return send(hit);
+      const entry = { at: Date.now(), buf: null, type: "image/jpeg" };
+      await slot(async () => {
+        const list = own ? [jidNormalizedUser(s.user.id)] : await candidates(req.instance, chatJid(raw));
+        for (const j of list) {
+          try {
+            const url = await s.profilePictureUrl(j, "preview", 8000);
+            if (!url) continue;
+            const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
+            if (!r.ok) continue;
+            const buf = Buffer.from(await r.arrayBuffer());
+            if (buf.length && buf.length < 3_000_000) {
+              entry.buf = buf;
+              entry.type = r.headers.get("content-type") || "image/jpeg";
+              break;
+            }
+          } catch { /* no picture or not permitted */ }
+        }
+      });
+      if (pictures.size > 2000) pictures.delete(pictures.keys().next().value);
+      pictures.set(key, entry);
+      send(entry);
+    }),
+  );
+  router.get(
+    "/chats/:chat/info",
+    wrap(async (req, res) => {
+      const chat = chatJid(req.params.chat),
+        s = wa.active(req.instance.id),
+        ctx = await resolver.context(req.instance);
+      if (chat.endsWith("@g.us")) {
+        const meta = await s.groupMetadata(chat);
+        return res.json({
+          kind: "group",
+          id: chat,
+          name: meta.subject || "",
+          description: meta.desc || "",
+          owner: meta.owner ? ctx.nameFor(meta.owner) || ctx.labelFor(meta.owner) : "",
+          createdAt: meta.creation ? new Date(meta.creation * 1000).toISOString() : null,
+          announce: !!meta.announce,
+          restrict: !!meta.restrict,
+          participants: (meta.participants || []).map((p) => ({
+            id: p.id, name: ctx.nameFor(p.id), phone: ctx.labelFor(p.id), admin: p.admin || null,
+          })),
+        });
+      }
+      const target = await inbox.resolve(req.instance, chat);
+      const [about, business, blocklist] = await Promise.allSettled([
+        s.fetchStatus(target),
+        s.getBusinessProfile(target),
+        s.fetchBlocklist(),
+      ]);
+      const raw = about.status === "fulfilled" ? (Array.isArray(about.value) ? about.value[0] : about.value) : null;
+      res.json({
+        kind: "contact",
+        id: target,
+        name: ctx.nameFor(target) || "",
+        phone: target.endsWith("@s.whatsapp.net") ? "+" + target.split("@")[0] : "",
+        about: raw?.status?.status ?? (typeof raw?.status === "string" ? raw.status : ""),
+        aboutSetAt: raw?.status?.setAt || raw?.setAt || null,
+        business: business.status === "fulfilled" ? business.value || null : null,
+        blocked: blocklist.status === "fulfilled" ? (blocklist.value || []).includes(target) : false,
+      });
+    }),
+  );
+  router.post(
+    "/chats/:chat/subscribe",
+    wrap(async (req, res) => {
+      const s = wa.active(req.instance.id),
+        target = await inbox.resolve(req.instance, chatJid(req.params.chat));
+      if (!target.endsWith("@g.us")) await s.presenceSubscribe(target).catch(() => {});
+      res.json({ ok: true });
     }),
   );
   router.get(

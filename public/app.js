@@ -196,6 +196,7 @@ function cards(limit) {
 }
 function render() {
   clearInterval(timer);
+  document.body.classList.remove("page-chats", "inbox-lock");
   const w = document.querySelector("#workspace");
   if (selected) {
     instancePage();
@@ -206,12 +207,7 @@ function render() {
     return;
   }
   if (view === "system") {
-    w.innerHTML = '<div class="loading">Checking system…</div>';
-    api("/admin/system")
-      .then((d) => {
-        w.innerHTML = `<div class="top"><div><div class="eyebrow">Administration</div><h1>System health</h1><p>Live status of the server and database.</p></div></div><div class="metrics"><div class="card metric"><span class="ico-box ok">${ico("check")}</span><div><div class="value">${esc(d.database)}</div><div class="hint">Database</div></div></div><div class="card metric"><span class="ico-box">${ico("activity")}</span><div><div class="value">${uptime(d.uptimeSeconds)}</div><div class="hint">Uptime</div></div></div><div class="card metric"><span class="ico-box warn">${ico("home")}</span><div><div class="value">${esc(d.nodeVersion)}</div><div class="hint">Node.js</div></div></div></div><section class="card"><h3>Records</h3><div class="tablewrap"><table><thead><tr><th>Type</th><th>Count</th></tr></thead><tbody>${Object.entries(d.counts || {}).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(flat(v))}</td></tr>`).join("")}</tbody></table></div></section>`;
-      })
-      .catch((e) => (w.textContent = e.message));
+    window.ZelonAdmin.system(adminCtx());
     return;
   }
   if (view === "users") {
@@ -680,72 +676,19 @@ function renameInstance(base, x) {
     await load();
   });
 }
-async function usersPage() {
-  const w = document.querySelector("#workspace");
-  w.innerHTML = '<div class="loading">Loading accounts…</div>';
-  try {
-    const users = await api("/admin/users");
-    if (view !== "users") return;
-    w.innerHTML = `<div class="top"><div><div class="eyebrow">Administration</div><h1>User accounts</h1><p>Provision access to each user’s own messaging workspace.</p></div><button class="btn primary" id="addUser" aria-label="Add user">+ Add user</button></div><div class="instancegrid">${users.map((u) => `<article class="card"><div class="row"><h3>${esc(u.email)}</h3><span class="status ${u.disabled ? "failed" : "connected"}">${u.disabled ? "Disabled" : "Active"}</span></div><p class="hint">${esc(u.role)}${u.id === user.id ? " · Your account" : ""}</p>${u.id !== user.id ? `<button class="btn" data-user="${u.id}" data-disabled="${!u.disabled}">${u.disabled ? "Enable account" : "Disable account"}</button><button class="btn" data-reset-user="${u.id}">Reset password</button>` : ""}</article>`).join("")}</div>`;
-    document.querySelectorAll("[data-reset-user]").forEach(
-      (b) =>
-        (b.onclick = () => {
-          const m = modal(
-            '<h2>Reset user password?</h2><p>The account will receive a new initial password and existing sessions will be revoked.</p><div class="actions"><button class="btn primary" id="confirmReset">Reset password</button><button class="btn" id="cancelReset">Cancel</button></div>',
-          );
-          on("cancelReset", m.close);
-          on("confirmReset", async () => {
-            const r = await api(
-              "/admin/users/" + b.dataset.resetUser + "/reset-password",
-              "POST",
-              {},
-            );
-            m.overlay.innerHTML =
-              '<section class="card"><h2>New password</h2><p>Save this securely. Shown once.</p><div class="key">' +
-              esc(r.password) +
-              '</div><button class="btn" id="closeReset">Done</button></section>';
-            on("closeReset", m.close);
-          });
-        }),
-    );
-    on("addUser", () => {
-      const m = modal(
-        '<h2>Add user</h2><form id="addUserForm"><label for="userEmail">Email address</label><input id="userEmail" name="email" type="email" maxlength="254" required><label for="userRole">Access role</label><select id="userRole" name="role"><option value="user">User</option><option value="admin">Administrator</option></select><p class="hint">A secure initial password will be generated and shown once.</p><div class="actions"><button type="submit" class="btn primary">Create account</button><button type="button" class="btn" id="closeUser">Cancel</button></div></form>',
-      );
-      on("closeUser", m.close);
-      form("addUserForm", async (d) => {
-        const r = await api("/admin/users", "POST", d);
-        m.overlay.innerHTML = `<section class="card"><h2>Account created</h2><p>${esc(r.email)}</p><p class="hint">Save this initial password securely. It is shown once.</p><div class="key">${esc(r.password)}</div><div class="actions"><button class="btn primary" id="doneUser">Done</button></div></section>`;
-        on("doneUser", () => {
-          m.close();
-          usersPage();
-        });
-      });
-    });
-    document.querySelectorAll("[data-user]").forEach(
-      (b) =>
-        (b.onclick = async () => {
-          try {
-            await api("/admin/users/" + b.dataset.user, "PUT", {
-              disabled: b.dataset.disabled === "true",
-            });
-            await usersPage();
-          } catch (e) {
-            toast(e.message);
-          }
-        }),
-    );
-  } catch (e) {
-    w.textContent = e.message;
-  }
+function adminCtx() {
+  return {
+    api, esc, ico, toast, on, form, modal,
+    getView: () => view,
+    getUser: () => user,
+    reloadUser: load,
+    signedOut: login,
+    startPolling: (fn, ms) => { clearInterval(timer); timer = setInterval(fn, ms); },
+  };
 }
-
+function usersPage() {
+  return window.ZelonAdmin.users(adminCtx());
+}
 function accountPage() {
-  document.querySelector("#workspace").innerHTML =
-    `<div class="top"><div><h1>Your account</h1><p>${esc(user.email)}</p></div></div><div class="panel card"><h3>Change password</h3><p class="hint">Changing your password signs you out on every device.</p><form id="passwordForm"><label for="currentPassword">Current password</label><input id="currentPassword" name="currentPassword" type="password" autocomplete="current-password" required><label for="newPassword">New password</label><input id="newPassword" name="newPassword" type="password" autocomplete="new-password" minlength="12" maxlength="200" required><div class="actions"><button class="btn primary" type="submit">Change password</button></div></form></div>`;
-  form("passwordForm", async (d) => {
-    await api("/account/password", "PUT", d);
-    toast("Password changed. Sign in with your new password.");
-    login();
-  });
+  return window.ZelonAdmin.account(adminCtx());
 }

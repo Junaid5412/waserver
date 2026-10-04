@@ -9,6 +9,9 @@ import { requestKey } from "./request-key.js";
 import cookieParser from "cookie-parser";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
+import os from "node:os";
+import { createBus } from "./realtime.js";
+import { createKeepAlive } from "./keepalive.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { openStore } from "./store.js";
@@ -80,7 +83,7 @@ app.use(
   rateLimit({
     keyGenerator: requestKey,
     windowMs: 60000,
-    limit: (req) => (/\/media\/[^/]+\/chunks\//.test(req.path) ? 1500 : 180),
+    limit: (req) => (/\/media\/[^/]+\/chunks\/|\/picture$|\/inbox\/[^/]+\/media$/.test(req.path) ? 1500 : 240),
     standardHeaders: "draft-8",
     legacyHeaders: false,
   }),
@@ -101,13 +104,38 @@ const wrap = (fn) => (req, res, next) =>
 const fail = (status, message) => {
   throw Object.assign(Error(message), { status });
 };
+const startedAt = new Date().toISOString();
+const bus = createBus(),
+  streams = new Set();
 app.get(
   "/health",
   wrap(async (req, res) => {
+    const t = Date.now();
     await store.health();
-    res.json({ status: "ok" });
+    res.set("Cache-Control", "no-store").json({
+      status: "ok",
+      uptimeSeconds: Math.floor(process.uptime()),
+      startedAt,
+      databaseMs: Date.now() - t,
+    });
   }),
 );
+app.get("/ping", (req, res) => res.set("Cache-Control", "no-store").type("text").send("pong"));
+const audit = (req, userId, action, detail = "") => {
+  const id = randomUUID();
+  return store
+    .set("audit", id, {
+      id,
+      userId,
+      action,
+      detail: String(detail).slice(0, 300),
+      actor: req.user?.email || "",
+      ip: String(req.ip || "").slice(0, 60),
+      ua: String(req.headers["user-agent"] || "").slice(0, 200),
+      createdAt: new Date().toISOString(),
+    })
+    .catch(() => {});
+};
 app.post(
   "/api/login",
   rateLimit({
@@ -128,15 +156,22 @@ app.post(
       !user ||
       !passwordMatches(data.password, user.password) ||
       user.disabled
-    )
+    ) {
+      if (user) await audit(req, user.id, "login_failed", user.disabled ? "Account disabled" : "Wrong password");
       fail(401, "Incorrect email or password");
+    }
     const t = token();
     await store.set("sessions", hash(t), {
       id: hash(t),
       userId: user.id,
       version: user.sessionVersion || 0,
       expires: Date.now() + 86400000,
+      createdAt: new Date().toISOString(),
+      ip: String(req.ip || "").slice(0, 60),
+      ua: String(req.headers["user-agent"] || "").slice(0, 200),
     });
+    await store.patch("users", user.id, { lastLoginAt: new Date().toISOString() });
+    await audit(req, user.id, "login", "Signed in");
     res.cookie("zelon_session", t, {
       httpOnly: true,
       secure: production,
@@ -168,7 +203,10 @@ const auth = wrap(async (req, res, next) => {
     const s = await store.get("sessions", hash(req.cookies.zelon_session));
     if (s && s.expires > Date.now()) {
       const u = await store.get("users", s.userId);
-      if (u && (u.sessionVersion || 0) === (s.version || 0)) req.user = u;
+      if (u && (u.sessionVersion || 0) === (s.version || 0)) {
+        req.user = u;
+        req.sessionId = s.id;
+      }
     }
   }
   if (!req.user || req.user.disabled) fail(401, "Sign in to continue");
@@ -182,7 +220,105 @@ const consoleOnly = (req, res, next) =>
         .json({ error: "Use the dashboard session for this operation" })
     : next();
 app.get("/api/me", (req, res) =>
-  res.json({ id: req.user.id, email: req.user.email, role: req.user.role }),
+  res.json({ id: req.user.id, email: req.user.email, role: req.user.role, name: req.user.name || "" }),
+);
+const sessionDto = (x, current) => ({
+  id: x.id.slice(0, 16),
+  full: x.id,
+  createdAt: x.createdAt || null,
+  expires: x.expires,
+  ip: x.ip || "",
+  ua: x.ua || "",
+  current: x.id === current,
+});
+app.get(
+  "/api/account",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const mine = (await store.query("instances", { userId: req.user.id, limit: 1000 })).filter((x) => !x.archived);
+    const sessions = (await store.query("sessions", { userId: req.user.id, limit: 200 })).filter((x) => x.expires > Date.now());
+    res.json({
+      id: req.user.id,
+      email: req.user.email,
+      name: req.user.name || "",
+      role: req.user.role,
+      createdAt: req.user.createdAt || null,
+      lastLoginAt: req.user.lastLoginAt || null,
+      passwordChangedAt: req.user.passwordChangedAt || null,
+      instances: mine.map((x) => ({
+        id: x.id,
+        name: x.name,
+        status: x.status,
+        phone: x.phone || null,
+        hasKey: !!x.activeKeyId && x.activeKeyId !== "revoked",
+        hasWebhook: !!x.webhookUrl,
+      })),
+      sessions: sessions
+        .sort((a, b) => (Date.parse(b.createdAt || 0) || 0) - (Date.parse(a.createdAt || 0) || 0))
+        .map((x) => ({ ...sessionDto(x, req.sessionId), full: undefined })),
+    });
+  }),
+);
+app.put(
+  "/api/account/profile",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const d = z.object({ name: z.string().trim().max(80) }).parse(req.body);
+    await store.patch("users", req.user.id, { name: d.name });
+    await audit(req, req.user.id, "profile_updated", "Display name changed");
+    res.json({ ok: true });
+  }),
+);
+app.put(
+  "/api/account/email",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const d = z.object({ email: z.email().max(254), password: z.string().min(1).max(200) }).parse(req.body);
+    if (!passwordMatches(d.password, req.user.password)) fail(403, "Password is incorrect");
+    const email = d.email.toLowerCase();
+    const taken = (await store.query("users", { email, limit: 1 }))[0];
+    if (taken && taken.id !== req.user.id) fail(409, "An account with this email already exists");
+    await store.patch("users", req.user.id, { email });
+    await audit(req, req.user.id, "email_changed", req.user.email + " → " + email);
+    res.json({ ok: true, email });
+  }),
+);
+app.delete(
+  "/api/account/sessions/:sid",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const rows = await store.query("sessions", { userId: req.user.id, limit: 200 });
+    const target = rows.find((x) => x.id.startsWith(req.params.sid) && req.params.sid.length >= 8);
+    if (!target) fail(404, "Session not found");
+    await store.delete("sessions", target.id);
+    await audit(req, req.user.id, "session_revoked", "Signed out a device");
+    res.json({ ok: true, current: target.id === req.sessionId });
+  }),
+);
+app.post(
+  "/api/account/sessions/revoke-others",
+  consoleOnly,
+  wrap(async (req, res) => {
+    let n = 0;
+    for (const x of await store.query("sessions", { userId: req.user.id, limit: 500 }))
+      if (x.id !== req.sessionId) {
+        await store.delete("sessions", x.id);
+        n++;
+      }
+    await audit(req, req.user.id, "sessions_revoked", n + " other device(s) signed out");
+    res.json({ ok: true, revoked: n });
+  }),
+);
+app.get(
+  "/api/account/activity",
+  consoleOnly,
+  wrap(async (req, res) =>
+    res.json(
+      (await store.query("audit", { userId: req.user.id, limit: 40 })).map(({ id, action, detail, actor, ip, ua, createdAt }) => ({
+        id, action, detail, actor, ip, ua, createdAt,
+      })),
+    ),
+  ),
 );
 app.put(
   "/api/account/password",
@@ -198,7 +334,9 @@ app.put(
       fail(403, "Current password is incorrect");
     req.user.password = passwordHash(d.newPassword);
     req.user.sessionVersion = token();
+    req.user.passwordChangedAt = new Date().toISOString();
     await store.set("users", req.user.id, req.user);
+    await audit(req, req.user.id, "password_changed", "Password updated; all devices signed out");
     for (const session of await store.query("sessions", {
       userId: req.user.id,
       limit: 1000,
@@ -223,31 +361,79 @@ const adminOnly = (req, res, next) =>
 app.get(
   "/api/admin/users",
   adminOnly,
-  wrap(async (req, res) =>
+  wrap(async (req, res) => {
+    const owned = {};
+    for (const x of await store.all("instances"))
+      if (!x.archived) owned[x.userId] = (owned[x.userId] || 0) + 1;
     res.json(
-      (await store.query("users", { limit: 1000 })).map(
-        ({ password, ...u }) => u,
-      ),
-    ),
-  ),
+      (await store.query("users", { limit: 1000 })).map(({ password, sessionVersion, ...u }) => ({
+        ...u,
+        instances: owned[u.id] || 0,
+      })),
+    );
+  }),
 );
 let creatingUser = false;
 app.get(
   "/api/admin/system",
   adminOnly,
   wrap(async (req, res) => {
+    const t = Date.now();
     await store.health();
+    const databaseMs = Date.now() - t;
     const counts = {};
     for (const ns of ["users", "instances", "messages", "hooks", "media"])
       counts[ns] = await store.stats(ns);
+    const all = (await store.all("instances")).filter((x) => !x.archived),
+      byStatus = {};
+    for (const x of all) byStatus[x.status || "disconnected"] = (byStatus[x.status || "disconnected"] || 0) + 1;
+    const mem = process.memoryUsage();
     res.json({
       database: "healthy",
+      databaseMs,
       storage: store.storage,
       uptimeSeconds: Math.floor(process.uptime()),
+      startedAt,
+      now: new Date().toISOString(),
       nodeVersion: process.version,
+      platform: os.platform() + " " + os.arch(),
+      pid: process.pid,
+      environment: production ? "production" : "development",
+      cpus: os.cpus().length,
+      loadAverage: os.loadavg().map((n) => Math.round(n * 100) / 100),
+      memory: {
+        rss: mem.rss,
+        heapUsed: mem.heapUsed,
+        heapTotal: mem.heapTotal,
+        systemTotal: os.totalmem(),
+        systemFree: os.freemem(),
+      },
+      instances: { total: all.length, byStatus, sockets: all.filter((x) => wa.has(x.id)).length },
+      liveStreams: bus.size(),
       counts,
+      keepAlive: keepAlive.status(),
+      restarts: await keepAlive.boots(),
+      origin,
     });
   }),
+);
+app.get("/api/admin/keepalive", adminOnly, (req, res) => res.json(keepAlive.status()));
+app.put(
+  "/api/admin/keepalive",
+  adminOnly,
+  wrap(async (req, res) => {
+    const d = z.object({ enabled: z.boolean().optional(), intervalMinutes: z.number().int().optional() }).parse(req.body);
+    if (d.intervalMinutes !== undefined && !keepAlive.status().options.includes(d.intervalMinutes))
+      fail(400, "Choose an interval of 1, 2, 5, 10 or 15 minutes");
+    const s = await keepAlive.configure(d);
+    await audit(req, req.user.id, "keepalive_changed", (s.enabled ? "On, every " + s.intervalMinutes + " min" : "Off"));
+    res.json(s);
+  }),
+);
+app.post(
+  "/api/admin/keepalive/run",
+  adminOnly,
+  wrap(async (req, res) => res.json(await keepAlive.tick("manual"))),
 );
 app.post(
   "/api/admin/users",
@@ -260,6 +446,7 @@ app.post(
         .object({
           email: z.email().max(254),
           role: z.enum(["admin", "user"]).default("user"),
+          name: z.string().trim().max(80).optional(),
         })
         .parse(req.body);
       if ((await store.query("users", { email: data.email, limit: 1 })).length)
@@ -269,10 +456,12 @@ app.post(
       await store.set("users", id, {
         id,
         email: data.email.toLowerCase(),
+        name: data.name || "",
         role: data.role,
         password: passwordHash(password),
         createdAt: new Date().toISOString(),
       });
+      await audit(req, id, "account_created", "Created by " + req.user.email);
       res.status(201).json({ id, email: data.email, password });
     } finally {
       creatingUser = false;
@@ -283,13 +472,63 @@ app.put(
   "/api/admin/users/:userId",
   adminOnly,
   wrap(async (req, res) => {
-    if (req.params.userId === req.user.id)
-      fail(400, "You cannot disable your own administrator account");
-    const data = z.object({ disabled: z.boolean() }).parse(req.body);
+    const data = z
+      .object({
+        disabled: z.boolean().optional(),
+        role: z.enum(["admin", "user"]).optional(),
+        name: z.string().trim().max(80).optional(),
+        email: z.email().max(254).optional(),
+      })
+      .parse(req.body);
+    const own = req.params.userId === req.user.id;
+    if (own && (data.disabled !== undefined || data.role !== undefined))
+      fail(400, "You cannot change your own role or disable your own administrator account");
     const u = await store.get("users", req.params.userId);
     if (!u) fail(404, "Account not found");
-    u.disabled = data.disabled;
+    if (data.email) {
+      const taken = (await store.query("users", { email: data.email.toLowerCase(), limit: 1 }))[0];
+      if (taken && taken.id !== u.id) fail(409, "An account with this email already exists");
+      u.email = data.email.toLowerCase();
+    }
+    if (data.name !== undefined) u.name = data.name;
+    if (data.role !== undefined) u.role = data.role;
+    if (data.disabled !== undefined) {
+      u.disabled = data.disabled;
+      if (data.disabled) u.sessionVersion = token();
+    }
     await store.set("users", u.id, u);
+    if (data.disabled) for (const x of await store.query("sessions", { userId: u.id, limit: 500 })) await store.delete("sessions", x.id);
+    await audit(req, u.id, "account_updated", Object.keys(data).join(", ") + " changed by " + req.user.email);
+    res.json({ ok: true });
+  }),
+);
+app.post(
+  "/api/admin/users/:userId/sign-out",
+  adminOnly,
+  wrap(async (req, res) => {
+    const u = await store.get("users", req.params.userId);
+    if (!u) fail(404, "Account not found");
+    if (u.id === req.user.id) fail(400, "Use the sign out option in your account");
+    await store.patch("users", u.id, { sessionVersion: token() });
+    for (const x of await store.query("sessions", { userId: u.id, limit: 500 })) await store.delete("sessions", x.id);
+    await audit(req, u.id, "forced_sign_out", "All devices signed out by " + req.user.email);
+    res.json({ ok: true });
+  }),
+);
+app.delete(
+  "/api/admin/users/:userId",
+  adminOnly,
+  wrap(async (req, res) => {
+    const u = await store.get("users", req.params.userId);
+    if (!u) fail(404, "Account not found");
+    if (u.id === req.user.id) fail(400, "You cannot delete your own account");
+    for (const x of await store.query("instances", { userId: u.id, limit: 1000 })) {
+      try { await wa.disconnect(x, false); } catch {}
+      await store.patch("instances", x.id, { archived: true, activeKeyId: "revoked" });
+    }
+    for (const x of await store.query("sessions", { userId: u.id, limit: 500 })) await store.delete("sessions", x.id);
+    await store.delete("users", u.id);
+    await audit(req, req.user.id, "account_deleted", u.email + " deleted");
     res.json({ ok: true });
   }),
 );
@@ -304,7 +543,10 @@ app.post(
     await store.patch("users", u.id, {
       password: passwordHash(password),
       sessionVersion: token(),
+      passwordChangedAt: new Date().toISOString(),
     });
+    for (const x of await store.query("sessions", { userId: u.id, limit: 500 })) await store.delete("sessions", x.id);
+    await audit(req, u.id, "password_reset", "Reset by " + req.user.email);
     res.json({ password });
   }),
 );
@@ -392,12 +634,13 @@ app.use(
   }),
 );
 const media = createMediaStore(store, enc),
-  inbox = createInbox(store, enc),
+  inbox = createInbox(store, enc, (instance, event) => bus.publish(instance.id, event)),
   automation = createAutomation(store, enc);
 const wa = gateway(
   store,
   enc,
   async (instance, type, data) => {
+    if (type === "presence" || type === "connection") bus.publish(instance.id, { type, data });
     const current = await store.get("instances", instance.id);
     if (!current) return;
     instance = { ...instance, webhookUrl: current.webhookUrl };
@@ -429,6 +672,26 @@ const wa = gateway(
   },
   { inbox, automation },
 );
+app.get("/api/instances/:id/stream", (req, res) => {
+  res.set({
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  res.flushHeaders?.();
+  streams.add(res);
+  const send = (e) => res.write("data: " + JSON.stringify(e) + "\n\n"),
+    off = bus.subscribe(req.instance.id, send),
+    beat = setInterval(() => res.write(": ping\n\n"), 20000);
+  res.write("retry: 3000\n\n");
+  send({ type: "ready", status: req.instance.status });
+  req.on("close", () => {
+    clearInterval(beat);
+    off();
+    streams.delete(res);
+  });
+});
 app.post(
   "/api/instances/:id/connect",
   consoleOnly,
@@ -492,6 +755,7 @@ app.post(
       req.headers["idempotency-key"],
       () => {},
     );
+    work().catch(() => {});
     res.status(httpStatus).json(result);
   }),
 );
@@ -692,6 +956,14 @@ while (true) {
 for (const x of await store.all("instances"))
   if (!x.archived && ["connected", "reconnecting"].includes(x.status))
     await wa.connect(x);
+const keepAlive = createKeepAlive({
+  store,
+  origin,
+  wa,
+  enabled: process.env.KEEPALIVE !== "off",
+  minutes: Number(process.env.KEEPALIVE_MINUTES || 5),
+});
+await keepAlive.start();
 const timer = setInterval(
   () => work().catch((e) => console.error("Worker failed:", e.message)),
   2000,
@@ -737,6 +1009,8 @@ async function shutdown() {
   if (stopping) return;
   stopping = true;
   clearInterval(timer);
+  keepAlive.stop();
+  for (const r of streams) r.end();
   setTimeout(() => process.exit(1), 15000).unref();
   try {
     await Promise.all([

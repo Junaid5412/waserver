@@ -3,6 +3,7 @@ import {
   normalizeMessageContent,
   getContentType,
   WAMessageStatus,
+  WAMessageStubType,
   getAggregateVotesInPollMessage,
 } from "@whiskeysockets/baileys";
 import { hash } from "./security.js";
@@ -50,7 +51,56 @@ export function describeMessage(message) {
       ? (value.contextInfo.quotedMessage.conversation || value.contextInfo.quotedMessage.extendedTextMessage?.text || value.contextInfo.quotedMessage.imageMessage?.caption || "Quoted message").slice(0, 500) : "",
   };
 }
-export function createInbox(store, enc) {
+const IGNORED = new Set(["senderKeyDistributionMessage", "pollUpdateMessage", "keepInChatMessage", "encReactionMessage", "messageContextInfo", "reactionMessage", "protocolMessage"]);
+export function createInbox(store, enc, notify = () => {}) {
+  const tell = (instance, event) => { try { notify(instance, event); } catch {} };
+  async function rowsFor(instance, waId) {
+    return store.query("inbox", { instanceId: instance.id, lookupKey: waId, limit: 10 });
+  }
+  async function markDeleted(instance, waId) {
+    const rows = await rowsFor(instance, waId);
+    for (const row of rows) await store.patch("inbox", row.id, { deleted: true });
+    if (rows[0]) tell(instance, { type: "update", chatId: rows[0].chatId, waId });
+  }
+  async function applyEdit(instance, waId, edited) {
+    if (!edited) return;
+    const rows = await rowsFor(instance, waId);
+    if (!rows.length) return;
+    const stored = await load(instance.id, waId);
+    if (stored) {
+      stored.message = edited;
+      await store.set("wa-message:" + instance.id, waId, {
+        id: waId, chatId: rows[0].chatId, fromMe: !!stored.key?.fromMe, data: pack(enc, stored),
+      });
+      for (const row of rows) await store.patch("inbox", row.id, { data: pack(enc, stored), edited: true });
+      const info = describeMessage(edited);
+      const chat = await store.get("chats", hash(instance.id + ":" + rows[0].chatId));
+      if (chat?.lastMessageId === waId) await store.patch("chats", chat.id, { lastPreview: enc.seal(info.text || "[" + info.type + "]") });
+    }
+    tell(instance, { type: "update", chatId: rows[0].chatId, waId });
+  }
+  async function react(instance, reactions) {
+    for (const { key, reaction } of reactions || []) {
+      if (!key?.id) continue;
+      const rows = await rowsFor(instance, key.id);
+      const who = normalizeJid(reaction?.key?.participant || (reaction?.key?.fromMe ? "me" : reaction?.key?.remoteJid)) || "me";
+      for (const row of rows)
+        await store.patch("inbox", row.id, (r) => {
+          const reactions = { ...(r.reactions || {}) };
+          if (reaction?.text) reactions[reaction?.key?.fromMe ? "me" : who] = reaction.text;
+          else delete reactions[reaction?.key?.fromMe ? "me" : who];
+          return { ...r, reactions };
+        });
+      if (rows[0]) tell(instance, { type: "update", chatId: rows[0].chatId, waId: key.id });
+    }
+  }
+  async function protocol(instance, pm) {
+    const target = pm?.key?.id,
+      t = pm?.type;
+    if (!target) return;
+    if (t === 0 || t === "REVOKE") await markDeleted(instance, target);
+    else if (t === 14 || t === "MESSAGE_EDIT") await applyEdit(instance, target, pm.editedMessage);
+  }
   async function load(instanceId, waId) {
     const row = await store.get("wa-message:" + instanceId, waId);
     if (!row) return null;
@@ -89,6 +139,14 @@ export function createInbox(store, enc) {
   }
   async function persist(instance, m, { notify = false } = {}) {
     if (!m.key?.id || !m.key.remoteJid || !m.message) return false;
+    const raw = normalizeMessageContent(m.message) || {},
+      rawKind = getContentType(raw);
+    if (rawKind === "protocolMessage") { await protocol(instance, raw.protocolMessage); return false; }
+    if (rawKind === "reactionMessage") {
+      await react(instance, [{ key: raw.reactionMessage.key, reaction: { text: raw.reactionMessage.text, key: m.key } }]);
+      return false;
+    }
+    if (!rawKind || IGNORED.has(rawKind)) return false;
     const remote = normalizeJid(m.key.remoteJid),
       altJid = m.key.remoteJidAlt || m.key.senderPn || m.key.participantPn;
     if (remote.endsWith("@lid") && altJid) await alias(instance, remote, altJid);
@@ -147,6 +205,7 @@ export function createInbox(store, enc) {
         unread: (c.unread || 0) + (fresh && notify && !m.key.fromMe ? 1 : 0),
       };
     });
+    if (fresh) tell(instance, { type: "message", chatId, waId: m.key.id, fromMe: !!m.key.fromMe, notify });
     return fresh;
   }
   async function receipt(instance, updates) {
@@ -183,6 +242,9 @@ export function createInbox(store, enc) {
         });
         await store.patch("receipts", receiptId, apply);
       }
+      if (update.messageStubType === WAMessageStubType.REVOKE) await markDeleted(instance, key.id);
+      if (update.message?.editedMessage?.message) await applyEdit(instance, key.id, update.message.editedMessage.message);
+      if (status && entries[0]) tell(instance, { type: "update", chatId: entries[0].chatId, waId: key.id });
       if (update.pollUpdates) {
         const creator = await load(instance.id, key.id);
         if (creator) {
@@ -248,6 +310,14 @@ export function createInbox(store, enc) {
   }
   const dto = (row) => {
     const m = unpack(enc, row.data);
+    if (row.deleted)
+      return {
+        id: row.id, waId: row.waId, chatId: row.chatId, fromMe: row.fromMe, status: row.status,
+        createdAt: row.createdAt, type: "deleted", text: "", hasMedia: false, mimetype: "", filename: "",
+        pollOptions: [], durationSeconds: 0, location: null, contacts: [], quotedText: "",
+        participant: m.key?.participant || "", name: m.pushName || "", deleted: true, edited: false,
+        starred: false, reactions: {},
+      };
     return {
       id: row.id,
       waId: row.waId,
@@ -258,12 +328,18 @@ export function createInbox(store, enc) {
       ...describeMessage(m.message),
       participant: m.key?.participant || "",
       name: m.pushName || "",
+      deleted: !!row.deleted,
+      edited: !!row.edited,
+      starred: !!row.starred,
+      reactions: row.reactions || {},
     };
   };
   return {
     load,
     persist,
     receipt,
+    react,
+    markDeleted,
     contact,
     chat,
     dto,

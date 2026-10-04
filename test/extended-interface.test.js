@@ -8,6 +8,8 @@ const features = await readFile(
     "utf8",
   ),
   app = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+const chatjs = await readFile(new URL("../public/chat.js", import.meta.url), "utf8"),
+  adminjs = await readFile(new URL("../public/admin.js", import.meta.url), "utf8");
 const wait = async (fn) => {
   for (let i = 0; i < 100; i++) {
     if (fn()) return;
@@ -84,6 +86,8 @@ function fixture(t, { rich = false } = {}) {
       headers: { "Content-Type": "application/json" },
     });
   };
+  vm.runInContext(chatjs, dom.getInternalVMContext());
+  vm.runInContext(adminjs, dom.getInternalVMContext());
   vm.runInContext(features, dom.getInternalVMContext());
   vm.runInContext(app, dom.getInternalVMContext());
   return { dom, calls, d: dom.window.document };
@@ -94,11 +98,14 @@ test("Extended inbox escapes names/messages and queues a quoted reply with a sco
   d.querySelector("[data-instance]").click();
   d.querySelector('[data-tab="inbox"]').click();
   await wait(() => d.querySelector("[data-chat]"));
-  assert.equal(d.querySelectorAll("script,img").length, 0);
+  assert.equal(d.querySelectorAll("script,img[onerror]").length, 0);
   d.querySelector("[data-chat]").click();
-  await wait(() => d.querySelector("[data-quote]"));
-  assert.equal(d.querySelectorAll("script,img").length, 0);
-  d.querySelector("[data-quote]").click();
+  await wait(() => d.querySelector(".wa-row[data-id]"));
+  assert.equal(d.querySelectorAll("script,img[onerror]").length, 0);
+  assert.match(d.querySelector(".wa-row").textContent, /<img onerror=evil\(\)> hello/);
+  d.querySelector(".wa-row[data-id]").dispatchEvent(new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
+  await wait(() => d.querySelector('[data-act="reply"]'));
+  d.querySelector('[data-act="reply"]').click();
   d.querySelector("#replyText").value = "Thanks";
   d.querySelector("#replyForm").dispatchEvent(
     new dom.window.Event("submit", { bubbles: true, cancelable: true }),
@@ -170,13 +177,13 @@ test("Console navigation, grouped instance tabs and mobile chat back navigation 
   assert.equal(d.querySelectorAll(".ptab").length, 6);
   d.querySelector("[data-chat]").click();
   await wait(() => d.querySelector("#chatBack"));
-  assert(d.querySelector(".inboxlayout").classList.contains("chat-open"));
+  assert(d.querySelector("#wa").classList.contains("chat-open"));
   d.querySelector("#chatBack").click();
-  assert(!d.querySelector(".inboxlayout").classList.contains("chat-open"));
+  assert(!d.querySelector("#wa").classList.contains("chat-open"));
   d.querySelector("#fullInbox").click();
-  assert(d.querySelector(".inboxlayout").classList.contains("inbox-full"));
+  assert(d.querySelector("#wa").classList.contains("inbox-full"));
   d.querySelector("#fullInbox").click();
-  assert(!d.querySelector(".inboxlayout").classList.contains("inbox-full"));
+  assert(!d.querySelector("#wa").classList.contains("inbox-full"));
 });
 
 test("Chat shows rich data and securely fetches an inline media preview", async (t) => {
@@ -186,15 +193,12 @@ test("Chat shows rich data and securely fetches an inline media preview", async 
   d.querySelector('[data-tab="inbox"]').click();
   await wait(() => d.querySelector("[data-chat]"));
   d.querySelector("[data-chat]").click();
-  await wait(() => d.querySelector("[data-preview]"));
-  assert.match(d.querySelector(".messages").textContent, /Photo caption/);
-  assert.match(d.querySelector(".messages").textContent, /TEL:\+97450000001/);
-  assert.match(d.querySelector(".messages").textContent, /Yes <script>/);
+  await wait(() => d.querySelector(".wa-media img"));
+  const txt = d.querySelector("#waMsgs").textContent;
+  assert.match(txt, /Photo caption/);
+  assert.match(txt, /Sam/);
+  assert.match(txt, /Yes <script>/);
   assert(d.querySelector('a[href^="https://www.google.com/maps?q="]'));
   assert.equal(d.querySelectorAll("script").length, 0);
-  assert(d.querySelector("#replyAttachment"));
-  d.querySelector("[data-preview]").click();
-  await wait(() => d.querySelector(".chat-media img"));
-  assert.match(d.querySelector(".chat-media img").src, /^blob:/);
-  assert(calls.some(call => call.url.endsWith("/inbox/image-id/media")));
+  assert.match(d.querySelector(".wa-media img").getAttribute("src"), /\/inbox\/image-id\/media\?.*inline=1/);
 });

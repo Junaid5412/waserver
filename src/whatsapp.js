@@ -264,6 +264,10 @@ export function gateway(store, encryption, emit, {
             }
           });
       }
+      if (inbox)
+        socket.ev.on("messages.reaction", async (rows) => {
+          try { await inbox.react(instance, rows); } catch (e) { logger.error({ err: e }, "Reaction persistence failed"); }
+        });
       socket.ev.on("presence.update", async (data) => {
         try {
           await emit(instance, "presence", data);
@@ -335,6 +339,8 @@ export function gateway(store, encryption, emit, {
     },
     qr: (id) => qrs.get(id),
     active,
+    has: (id) => sockets.has(id) || connecting.has(id),
+    socket: (id) => sockets.get(id) || null,
     async disconnect(instance, logout = false) {
       stopped.add(instance.id);
       clearTimeout(reconnectTimers.get(instance.id));
