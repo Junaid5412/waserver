@@ -5,6 +5,8 @@ import { once } from "node:events";
 import {
   downloadMediaMessage,
   jidNormalizedUser,
+  normalizeMessageContent,
+  getContentType,
 } from "@whiskeysockets/baileys";
 import pino from "pino";
 import { timestampSeconds, describeMessage, normalizeJid, isJunkType, previewOf } from "./inbox.js";
@@ -391,15 +393,33 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
   router.put(
     "/inbox/:message/text",
     wrap(async (req, res) => {
-      const { text } = z
-          .object({ text: z.string().min(1).max(20000) })
-          .parse(req.body),
+      const { text } = z.object({ text: z.string().max(20000) }).parse(req.body),
         m = await message(req);
       if (!m.key.fromMe)
         fail(403, "You can only edit messages sent by this number");
-      await wa
-        .active(req.instance.id)
-        .sendMessage(m.key.remoteJid, { text, edit: m.key });
+      const sock = wa.active(req.instance.id),
+        raw = normalizeMessageContent(m.message) || {},
+        kind = getContentType(raw),
+        sentAt = timestampSeconds(m.messageTimestamp) * 1000;
+      if (sentAt && Date.now() - sentAt > 15 * 60 * 1000 + 30000)
+        fail(400, "WhatsApp only allows editing a message within 15 minutes of sending it");
+      let edited;
+      if (kind === "conversation" || kind === "extendedTextMessage") {
+        if (!text.trim()) fail(400, "Write the new message text");
+        edited = kind === "conversation" ? { conversation: text } : { extendedTextMessage: { ...raw.extendedTextMessage, text } };
+        await sock.sendMessage(m.key.remoteJid, { text, edit: m.key });
+      } else if (kind === "imageMessage" || kind === "videoMessage" || kind === "documentMessage") {
+        const body = { ...raw[kind], caption: text };
+        edited = kind === "documentMessage" ? { documentWithCaptionMessage: { message: { documentMessage: body } } } : { [kind]: body };
+        await sock.relayMessage(
+          m.key.remoteJid,
+          { protocolMessage: { key: m.key, type: 14, editedMessage: edited, timestampMs: Date.now() } },
+          { additionalAttributes: { edit: "1" } },
+        );
+      } else {
+        fail(400, "WhatsApp only lets you edit text messages and photo, video or document captions");
+      }
+      await inbox.applyEdit(req.instance, m.key.id, edited);
       res.json({ ok: true });
     }),
   );

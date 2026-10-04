@@ -366,6 +366,8 @@ export function createInbox(store, enc, notify = () => {}) {
     dto,
     alias,
     resolve,
+    applyEdit,
+    load,
     async votes(instance, id) {
       const m = await load(instance.id, id);
       return m

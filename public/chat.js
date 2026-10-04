@@ -280,6 +280,7 @@ window.ZelonChat = (() => {
     };
     const sigOf = (list) => JSON.stringify(list.map((m) => [m.waId, m.status, m.text, m.edited, m.deleted, m.starred, m.reactions, m.pending, m.late]));
     const allMsgs = () => [...pending.map((m) => ({ ...m })), ...msgs].filter((m) => !isJunk(m.type)).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    const canEdit = (m) => m.fromMe && !m.pending && !m.deleted && !m.location && !(m.contacts || []).length && !m.pollOptions?.length && !["audio", "sticker", "poll", "location", "contact", "deleted"].includes(m.type) && (m.hasMedia ? ["image", "video", "document"].includes(m.type) : !!m.text) && Date.now() - Date.parse(m.createdAt) < 15 * 60000;
     const senderPhone = (m) => m.participantPhone ? fmtPhone(m.participantPhone) : isPnJid(m.participant) ? fmtPhone(m.participant) : "";
     const senderName = (m) => {
       if (m.fromMe) return "You";
@@ -813,8 +814,8 @@ window.ZelonChat = (() => {
         e.preventDefault();
         const text = ta.value.trim();
         if (editing) {
-          if (!text) return toast("Write the new message text");
           const target = editing;
+          if (!text && !target.hasMedia) return toast("Write the new message text");
           try {
             await api(base + "/inbox/" + encodeURIComponent(target.waId) + "/text", "PUT", { text });
             const m = msgs.find((x) => x.waId === target.waId);
@@ -939,7 +940,7 @@ window.ZelonChat = (() => {
         if (m.text) items.push(["copy", I.copy, "Copy"]);
         items.push(["forward", I.forward, "Forward"]);
         items.push(["star", I.star, m.starred ? "Unstar" : "Star"]);
-        if (m.fromMe && m.text && !m.hasMedia && m.type !== "poll") items.push(["edit", I.edit, "Edit"]);
+        if (canEdit(m)) items.push(["edit", I.edit, "Edit"]);
         if (m.hasMedia) items.push(["download", I.download, "Download"]);
         if (m.pollOptions?.length) items.push(["votes", I.poll, "Poll results"]);
         if (m.hasMedia && isPdf(m)) items.push(["view", I.doc, "View PDF"]);
