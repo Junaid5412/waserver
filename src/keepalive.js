@@ -34,9 +34,11 @@ export function createKeepAlive({ store, origin, wa, fetcher = globalThis.fetch,
   }
   async function watchdog() {
     let revived = 0;
-    for (const status of ["connected", "reconnecting"])
+    for (const status of ["connected", "reconnecting", "disconnected"])
       for (const x of await store.query("instances", { status, limit: 1000 })) {
         if (x.archived || wa.has(x.id)) continue;
+        // Disconnected instances are only revived when still linked and not replaced by another session.
+        if (status === "disconnected" && (!wa.canResume || /code 440/.test(x.connectionError || "") || !(await wa.canResume(x)))) continue;
         try {
           await wa.connect(x);
           revived++;

@@ -390,6 +390,13 @@ export function gateway(store, encryption, emit, {
   }
   return {
     connect,
+    // True when stored credentials are still a linked session (not logged out / never linked).
+    async canResume(instance) {
+      try {
+        const r = await store.get("auth:" + instance.id, "creds");
+        return !!(r && JSON.parse(encryption.open(r.data), BufferJSON.reviver).registered);
+      } catch { return false; }
+    },
     async pairingCode(instance, phone) {
       const digits = String(phone || "").replace(/\D/g, "").replace(/^00/, "");
       if (digits.length < 8 || digits.length > 15)

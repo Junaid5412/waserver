@@ -990,7 +990,7 @@ while (true) {
   }
 }
 for (const x of await store.all("instances"))
-  if (!x.archived && ["connected", "reconnecting"].includes(x.status))
+  if (!x.archived && (["connected", "reconnecting"].includes(x.status) || (x.status === "disconnected" && !/code 440/.test(x.connectionError || "") && (await wa.canResume(x)))))
     await wa.connect(x);
 const keepAlive = createKeepAlive({
   store,
