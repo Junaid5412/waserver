@@ -182,7 +182,17 @@ app.post(
       maxAge: 86400000,
       path: "/",
     });
-    res.json({ ok: true });
+    res.json({
+      ok: true,
+      token: t,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        name: user.name || "",
+        permissions: user.permissions || {},
+      },
+    });
   }),
 );
 const auth = wrap(async (req, res, next) => {
@@ -201,9 +211,19 @@ const auth = wrap(async (req, res, next) => {
         req.user = await store.get("users", key.userId);
         req.apiInstance = key.instanceId;
       }
+    } else {
+      const s = await store.get("sessions", hash(bearer));
+      if (s && s.expires > Date.now()) {
+        const u = await store.get("users", s.userId);
+        if (u && (u.sessionVersion || 0) === (s.version || 0)) {
+          req.user = u;
+          req.sessionId = s.id;
+        }
+      }
     }
-  } else if (req.cookies.zelon_session) {
-    const s = await store.get("sessions", hash(req.cookies.zelon_session));
+  } else if (req.cookies.zelon_session || req.headers["x-session-token"]) {
+    const tokenVal = req.cookies.zelon_session || req.headers["x-session-token"];
+    const s = await store.get("sessions", hash(tokenVal));
     if (s && s.expires > Date.now()) {
       const u = await store.get("users", s.userId);
       if (u && (u.sessionVersion || 0) === (s.version || 0)) {
@@ -223,7 +243,13 @@ const consoleOnly = (req, res, next) =>
         .json({ error: "Use the dashboard session for this operation" })
     : next();
 app.get("/api/me", (req, res) =>
-  res.json({ id: req.user.id, email: req.user.email, role: req.user.role, name: req.user.name || "" }),
+  res.json({
+    id: req.user.id,
+    email: req.user.email,
+    role: req.user.role,
+    name: req.user.name || "",
+    permissions: req.user.permissions || {},
+  }),
 );
 const sessionDto = (x, current) => ({
   id: x.id.slice(0, 16),
@@ -453,6 +479,7 @@ app.post(
           email: z.email().max(254),
           role: z.enum(["admin", "user"]).default("user"),
           name: z.string().trim().max(80).optional(),
+          permissions: z.record(z.boolean()).optional(),
         })
         .parse(req.body);
       if ((await store.query("users", { email: data.email, limit: 1 })).length)
@@ -464,6 +491,7 @@ app.post(
         email: data.email.toLowerCase(),
         name: data.name || "",
         role: data.role,
+        permissions: data.permissions || {},
         password: passwordHash(password),
         createdAt: new Date().toISOString(),
       });
@@ -484,6 +512,7 @@ app.put(
         role: z.enum(["admin", "user"]).optional(),
         name: z.string().trim().max(80).optional(),
         email: z.email().max(254).optional(),
+        permissions: z.record(z.boolean()).optional(),
       })
       .parse(req.body);
     const own = req.params.userId === req.user.id;
@@ -498,6 +527,7 @@ app.put(
     }
     if (data.name !== undefined) u.name = data.name;
     if (data.role !== undefined) u.role = data.role;
+    if (data.permissions !== undefined) u.permissions = data.permissions;
     if (data.disabled !== undefined) {
       u.disabled = data.disabled;
       if (data.disabled) u.sessionVersion = token();

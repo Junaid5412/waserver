@@ -1,0 +1,9 @@
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugin-dependencies
+.flutter-plugins-dependencies
+local.properties
+*.apk
+*.aab
