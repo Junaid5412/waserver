@@ -1,7 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiConfig {
-  static const String defaultBaseUrl = 'http://10.0.2.2:3000';
+  static const String defaultBaseUrl = 'https://wa.hostzelon.com';
   static const String prefBaseUrlKey = 'zelon_base_url';
 
   static String _baseUrl = defaultBaseUrl;

@@ -36,7 +36,9 @@ jobs:
 
       - name: Ensure Android platform files
         working-directory: App
-        run: flutter create --platforms=android --org=com.zelon .
+        run: |
+          flutter create --platforms=android --org=com.zelon .
+          rm -f android/build.gradle.kts android/settings.gradle.kts android/app/build.gradle.kts
 
       - name: Install Flutter Dependencies
         working-directory: App

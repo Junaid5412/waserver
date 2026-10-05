@@ -76,7 +76,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
             ScaleTransition(
               scale: _scaleAnimation,
               child: FadeTransition(
-                fade: _fadeAnimation,
+                opacity: _fadeAnimation,
                 child: Column(
                   children: [
                     Container(
@@ -123,7 +123,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 
             // Footer branding
             FadeTransition(
-              fade: _fadeAnimation,
+              opacity: _fadeAnimation,
               child: Column(
                 children: [
                   Text(
