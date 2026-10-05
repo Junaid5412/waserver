@@ -368,7 +368,7 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
                             const SizedBox(height: 3),
                             Text(
                               isOnline
-                                  ? (inst.phone.isNotEmpty ? '+${inst.phone}' : 'Connected & Synced')
+                                  ? (inst.phone != null && inst.phone!.isNotEmpty ? '+${inst.phone}' : 'Connected & Synced')
                                   : 'Disconnected / Tap to Link',
                               style: TextStyle(
                                 fontSize: 12.5,
@@ -449,15 +449,21 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                           ),
                           const SizedBox(height: 16),
-                          if (_isLoadingQr)
+                          if (_qrCode.isNotEmpty)
+                            Center(
+                              child: QrWidget(
+                                qrData: _qrCode,
+                                onRefresh: _startQrFlow,
+                                isLoading: _isLoadingQr,
+                              ),
+                            )
+                          else if (_isLoadingQr)
                             const SizedBox(
                               height: 220,
                               child: Center(
                                 child: CircularProgressIndicator(color: WhatsAppTheme.primaryGreen),
                               ),
                             )
-                          else if (_qrCode.isNotEmpty)
-                            Center(child: QrWidget(qrData: _qrCode, size: 220))
                           else
                             const SizedBox(
                               height: 220,

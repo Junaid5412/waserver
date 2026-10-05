@@ -23,6 +23,7 @@ class ChatModel {
 
   bool get isGroup => chatId.endsWith('@g.us');
   bool get isStatus => chatId == 'status@broadcast';
+  int get unreadCount => unread;
 
   String get displayTitle {
     if (name.isNotEmpty && name != chatId) return name;
