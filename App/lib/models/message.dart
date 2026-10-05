@@ -39,6 +39,10 @@ class MessageModel {
   final String? mimetype;
   final String? filename;
   final bool starred;
+  final double? latitude;
+  final double? longitude;
+  final String? locationName;
+  final String? locationAddress;
 
   String get senderName => name;
   String get senderJid => participant;
@@ -46,6 +50,8 @@ class MessageModel {
       type != 'text' &&
       type != 'deleted' &&
       (mimetype != null || ['image', 'video', 'document', 'audio'].contains(type));
+  bool get isLocation =>
+      type == 'location' || (latitude != null && longitude != null);
 
   MessageModel({
     required this.id,
@@ -69,6 +75,10 @@ class MessageModel {
     this.mimetype,
     this.filename,
     this.starred = false,
+    this.latitude,
+    this.longitude,
+    this.locationName,
+    this.locationAddress,
   });
 
   factory MessageModel.fromJson(Map<String, dynamic> json) {
@@ -86,6 +96,23 @@ class MessageModel {
       json['reactions'].forEach((k, v) {
         if (v != null) reacts[k.toString()] = v.toString();
       });
+    }
+
+    double? lat;
+    double? lng;
+    String? locName;
+    String? locAddr;
+    if (json['location'] is Map) {
+      final loc = json['location'] as Map;
+      lat = (loc['latitude'] as num?)?.toDouble();
+      lng = (loc['longitude'] as num?)?.toDouble();
+      locName = loc['name']?.toString();
+      locAddr = loc['address']?.toString();
+    } else {
+      if (json['latitude'] != null) lat = (json['latitude'] as num?)?.toDouble();
+      if (json['longitude'] != null) lng = (json['longitude'] as num?)?.toDouble();
+      locName = json['locationName']?.toString();
+      locAddr = json['locationAddress']?.toString();
     }
 
     return MessageModel(
@@ -110,6 +137,10 @@ class MessageModel {
       mimetype: json['mimetype']?.toString(),
       filename: json['filename']?.toString(),
       starred: json['starred'] == true,
+      latitude: lat,
+      longitude: lng,
+      locationName: locName,
+      locationAddress: locAddr,
     );
   }
 
@@ -136,7 +167,10 @@ class MessageModel {
       'quotedText': quotedText,
       'mimetype': mimetype,
       'filename': filename,
+      'latitude': latitude,
+      'longitude': longitude,
+      'locationName': locationName,
+      'locationAddress': locationAddress,
     };
   }
 }
-

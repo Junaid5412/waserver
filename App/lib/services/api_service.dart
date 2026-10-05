@@ -302,6 +302,29 @@ class ApiService {
     } catch (_) {}
   }
 
+  Future<void> sendPresence(String instanceId, String chatJid, String presence) async {
+    try {
+      await http.post(
+        Uri.parse(ApiConfig.sendPresenceUrl(instanceId, chatJid)),
+        headers: _headers(),
+        body: jsonEncode({'presence': presence}),
+      );
+    } catch (_) {}
+  }
+
+  Future<Map<String, dynamic>> getChatInfo(String instanceId, String chatJid) async {
+    try {
+      final res = await http.get(
+        Uri.parse(ApiConfig.chatInfoUrl(instanceId, chatJid)),
+        headers: _headers(),
+      );
+      if (res.statusCode == 200) {
+        return jsonDecode(res.body) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return {};
+  }
+
   Future<void> sendMediaMessage(String instanceId, {
     required String to,
     required String type,
@@ -377,6 +400,7 @@ class ApiService {
     required double latitude,
     required double longitude,
     String? name,
+    String? address,
     String? quotedWaId,
   }) async {
     final body = <String, dynamic>{
@@ -386,6 +410,7 @@ class ApiService {
       'longitude': longitude,
     };
     if (name != null && name.isNotEmpty) body['name'] = name;
+    if (address != null && address.isNotEmpty) body['address'] = address;
     if (quotedWaId != null && quotedWaId.isNotEmpty) body['quotedId'] = quotedWaId;
 
     final res = await http.post(

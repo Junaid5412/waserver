@@ -1,24 +1,81 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
 import '../config/api_config.dart';
 import '../config/theme.dart';
 import '../models/chat.dart';
 import '../services/auth_service.dart';
 import '../widgets/chat_avatar.dart';
+import 'call_screen.dart';
 
-class ContactProfileScreen extends StatelessWidget {
+class ContactProfileScreen extends StatefulWidget {
   final ChatModel chat;
 
   const ContactProfileScreen({super.key, required this.chat});
+
+  @override
+  State<ContactProfileScreen> createState() => _ContactProfileScreenState();
+}
+
+class _ContactProfileScreenState extends State<ContactProfileScreen> {
+  Map<String, dynamic> _info = {};
+  bool _isLoadingInfo = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadChatInfo();
+  }
+
+  Future<void> _loadChatInfo() async {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final instanceId = auth.selectedInstance?.id;
+    if (instanceId == null) {
+      if (mounted) setState(() => _isLoadingInfo = false);
+      return;
+    }
+
+    try {
+      final data = await auth.api.getChatInfo(instanceId, widget.chat.chatId);
+      if (mounted) {
+        setState(() {
+          _info = data;
+          _isLoadingInfo = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoadingInfo = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final auth = Provider.of<AuthService>(context, listen: false);
     final instanceId = auth.selectedInstance?.id;
+    final chat = widget.chat;
     final isGroup = chat.isGroup;
     final rawNumber = chat.chatId.split('@').first;
     final formattedPhone = rawNumber.isNotEmpty ? '+$rawNumber' : chat.chatId;
+
+    // Real dynamic data extracted from Baileys
+    final realAbout = _info['about']?.toString().isNotEmpty == true
+        ? _info['about'].toString()
+        : (_info['status']?.toString().isNotEmpty == true
+            ? _info['status'].toString()
+            : null);
+
+    final realDesc = _info['description']?.toString().isNotEmpty == true
+        ? _info['description'].toString()
+        : null;
+
+    final createdAtStr = _info['createdAt'] != null
+        ? DateFormat('MMMM d, yyyy').format(DateTime.parse(_info['createdAt'].toString()).toLocal())
+        : null;
+
+    final ownerName = _info['owner']?.toString();
+    final participants = (_info['participants'] as List?)?.map((p) => Map<String, dynamic>.from(p)).toList() ?? [];
 
     return Scaffold(
       backgroundColor: isDark ? WhatsAppTheme.bgDark : const Color(0xFFF0F2F5),
@@ -35,8 +92,12 @@ class ContactProfileScreen extends StatelessWidget {
             ),
             actions: [
               IconButton(
-                icon: const Icon(Icons.more_vert, color: Colors.white),
-                onPressed: () {},
+                icon: const Icon(Icons.share_rounded, color: Colors.white),
+                onPressed: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Share ${chat.displayTitle}')),
+                  );
+                },
               ),
             ],
             flexibleSpace: FlexibleSpaceBar(
@@ -155,13 +216,27 @@ class ContactProfileScreen extends StatelessWidget {
                             context,
                             Icons.call_rounded,
                             'Audio',
-                            () => _showCallDialog(context, 'Audio Call', formattedPhone),
+                            () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => CallScreen(chat: chat, isVideo: false),
+                                ),
+                              );
+                            },
                           ),
                           _actionBtn(
                             context,
                             Icons.videocam_rounded,
                             'Video',
-                            () => _showCallDialog(context, 'Video Call', formattedPhone),
+                            () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => CallScreen(chat: chat, isVideo: true),
+                                ),
+                              );
+                            },
                           ),
                           _actionBtn(
                             context,
@@ -177,7 +252,7 @@ class ContactProfileScreen extends StatelessWidget {
 
                 const SizedBox(height: 10),
 
-                // About & Status
+                // About & Status (Original Data)
                 Container(
                   width: double.infinity,
                   color: isDark ? WhatsAppTheme.surfaceDark : Colors.white,
@@ -193,65 +268,117 @@ class ContactProfileScreen extends StatelessWidget {
                                 : isGroup
                                     ? 'Group Description'
                                     : 'About & Phone',
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.bold,
                           color: WhatsAppTheme.primaryGreen,
                         ),
                       ),
                       const SizedBox(height: 8),
-                      Text(
-                        isGroup
-                            ? 'Welcome to ${chat.displayTitle}! Group notifications and media synced via Zelon Messenger.'
-                            : 'Hey there! I am using Zelon Messenger.',
-                        style: const TextStyle(fontSize: 15),
-                      ),
-                      const SizedBox(height: 12),
-                      const Divider(height: 1),
-                      const SizedBox(height: 12),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(formattedPhone, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
-                              const SizedBox(height: 2),
-                              Text('Mobile Phone', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                            ],
+                      if (_isLoadingInfo)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 8),
+                          child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: WhatsAppTheme.primaryGreen),
                           ),
-                          const Icon(Icons.phone_rounded, color: WhatsAppTheme.primaryGreen),
-                        ],
-                      ),
+                        )
+                      else
+                        Text(
+                          isGroup
+                              ? (realDesc ?? 'No group description provided.')
+                              : (realAbout ?? 'Hey there! I am using WhatsApp.'),
+                          style: const TextStyle(fontSize: 15),
+                        ),
+                      if (!isGroup) ...[
+                        const SizedBox(height: 12),
+                        const Divider(height: 1),
+                        const SizedBox(height: 12),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(formattedPhone, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+                                const SizedBox(height: 2),
+                                Text('Mobile Phone', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                              ],
+                            ),
+                            const Icon(Icons.phone_rounded, color: WhatsAppTheme.primaryGreen),
+                          ],
+                        ),
+                      ],
+                      if (isGroup && createdAtStr != null) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          'Created on $createdAtStr${ownerName != null ? " by $ownerName" : ""}',
+                          style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.grey.shade600),
+                        ),
+                      ],
                     ],
                   ),
                 ),
 
                 const SizedBox(height: 10),
 
-                // Media, Links, and Docs Tile
-                Container(
-                  color: isDark ? WhatsAppTheme.surfaceDark : Colors.white,
-                  child: ListTile(
-                    leading: const Icon(Icons.perm_media_rounded, color: WhatsAppTheme.primaryGreen),
-                    title: const Text('Media, links, and docs'),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: const [
-                        Text('14', style: TextStyle(color: Colors.grey, fontSize: 14)),
-                        SizedBox(width: 4),
-                        Icon(Icons.chevron_right_rounded, color: Colors.grey),
+                // Group Participants List (If Group)
+                if (isGroup && participants.isNotEmpty) ...[
+                  Container(
+                    width: double.infinity,
+                    color: isDark ? WhatsAppTheme.surfaceDark : Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${participants.length} participants',
+                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: WhatsAppTheme.primaryGreen),
+                        ),
+                        const SizedBox(height: 8),
+                        ListView.separated(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: math.min(participants.length, 30),
+                          separatorBuilder: (_, __) => const Divider(height: 1, indent: 48),
+                          itemBuilder: (ctx, i) {
+                            final p = participants[i];
+                            final pName = p['name']?.toString() ?? p['phone']?.toString() ?? p['id']?.toString() ?? '';
+                            final isAdmin = p['admin'] != null;
+
+                            return ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: ChatAvatar(
+                                chatId: p['id']?.toString() ?? '',
+                                title: pName,
+                                radius: 18,
+                              ),
+                              title: Text(pName, maxLines: 1, overflow: TextOverflow.ellipsis),
+                              subtitle: p['phone'] != null && p['phone'].toString().isNotEmpty
+                                  ? Text(p['phone'].toString(), style: const TextStyle(fontSize: 12))
+                                  : null,
+                              trailing: isAdmin
+                                  ? Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: WhatsAppTheme.primaryGreen.withOpacity(0.15),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: const Text(
+                                        'Admin',
+                                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: WhatsAppTheme.primaryGreen),
+                                      ),
+                                    )
+                                  : null,
+                            );
+                          },
+                        ),
                       ],
                     ),
-                    onTap: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Media gallery view')),
-                      );
-                    },
                   ),
-                ),
-
-                const SizedBox(height: 10),
+                  const SizedBox(height: 10),
+                ],
 
                 // Settings & Notifications
                 Container(
@@ -269,16 +396,9 @@ class ContactProfileScreen extends StatelessWidget {
                       ),
                       const Divider(height: 1, indent: 56),
                       ListTile(
-                        leading: const Icon(Icons.music_note_rounded, color: WhatsAppTheme.primaryGreen),
-                        title: const Text('Custom notifications'),
-                        trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
-                        onTap: () {},
-                      ),
-                      const Divider(height: 1, indent: 56),
-                      ListTile(
                         leading: const Icon(Icons.lock_rounded, color: WhatsAppTheme.primaryGreen),
                         title: const Text('Encryption'),
-                        subtitle: const Text('Messages and calls are end-to-end encrypted.'),
+                        subtitle: const Text('Messages and calls are end-to-end encrypted.', style: TextStyle(fontSize: 12)),
                         trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
                         onTap: () {},
                       ),
@@ -286,35 +406,7 @@ class ContactProfileScreen extends StatelessWidget {
                   ),
                 ),
 
-                const SizedBox(height: 10),
-
-                // Block & Report (Danger Zone)
-                Container(
-                  color: isDark ? WhatsAppTheme.surfaceDark : Colors.white,
-                  child: Column(
-                    children: [
-                      ListTile(
-                        leading: const Icon(Icons.block_rounded, color: WhatsAppTheme.deletedRed),
-                        title: Text(
-                          isGroup ? 'Exit Group' : 'Block Contact',
-                          style: const TextStyle(color: WhatsAppTheme.deletedRed, fontWeight: FontWeight.bold),
-                        ),
-                        onTap: () => _showBlockDialog(context, isGroup ? 'Exit Group' : 'Block Contact'),
-                      ),
-                      const Divider(height: 1, indent: 56),
-                      ListTile(
-                        leading: const Icon(Icons.thumb_down_alt_rounded, color: WhatsAppTheme.deletedRed),
-                        title: Text(
-                          isGroup ? 'Report Group' : 'Report Contact',
-                          style: const TextStyle(color: WhatsAppTheme.deletedRed, fontWeight: FontWeight.bold),
-                        ),
-                        onTap: () => _showBlockDialog(context, isGroup ? 'Report Group' : 'Report Contact'),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 30),
+                const SizedBox(height: 40),
               ],
             ),
           ),
@@ -336,52 +428,6 @@ class ContactProfileScreen extends StatelessWidget {
             Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: WhatsAppTheme.primaryGreen)),
           ],
         ),
-      ),
-    );
-  }
-
-  void _showCallDialog(BuildContext context, String type, String destination) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(type),
-        content: Text('Initiating $type with $destination via WhatsApp API gateway...'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('$type connected')),
-              );
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: WhatsAppTheme.primaryGreen),
-            child: const Text('Connect', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showBlockDialog(BuildContext context, String action) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('$action?'),
-        content: Text('Are you sure you want to $action?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('$action confirmed')),
-              );
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: WhatsAppTheme.deletedRed),
-            child: Text(action, style: const TextStyle(color: Colors.white)),
-          ),
-        ],
       ),
     );
   }

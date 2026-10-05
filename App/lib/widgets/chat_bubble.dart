@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -7,6 +8,7 @@ import '../config/permissions.dart';
 import '../models/message.dart';
 import '../models/user.dart';
 import '../services/auth_service.dart';
+import '../services/chat_design_service.dart';
 import '../screens/pdf_viewer_screen.dart';
 import 'status_indicator.dart';
 import 'voice_player.dart';
@@ -253,12 +255,152 @@ class ChatBubble extends StatelessWidget {
           ],
         ],
       );
+    } else if (message.isLocation) {
+      return _buildLocationBody(context, textColor, isDark);
     }
 
     // Default: Plain text
     return Text(
       message.text,
-      style: TextStyle(fontSize: 15, color: textColor),
+      style: TextStyle(
+        fontSize: Provider.of<ChatDesignService>(context, listen: false).fontSizeValue,
+        color: textColor,
+      ),
+    );
+  }
+
+  static int _lon2tile(double lon, int zoom) => ((lon + 180.0) / 360.0 * (1 << zoom)).floor();
+  static int _lat2tile(double lat, int zoom) =>
+      ((1.0 - math.log(math.tan(lat * math.pi / 180.0) + 1.0 / math.cos(lat * math.pi / 180.0)) / math.pi) / 2.0 * (1 << zoom)).floor();
+
+  Widget _buildLocationBody(BuildContext context, Color textColor, bool isDark) {
+    final lat = message.latitude ?? 0.0;
+    final lng = message.longitude ?? 0.0;
+    final title = message.locationName?.isNotEmpty == true ? message.locationName! : 'Shared Location';
+    final addr = message.locationAddress?.isNotEmpty == true
+        ? message.locationAddress!
+        : '${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)}';
+
+    final tileX = _lon2tile(lng, 15);
+    final tileY = _lat2tile(lat, 15);
+    final tileUrl = 'https://basemaps.cartocdn.com/rastertiles/voyager/15/$tileX/$tileY.png';
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        width: 240,
+        color: isDark ? Colors.black26 : Colors.black.withOpacity(0.04),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Map Preview Thumbnail with Red Pin
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  height: 120,
+                  width: double.infinity,
+                  child: Image.network(
+                    tileUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Container(
+                      color: const Color(0xFFE5E9EC),
+                      child: const Center(
+                        child: Icon(Icons.map_rounded, color: Colors.black26, size: 36),
+                      ),
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 4),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.location_on_rounded,
+                    color: Color(0xFFE53935),
+                    size: 26,
+                  ),
+                ),
+              ],
+            ),
+
+            // Location Info & Google Maps launcher button
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      color: textColor,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    addr,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: isDark ? Colors.white60 : Colors.black54,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  InkWell(
+                    onTap: () {
+                      showDialog(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: Text(title),
+                          content: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(addr),
+                              const SizedBox(height: 8),
+                              Text('Coordinates: $lat, $lng', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                              const SizedBox(height: 8),
+                              SelectableText('https://www.google.com/maps/search/?api=1&query=$lat,$lng', style: const TextStyle(fontSize: 11, color: Colors.blue)),
+                            ],
+                          ),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+                          ],
+                        ),
+                      );
+                    },
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.directions_outlined, color: WhatsAppTheme.primaryGreen, size: 16),
+                        SizedBox(width: 4),
+                        Text(
+                          'View on Google Maps',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.bold,
+                            color: WhatsAppTheme.primaryGreen,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -269,18 +411,26 @@ class ChatBubble extends StatelessWidget {
     final auth = Provider.of<AuthService>(context, listen: false);
     final activeInstId = instanceId ?? auth.selectedInstance?.id ?? '';
     final headers = auth.api.authHeaders;
+    final design = Provider.of<ChatDesignService>(context);
 
     final bubbleBg = isMe
         ? (isDark ? WhatsAppTheme.bubbleOutDark : WhatsAppTheme.bubbleOutLight)
         : (isDark ? WhatsAppTheme.bubbleInDark : WhatsAppTheme.bubbleInLight);
 
     final textColor = isDark ? Colors.white : Colors.black87;
+    // 12-Hour AM/PM format
     final timeStr = message.createdAt != null
-        ? DateFormat('HH:mm').format(message.createdAt!.toLocal())
+        ? DateFormat('hh:mm a').format(message.createdAt!.toLocal())
         : '';
 
     final canViewDeleted = UserPermissions.canViewDeleted(currentUser);
     final canViewEdits = UserPermissions.canViewEdits(currentUser);
+
+    final radiusValue = design.bubbleStyle == 'classic_whatsapp'
+        ? 8.0
+        : design.bubbleStyle == 'minimalist'
+            ? 4.0
+            : 16.0;
 
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -294,10 +444,10 @@ class ChatBubble extends StatelessWidget {
           decoration: BoxDecoration(
             color: bubbleBg,
             borderRadius: BorderRadius.only(
-              topLeft: const Radius.circular(12),
-              topRight: const Radius.circular(12),
-              bottomLeft: Radius.circular(isMe ? 12 : 2),
-              bottomRight: Radius.circular(isMe ? 2 : 12),
+              topLeft: Radius.circular(radiusValue),
+              topRight: Radius.circular(radiusValue),
+              bottomLeft: Radius.circular(isMe ? radiusValue : 2),
+              bottomRight: Radius.circular(isMe ? 2 : radiusValue),
             ),
             boxShadow: [
               BoxShadow(

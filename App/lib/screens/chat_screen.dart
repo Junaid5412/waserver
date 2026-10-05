@@ -20,6 +20,9 @@ import '../widgets/message_actions_sheet.dart';
 import 'diff_viewer_screen.dart';
 import 'contact_profile_screen.dart';
 import 'pdf_viewer_screen.dart';
+import 'call_screen.dart';
+import 'location_picker_screen.dart';
+import '../services/chat_design_service.dart';
 
 class ChatScreen extends StatefulWidget {
   final ChatModel chat;
@@ -41,6 +44,9 @@ class _ChatScreenState extends State<ChatScreen> {
   MessageModel? _editingMessage;
   String? _livePresence;
   Timer? _presenceTimer;
+  Timer? _presenceKeepaliveTimer;
+  Timer? _outgoingPresenceTimer;
+  bool _sentComposing = false;
   StreamSubscription<RealtimeEvent>? _streamSub;
   Timer? _foregroundPollTimer;
   Timer? _debounceTimer;
@@ -94,12 +100,42 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  void _handleOutgoingTyping(bool isTyping) {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final instanceId = auth.selectedInstance?.id;
+    if (instanceId == null) return;
+
+    if (isTyping) {
+      if (!_sentComposing) {
+        _sentComposing = true;
+        auth.api.sendPresence(instanceId, widget.chat.chatId, 'composing');
+      }
+      _outgoingPresenceTimer?.cancel();
+      _outgoingPresenceTimer = Timer(const Duration(milliseconds: 2500), () {
+        if (_sentComposing) {
+          _sentComposing = false;
+          auth.api.sendPresence(instanceId, widget.chat.chatId, 'paused');
+        }
+      });
+    } else if (_sentComposing) {
+      _sentComposing = false;
+      _outgoingPresenceTimer?.cancel();
+      auth.api.sendPresence(instanceId, widget.chat.chatId, 'paused');
+    }
+  }
+
   void _subscribePresenceAndRealtime() {
     final auth = Provider.of<AuthService>(context, listen: false);
     final instanceId = auth.selectedInstance?.id;
     if (instanceId != null) {
       auth.realtime.ensureConnected(instanceId);
       auth.api.subscribePresence(instanceId, widget.chat.chatId);
+      _presenceKeepaliveTimer?.cancel();
+      _presenceKeepaliveTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+        if (mounted) {
+          auth.api.subscribePresence(instanceId, widget.chat.chatId);
+        }
+      });
     }
 
     _streamSub?.cancel();
@@ -146,6 +182,8 @@ class _ChatScreenState extends State<ChatScreen> {
     _debounceTimer?.cancel();
     _streamSub?.cancel();
     _presenceTimer?.cancel();
+    _presenceKeepaliveTimer?.cancel();
+    _outgoingPresenceTimer?.cancel();
     _textController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -290,6 +328,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
     final quoted = _replyingTo;
     _textController.clear();
+    if (_sentComposing) {
+      _sentComposing = false;
+      _outgoingPresenceTimer?.cancel();
+      auth.api.sendPresence(instanceId, widget.chat.chatId, 'paused');
+    }
     setState(() {
       _isComposing = false;
       _replyingTo = null;
@@ -1166,219 +1209,47 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _showLocationDialog() {
+  Future<void> _showLocationDialog() async {
     final auth = Provider.of<AuthService>(context, listen: false);
     final instanceId = auth.selectedInstance?.id;
     if (instanceId == null) return;
 
-    final nameCtrl = TextEditingController(text: 'Current Location');
-    final latCtrl = TextEditingController(text: '24.8607');
-    final lngCtrl = TextEditingController(text: '67.0011');
-    bool isSending = false;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        final isDark = Theme.of(context).brightness == Brightness.dark;
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Container(
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-                top: 16,
-                left: 16,
-                right: 16,
-              ),
-              decoration: BoxDecoration(
-                color: isDark ? WhatsAppTheme.surfaceDark : Colors.white,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade400,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  const Row(
-                    children: [
-                      Icon(Icons.location_on_rounded, color: Color(0xFF20BF6B), size: 24),
-                      SizedBox(width: 8),
-                      Text(
-                        'Share Location Pin',
-                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: nameCtrl,
-                    decoration: InputDecoration(
-                      labelText: 'Place / Location Name',
-                      hintText: 'e.g. Head Office, Central Station',
-                      filled: true,
-                      fillColor: isDark ? Colors.black26 : Colors.grey.shade100,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: latCtrl,
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                          decoration: InputDecoration(
-                            labelText: 'Latitude',
-                            filled: true,
-                            fillColor: isDark ? Colors.black26 : Colors.grey.shade100,
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: lngCtrl,
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                          decoration: InputDecoration(
-                            labelText: 'Longitude',
-                            filled: true,
-                            fillColor: isDark ? Colors.black26 : Colors.grey.shade100,
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    children: [
-                      ActionChip(
-                        avatar: const Icon(Icons.my_location, size: 16),
-                        label: const Text('Current'),
-                        onPressed: () {
-                          setModalState(() {
-                            nameCtrl.text = 'Current Location';
-                            latCtrl.text = '24.8607';
-                            lngCtrl.text = '67.0011';
-                          });
-                        },
-                      ),
-                      ActionChip(
-                        avatar: const Icon(Icons.business_rounded, size: 16),
-                        label: const Text('Office'),
-                        onPressed: () {
-                          setModalState(() {
-                            nameCtrl.text = 'Head Office';
-                            latCtrl.text = '24.8615';
-                            lngCtrl.text = '67.0099';
-                          });
-                        },
-                      ),
-                      ActionChip(
-                        avatar: const Icon(Icons.home_rounded, size: 16),
-                        label: const Text('Home'),
-                        onPressed: () {
-                          setModalState(() {
-                            nameCtrl.text = 'Home';
-                            latCtrl.text = '24.8710';
-                            lngCtrl.text = '67.0200';
-                          });
-                        },
-                      ),
-                      ActionChip(
-                        avatar: const Icon(Icons.flight_rounded, size: 16),
-                        label: const Text('Airport'),
-                        onPressed: () {
-                          setModalState(() {
-                            nameCtrl.text = 'International Airport';
-                            latCtrl.text = '24.9065';
-                            lngCtrl.text = '67.1608';
-                          });
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: WhatsAppTheme.primaryGreen,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                    onPressed: isSending
-                        ? null
-                        : () async {
-                            final lat = double.tryParse(latCtrl.text.trim());
-                            final lng = double.tryParse(lngCtrl.text.trim());
-                            if (lat == null || lng == null) {
-                              ScaffoldMessenger.of(this.context).showSnackBar(
-                                const SnackBar(content: Text('Please enter valid numeric latitude and longitude')),
-                              );
-                              return;
-                            }
-                            setModalState(() => isSending = true);
-                            try {
-                              await auth.api.sendLocationMessage(
-                                instanceId,
-                                to: widget.chat.chatId,
-                                latitude: lat,
-                                longitude: lng,
-                                name: nameCtrl.text.trim().isNotEmpty ? nameCtrl.text.trim() : null,
-                                quotedWaId: _replyingTo?.waId,
-                              );
-                              if (mounted) {
-                                setState(() => _replyingTo = null);
-                                _syncMessagesSilently();
-                                Navigator.pop(ctx);
-                                ScaffoldMessenger.of(this.context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('📍 Location sent!'),
-                                    backgroundColor: WhatsAppTheme.primaryGreen,
-                                  ),
-                                );
-                              }
-                            } catch (e) {
-                              setModalState(() => isSending = false);
-                              if (mounted) {
-                                ScaffoldMessenger.of(this.context).showSnackBar(
-                                  SnackBar(content: Text('Failed to send location: $e')),
-                                );
-                              }
-                            }
-                          },
-                    icon: isSending
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                          )
-                        : const Icon(Icons.send_rounded, color: Colors.white),
-                    label: Text(
-                      isSending ? 'Sending...' : 'Send Location',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+    final result = await Navigator.push<LocationResult>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const LocationPickerScreen(),
+      ),
     );
+
+    if (result != null && mounted) {
+      try {
+        await auth.api.sendLocationMessage(
+          instanceId,
+          to: widget.chat.chatId,
+          latitude: result.latitude,
+          longitude: result.longitude,
+          name: result.name,
+          address: result.address,
+          quotedWaId: _replyingTo?.waId,
+        );
+        if (mounted) {
+          setState(() => _replyingTo = null);
+          _debouncedSync();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('📍 Location pin sent successfully!'),
+              backgroundColor: WhatsAppTheme.primaryGreen,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to send location: $e')),
+          );
+        }
+      }
+    }
   }
 
   void _showContactDialog() {
@@ -1840,6 +1711,30 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         actions: [
           IconButton(
+            icon: const Icon(Icons.videocam_rounded, color: Colors.white, size: 23),
+            tooltip: 'Video Call',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => CallScreen(chat: widget.chat, isVideo: true),
+                ),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.call_rounded, color: Colors.white, size: 21),
+            tooltip: 'Audio Call',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => CallScreen(chat: widget.chat, isVideo: false),
+                ),
+              );
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.done_all_rounded, color: Colors.white, size: 22),
             tooltip: 'Mark as read',
             onPressed: () async {
@@ -1956,7 +1851,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
       body: Container(
         decoration: BoxDecoration(
-          color: isDark ? WhatsAppTheme.bgDark : WhatsAppTheme.bgLight,
+          color: Provider.of<ChatDesignService>(context).wallpaperColor != Colors.transparent
+              ? Provider.of<ChatDesignService>(context).wallpaperColor
+              : (isDark ? WhatsAppTheme.bgDark : WhatsAppTheme.bgLight),
         ),
         child: Column(
           children: [
@@ -2149,6 +2046,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                   if (composing != _isComposing) {
                                     setState(() => _isComposing = composing);
                                   }
+                                  _handleOutgoingTyping(composing);
                                 },
                               ),
                             ),

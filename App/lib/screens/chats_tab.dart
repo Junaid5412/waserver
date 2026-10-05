@@ -109,8 +109,10 @@ class _ChatsTabState extends State<ChatsTab> {
     final now = DateTime.now();
     final local = dt.toLocal();
     if (local.year == now.year && local.month == now.month && local.day == now.day) {
+      final hour = local.hour == 0 ? 12 : (local.hour > 12 ? local.hour - 12 : local.hour);
       final m = local.minute.toString().padLeft(2, '0');
-      return '${local.hour}:$m';
+      final period = local.hour >= 12 ? 'PM' : 'AM';
+      return '$hour:$m $period';
     }
     return '${local.day}/${local.month}';
   }

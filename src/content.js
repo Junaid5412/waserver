@@ -27,6 +27,7 @@ export const messageSchema = z.object({
   latitude: z.number().min(-90).max(90).optional(),
   longitude: z.number().min(-180).max(180).optional(),
   name: z.string().max(100).optional(),
+  address: z.string().max(300).optional(),
   phone: z
     .string()
     .regex(/^\+?[1-9]\d{6,14}$/)
@@ -136,6 +137,7 @@ export function buildContent(media, loadMessage) {
           degreesLatitude: d.latitude,
           degreesLongitude: d.longitude,
           name: d.name,
+          address: d.address,
         },
       };
     else if (d.type === "poll")

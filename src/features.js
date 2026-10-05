@@ -589,7 +589,7 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
         for (const j of list) {
           try {
             let url = null;
-            for (const kind of full ? ["image", "preview"] : ["preview"]) {
+            for (const kind of ["image", "preview"]) {
               try { url = await s.profilePictureUrl(j, kind, 8000); } catch { url = null; }
               if (url) break;
             }

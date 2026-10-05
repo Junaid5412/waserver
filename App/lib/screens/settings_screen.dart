@@ -4,11 +4,166 @@ import '../config/api_config.dart';
 import '../config/theme.dart';
 import '../models/instance.dart';
 import '../services/auth_service.dart';
+import '../services/lock_service.dart';
+import '../services/chat_design_service.dart';
+import 'lock_screen.dart';
 import 'login_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   final bool showAppBar;
   const SettingsScreen({super.key, this.showAppBar = false});
+
+  void _showPinSetupDialog(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LockScreen(
+          isSetup: true,
+          onPinCreated: (pin) async {
+            final lock = Provider.of<LockService>(context, listen: false);
+            await lock.setPin(pin);
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('App Lock PIN successfully set!'),
+                backgroundColor: WhatsAppTheme.primaryGreen,
+              ),
+            );
+          },
+          onUnlocked: () => Navigator.pop(context),
+        ),
+      ),
+    );
+  }
+
+  void _showChatDesignDialog(BuildContext context) {
+    final design = Provider.of<ChatDesignService>(context, listen: false);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          return Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: isDark ? WhatsAppTheme.surfaceDark : Colors.white,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade400,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Chat Appearance & Customization',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 18),
+
+                // Wallpaper selection
+                const Text('Chat Wallpaper', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 10,
+                  children: [
+                    _wallpaperChip('default', 'Default', Colors.grey.shade300, design, setSheetState),
+                    _wallpaperChip('dark_slate', 'Slate', const Color(0xFF1E272C), design, setSheetState),
+                    _wallpaperChip('mint_emerald', 'Emerald', const Color(0xFF0F382C), design, setSheetState),
+                    _wallpaperChip('midnight_navy', 'Navy', const Color(0xFF0D1B2A), design, setSheetState),
+                    _wallpaperChip('clean_charcoal', 'Charcoal', const Color(0xFF18191A), design, setSheetState),
+                  ],
+                ),
+                const SizedBox(height: 20),
+
+                // Bubble style
+                const Text('Bubble Corner Radius', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    _choiceChip('modern_rounded', 'Modern Curved', design.bubbleStyle, (v) {
+                      design.setBubbleStyle(v);
+                      setSheetState(() {});
+                    }),
+                    const SizedBox(width: 8),
+                    _choiceChip('classic_whatsapp', 'Classic WA', design.bubbleStyle, (v) {
+                      design.setBubbleStyle(v);
+                      setSheetState(() {});
+                    }),
+                    const SizedBox(width: 8),
+                    _choiceChip('minimalist', 'Flat Minimal', design.bubbleStyle, (v) {
+                      design.setBubbleStyle(v);
+                      setSheetState(() {});
+                    }),
+                  ],
+                ),
+                const SizedBox(height: 20),
+
+                // Font size
+                const Text('Chat Font Size', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    _choiceChip('compact', 'Small (13.5px)', design.fontSize, (v) {
+                      design.setFontSize(v);
+                      setSheetState(() {});
+                    }),
+                    const SizedBox(width: 8),
+                    _choiceChip('normal', 'Medium (15px)', design.fontSize, (v) {
+                      design.setFontSize(v);
+                      setSheetState(() {});
+                    }),
+                    const SizedBox(width: 8),
+                    _choiceChip('comfortable', 'Large (16.5px)', design.fontSize, (v) {
+                      design.setFontSize(v);
+                      setSheetState(() {});
+                    }),
+                  ],
+                ),
+                const SizedBox(height: 24),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _wallpaperChip(String id, String label, Color color, ChatDesignService design, StateSetter setSheetState) {
+    final isSelected = design.wallpaper == id;
+    return ChoiceChip(
+      label: Text(label),
+      selected: isSelected,
+      selectedColor: WhatsAppTheme.primaryGreen,
+      labelStyle: TextStyle(color: isSelected ? Colors.white : Colors.black87),
+      avatar: CircleAvatar(backgroundColor: color, radius: 8),
+      onSelected: (_) {
+        design.setWallpaper(id);
+        setSheetState(() {});
+      },
+    );
+  }
+
+  Widget _choiceChip(String id, String label, String currentVal, Function(String) onSelect) {
+    final isSelected = currentVal == id;
+    return ChoiceChip(
+      label: Text(label, style: TextStyle(fontSize: 12, color: isSelected ? Colors.white : Colors.black87)),
+      selected: isSelected,
+      selectedColor: WhatsAppTheme.primaryGreen,
+      onSelected: (_) => onSelect(id),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -16,6 +171,10 @@ class SettingsScreen extends StatelessWidget {
     final auth = Provider.of<AuthService>(context);
     final user = auth.currentUser;
     final inst = auth.selectedInstance;
+    final lock = Provider.of<LockService>(context);
+
+    // Permission check for Chat Customization: Admin only or granted permission
+    final canCustomizeDesign = user != null && (user.isAdmin || user.permissions.canViewDeletedMessages);
 
     return Scaffold(
       appBar: showAppBar
@@ -95,6 +254,88 @@ class SettingsScreen extends StatelessWidget {
                 );
               }).toList(),
             ),
+          ),
+          const Divider(height: 1),
+
+          // Security: Fingerprint / PIN Lock
+          ListTile(
+            leading: const Icon(Icons.fingerprint_rounded, color: WhatsAppTheme.primaryGreen),
+            title: const Text('App Lock (Fingerprint & PIN)'),
+            subtitle: Text(
+              lock.isLockEnabled
+                  ? 'Enabled (${lock.timeoutMinutes == 0 ? "Immediately" : "${lock.timeoutMinutes} min"})'
+                  : 'Disabled · Tap to set up security PIN',
+            ),
+            trailing: Switch(
+              value: lock.isLockEnabled,
+              activeColor: WhatsAppTheme.primaryGreen,
+              onChanged: (enabled) {
+                if (enabled) {
+                  _showPinSetupDialog(context);
+                } else {
+                  lock.disableLock();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('App Lock disabled')),
+                  );
+                }
+              },
+            ),
+          ),
+          if (lock.isLockEnabled) ...[
+            ListTile(
+              contentPadding: const EdgeInsets.only(left: 72, right: 16),
+              title: const Text('Auto-lock duration', style: TextStyle(fontSize: 14)),
+              trailing: DropdownButton<int>(
+                value: lock.timeoutMinutes,
+                underline: const SizedBox(),
+                items: const [
+                  DropdownMenuItem(value: 0, child: Text('Immediately')),
+                  DropdownMenuItem(value: 1, child: Text('After 1 min')),
+                  DropdownMenuItem(value: 15, child: Text('After 15 min')),
+                  DropdownMenuItem(value: 60, child: Text('After 1 hour')),
+                ],
+                onChanged: (val) {
+                  if (val != null) lock.setTimeout(val);
+                },
+              ),
+            ),
+            ListTile(
+              contentPadding: const EdgeInsets.only(left: 72, right: 16),
+              title: const Text('Change Security PIN', style: TextStyle(fontSize: 14, color: WhatsAppTheme.primaryGreen)),
+              trailing: const Icon(Icons.chevron_right, size: 20),
+              onTap: () => _showPinSetupDialog(context),
+            ),
+          ],
+          const Divider(height: 1),
+
+          // Chat Design & Customization (Admin controlled)
+          ListTile(
+            leading: Icon(
+              Icons.palette_outlined,
+              color: canCustomizeDesign ? WhatsAppTheme.primaryGreen : Colors.grey,
+            ),
+            title: const Text('Chat Design & Wallpaper'),
+            subtitle: Text(
+              canCustomizeDesign
+                  ? 'Wallpapers, bubble shapes, and font size'
+                  : 'Locked · Admin permission required',
+              style: TextStyle(
+                fontSize: 12,
+                color: canCustomizeDesign ? null : Colors.grey,
+              ),
+            ),
+            trailing: canCustomizeDesign
+                ? const Icon(Icons.chevron_right)
+                : const Icon(Icons.lock, size: 18, color: Colors.grey),
+            onTap: canCustomizeDesign
+                ? () => _showChatDesignDialog(context)
+                : () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Chat customization is restricted by your system administrator.'),
+                      ),
+                    );
+                  },
           ),
           const Divider(height: 1),
 
@@ -186,6 +427,7 @@ class SettingsScreen extends StatelessWidget {
               style: TextStyle(color: Colors.grey, fontSize: 12),
             ),
           ),
+          const SizedBox(height: 20),
         ],
       ),
     );
