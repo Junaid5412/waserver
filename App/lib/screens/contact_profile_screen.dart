@@ -53,7 +53,7 @@ class ContactProfileScreen extends StatelessWidget {
               background: Stack(
                 fit: StackFit.expand,
                 children: [
-                  if (instanceId != null && !isGroup)
+                  if (instanceId != null && !isGroup && !chat.isChannel && !chat.isCommunity)
                     Image.network(
                       ApiConfig.chatPictureUrl(instanceId, chat.chatId),
                       headers: auth.api.authHeaders,
@@ -65,6 +65,8 @@ class ContactProfileScreen extends StatelessWidget {
                             chatId: chat.chatId,
                             title: chat.displayTitle,
                             isGroup: isGroup,
+                            isCommunity: chat.isCommunity,
+                            isChannel: chat.isChannel,
                             radius: 64,
                           ),
                         ),
@@ -78,6 +80,8 @@ class ContactProfileScreen extends StatelessWidget {
                           chatId: chat.chatId,
                           title: chat.displayTitle,
                           isGroup: isGroup,
+                          isCommunity: chat.isCommunity,
+                          isChannel: chat.isChannel,
                           radius: 64,
                         ),
                       ),
@@ -126,7 +130,13 @@ class ContactProfileScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       SelectableText(
-                        isGroup ? 'Group ID: ${chat.chatId}' : formattedPhone,
+                        chat.isChannel
+                            ? 'Channel ID: ${chat.chatId}'
+                            : chat.isCommunity
+                                ? 'Community ID: ${chat.chatId}'
+                                : isGroup
+                                    ? 'Group ID: ${chat.chatId}'
+                                    : formattedPhone,
                         style: TextStyle(fontSize: 14, color: isDark ? Colors.white70 : Colors.black54),
                       ),
                       const SizedBox(height: 16),
@@ -176,7 +186,13 @@ class ContactProfileScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        isGroup ? 'Group Description' : 'About & Phone',
+                        chat.isChannel
+                            ? 'Channel Description'
+                            : chat.isCommunity
+                                ? 'Community Description'
+                                : isGroup
+                                    ? 'Group Description'
+                                    : 'About & Phone',
                         style: TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.bold,

@@ -621,10 +621,21 @@ class _ChatScreenState extends State<ChatScreen> {
                                   chatId: c.chatId,
                                   title: c.displayTitle,
                                   isGroup: c.isGroup,
+                                  isCommunity: c.isCommunity,
+                                  isChannel: c.isChannel,
                                   radius: 18,
                                 ),
                                 title: Text(c.displayTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
-                                subtitle: Text(c.isGroup ? 'Group' : c.chatId, style: const TextStyle(fontSize: 12)),
+                                subtitle: Text(
+                                  c.isChannel
+                                      ? 'Channel'
+                                      : c.isCommunity
+                                          ? 'Community'
+                                          : c.isGroup
+                                              ? 'Group'
+                                              : c.chatId,
+                                  style: const TextStyle(fontSize: 12),
+                                ),
                                 onChanged: (v) {
                                   setModalState(() {
                                     if (v == true) {
@@ -1753,6 +1764,12 @@ class _ChatScreenState extends State<ChatScreen> {
     if (_livePresence != null) {
       return _livePresence!;
     }
+    if (widget.chat.isChannel) {
+      return 'Channel • tap for info';
+    }
+    if (widget.chat.isCommunity) {
+      return 'Community • tap for info';
+    }
     if (widget.chat.isGroup) {
       return 'tap for group info';
     }
@@ -1792,6 +1809,8 @@ class _ChatScreenState extends State<ChatScreen> {
                 chatId: widget.chat.chatId,
                 title: widget.chat.displayTitle,
                 isGroup: widget.chat.isGroup,
+                isCommunity: widget.chat.isCommunity,
+                isChannel: widget.chat.isChannel,
                 radius: 19,
               ),
               const SizedBox(width: 10),
@@ -1886,9 +1905,27 @@ class _ChatScreenState extends State<ChatScreen> {
                 value: 'info',
                 child: Row(
                   children: [
-                    Icon(widget.chat.isGroup ? Icons.group : Icons.person, color: WhatsAppTheme.primaryGreen, size: 20),
+                    Icon(
+                      widget.chat.isChannel
+                          ? Icons.campaign_rounded
+                          : widget.chat.isCommunity
+                              ? Icons.diversity_3_rounded
+                              : widget.chat.isGroup
+                                  ? Icons.group
+                                  : Icons.person,
+                      color: WhatsAppTheme.primaryGreen,
+                      size: 20,
+                    ),
                     const SizedBox(width: 10),
-                    Text(widget.chat.isGroup ? 'Group info' : 'Contact info'),
+                    Text(
+                      widget.chat.isChannel
+                          ? 'Channel info'
+                          : widget.chat.isCommunity
+                              ? 'Community info'
+                              : widget.chat.isGroup
+                                  ? 'Group info'
+                                  : 'Contact info',
+                    ),
                   ],
                 ),
               ),

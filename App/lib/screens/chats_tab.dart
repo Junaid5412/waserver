@@ -75,7 +75,7 @@ class _ChatsTabState extends State<ChatsTab> {
 
     // 1. Instant load from local cache
     final cached = await CacheService.getCachedChats(inst.id);
-    final cachedDirect = cached.where((c) => !c.isGroup).toList();
+    final cachedDirect = cached.where((c) => c.isDirect).toList();
     if (cachedDirect.isNotEmpty && mounted) {
       setState(() => _chats = cachedDirect);
     }
@@ -91,7 +91,7 @@ class _ChatsTabState extends State<ChatsTab> {
 
     try {
       final fresh = await auth.api.getChats(inst.id);
-      final freshDirect = fresh.where((c) => !c.isGroup).toList();
+      final freshDirect = fresh.where((c) => c.isDirect).toList();
       if (mounted) {
         setState(() {
           _chats = freshDirect;

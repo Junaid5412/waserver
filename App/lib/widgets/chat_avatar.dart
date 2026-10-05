@@ -9,6 +9,8 @@ class ChatAvatar extends StatelessWidget {
   final String chatId;
   final String title;
   final bool isGroup;
+  final bool isCommunity;
+  final bool isChannel;
   final double radius;
 
   const ChatAvatar({
@@ -17,6 +19,8 @@ class ChatAvatar extends StatelessWidget {
     required this.chatId,
     required this.title,
     this.isGroup = false,
+    this.isCommunity = false,
+    this.isChannel = false,
     this.radius = 24,
   });
 
@@ -41,6 +45,42 @@ class ChatAvatar extends StatelessWidget {
   Widget _buildFallback(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bg = _getDeterministicColor(chatId.isNotEmpty ? chatId : title);
+
+    if (isChannel) {
+      return Container(
+        width: radius * 2,
+        height: radius * 2,
+        decoration: BoxDecoration(
+          color: const Color(0xFF11CDEF).withOpacity(0.18),
+          shape: BoxShape.circle,
+        ),
+        child: Center(
+          child: Icon(
+            Icons.campaign_rounded,
+            size: radius * 1.15,
+            color: const Color(0xFF1171EF),
+          ),
+        ),
+      );
+    }
+
+    if (isCommunity) {
+      return Container(
+        width: radius * 2,
+        height: radius * 2,
+        decoration: BoxDecoration(
+          color: const Color(0xFF5E72E4).withOpacity(0.18),
+          shape: BoxShape.circle,
+        ),
+        child: Center(
+          child: Icon(
+            Icons.diversity_3_rounded,
+            size: radius * 1.15,
+            color: const Color(0xFF5E72E4),
+          ),
+        ),
+      );
+    }
 
     if (isGroup) {
       return Container(

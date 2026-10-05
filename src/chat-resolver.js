@@ -60,7 +60,14 @@ export function createChatResolver({ store, wa }) {
       const all = await wa.active(instance.id).groupFetchAllParticipating();
       const map = {};
       for (const g of Object.values(all || {}))
-        map[g.id] = { subject: g.subject || "", size: g.participants?.length || 0, parts: g.participants || [] };
+        map[g.id] = {
+          subject: g.subject || "",
+          size: g.participants?.length || 0,
+          parts: g.participants || [],
+          isCommunity: !!(g.isCommunity || g.isCommunityAnnounce || g.linkedParent),
+          isCommunityAnnounce: !!g.isCommunityAnnounce,
+          linkedParent: g.linkedParent || null,
+        };
       groupCache.set(instance.id, { at: Date.now(), map });
       return map;
     } catch {
@@ -111,14 +118,35 @@ export function createChatResolver({ store, wa }) {
       let name = ctx.nameFor(entry.chatId);
       for (const a of entry.aliases) name ||= ctx.nameFor(a);
       if (!name && !looksLikeJid(entry.name)) name = entry.name;
-      if (!name && isGroup(entry.chatId)) {
+      let isComm = false;
+      if (isGroup(entry.chatId)) {
         groups ||= await groupMap(instance);
-        name = groups[entry.chatId]?.subject || "";
-        if (groups[entry.chatId]) entry.participants = groups[entry.chatId].size;
+        const grp = groups[entry.chatId];
+        if (grp) {
+          name ||= grp.subject;
+          entry.participants = grp.size;
+          isComm = grp.isCommunity || false;
+        }
       }
-      entry.kind = isGroup(entry.chatId) ? "group" : "contact";
+      const isNewsletter = entry.chatId.endsWith("@newsletter");
+      const isBroadcast = entry.chatId.endsWith("@broadcast");
+      if (isNewsletter) {
+        entry.kind = "channel";
+        entry.isChannel = true;
+      } else if (isComm || entry.isCommunity || (name && name.toLowerCase().includes("community"))) {
+        entry.kind = "community";
+        entry.isCommunity = true;
+      } else if (isGroup(entry.chatId)) {
+        entry.kind = "group";
+        entry.isGroup = true;
+      } else if (isBroadcast) {
+        entry.kind = "broadcast";
+        entry.isBroadcast = true;
+      } else {
+        entry.kind = "contact";
+      }
       entry.phone = isPn(entry.chatId) ? "+" + digits(entry.chatId) : "";
-      entry.name = name || (entry.kind === "group" ? "Group " + digits(entry.chatId).slice(-6) : ctx.labelFor(entry.chatId));
+      entry.name = name || (entry.kind === "channel" ? "Channel " + digits(entry.chatId).slice(-6) : (entry.kind === "community" ? "Community " + digits(entry.chatId).slice(-6) : (entry.kind === "group" ? "Group " + digits(entry.chatId).slice(-6) : ctx.labelFor(entry.chatId))));
       entry.hasName = !!name;
     }
     // Last resort: an unlinked @lid chat whose name matches exactly one phone chat.
