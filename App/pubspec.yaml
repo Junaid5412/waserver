@@ -1,5 +1,5 @@
-name: zelon_whatsapp
-description: "Zelon WhatsApp Professional App with In-App WhatsApp Connection, Role-Based Permissions, and Full WhatsApp UI"
+name: zelon_messenger
+description: "Zelon Messenger Professional Mobile Application with Real-Time Sync, Dedicated Groups, and Role-Based Permissions"
 publish_to: "none"
 version: 1.0.0+1
 

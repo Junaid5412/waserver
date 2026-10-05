@@ -1,11 +1,13 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../config/theme.dart';
 import '../models/chat.dart';
 import '../models/message.dart';
-import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/cache_service.dart';
+import '../services/realtime_service.dart';
+import '../widgets/chat_avatar.dart';
 import '../widgets/chat_bubble.dart';
 import 'diff_viewer_screen.dart';
 
@@ -24,15 +26,27 @@ class _ChatScreenState extends State<ChatScreen> {
   List<MessageModel> _messages = [];
   bool _isLoading = false;
   bool _isComposing = false;
+  StreamSubscription<RealtimeEvent>? _streamSub;
 
   @override
   void initState() {
     super.initState();
     _loadMessages();
+    _subscribeRealtime();
+  }
+
+  void _subscribeRealtime() {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    _streamSub = auth.realtime.events.listen((event) {
+      if (event.chatId == widget.chat.chatId || event.type == 'message' || event.type == 'update') {
+        _syncMessagesSilently();
+      }
+    });
   }
 
   @override
   void dispose() {
+    _streamSub?.cancel();
     _textController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -43,40 +57,54 @@ class _ChatScreenState extends State<ChatScreen> {
     final instanceId = auth.selectedInstance?.id;
     if (instanceId == null) return;
 
-    // 1. Instant load from local cache
+    // 1. Instant 0ms load from local disk cache
     final cached = await CacheService.getCachedMessages(instanceId, widget.chat.chatId);
     if (cached.isNotEmpty && mounted) {
       setState(() {
         _messages = cached;
+        _isLoading = false;
       });
       _scrollToBottom();
+    } else {
+      setState(() => _isLoading = true);
     }
 
-    // 2. Fetch fresh from API
-    setState(() => _isLoading = true);
+    // 2. Fetch latest messages from API in background
+    _syncMessagesSilently();
+  }
+
+  Future<void> _syncMessagesSilently() async {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final instanceId = auth.selectedInstance?.id;
+    if (instanceId == null) return;
+
     try {
-      final fresh = await auth.api.getMessages(instanceId, widget.chat.chatId);
+      final fresh = await auth.api.getMessages(instanceId, widget.chat.chatId, limit: 35);
       if (mounted) {
         setState(() {
           _messages = fresh;
           _isLoading = false;
         });
         await CacheService.saveMessages(instanceId, widget.chat.chatId, fresh);
-        _scrollToBottom();
+        _scrollToBottom(smooth: true);
       }
     } catch (_) {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  void _scrollToBottom() {
+  void _scrollToBottom({bool smooth = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOut,
-        );
+        if (smooth) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+          );
+        } else {
+          _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+        }
       }
     });
   }
@@ -92,10 +120,11 @@ class _ChatScreenState extends State<ChatScreen> {
     _textController.clear();
     setState(() => _isComposing = false);
 
-    // Optimistic UI update
+    // 0ms Optimistic UI update: message appears immediately with pending status
+    final tempWaId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
     final tempMsg = MessageModel(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
-      waId: 'temp_${DateTime.now().millisecondsSinceEpoch}',
+      waId: tempWaId,
       chatId: widget.chat.chatId,
       fromMe: true,
       status: 'pending',
@@ -107,7 +136,7 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       _messages.add(tempMsg);
     });
-    _scrollToBottom();
+    _scrollToBottom(smooth: true);
 
     try {
       await auth.api.sendMessage(
@@ -115,16 +144,29 @@ class _ChatScreenState extends State<ChatScreen> {
         to: widget.chat.chatId,
         text: text,
       );
-      // Re-fetch messages in background
-      final fresh = await auth.api.getMessages(instanceId, widget.chat.chatId);
+      // Mark as sent
       if (mounted) {
-        setState(() => _messages = fresh);
-        await CacheService.saveMessages(instanceId, widget.chat.chatId, fresh);
+        setState(() {
+          final idx = _messages.indexWhere((m) => m.waId == tempWaId);
+          if (idx != -1) {
+            _messages[idx] = MessageModel(
+              id: _messages[idx].id,
+              waId: _messages[idx].waId,
+              chatId: _messages[idx].chatId,
+              fromMe: true,
+              status: 'sent',
+              type: _messages[idx].type,
+              text: _messages[idx].text,
+              createdAt: _messages[idx].createdAt,
+            );
+          }
+        });
       }
+      _syncMessagesSilently();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to send: $e')),
+          SnackBar(content: Text('Failed to send: $e'), backgroundColor: Colors.red.shade700),
         );
       }
     }
@@ -186,18 +228,16 @@ class _ChatScreenState extends State<ChatScreen> {
         titleSpacing: 0,
         backgroundColor: isDark ? WhatsAppTheme.surfaceDark : WhatsAppTheme.primaryGreen,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
         title: Row(
           children: [
-            CircleAvatar(
+            ChatAvatar(
+              chatId: widget.chat.chatId,
+              title: widget.chat.displayTitle,
+              isGroup: widget.chat.isGroup,
               radius: 19,
-              backgroundColor: Colors.white24,
-              child: Text(
-                widget.chat.displayTitle.isNotEmpty ? widget.chat.displayTitle[0].toUpperCase() : '?',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-              ),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -208,10 +248,10 @@ class _ChatScreenState extends State<ChatScreen> {
                     widget.chat.displayTitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w600),
+                    style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w600, color: Colors.white),
                   ),
                   Text(
-                    widget.chat.isGroup ? 'Group' : 'WhatsApp Contact',
+                    widget.chat.isGroup ? 'Group Chat' : 'Online',
                     style: const TextStyle(fontSize: 11.5, color: Colors.white70),
                   ),
                 ],
@@ -220,24 +260,25 @@ class _ChatScreenState extends State<ChatScreen> {
           ],
         ),
         actions: [
-          IconButton(icon: const Icon(Icons.videocam), onPressed: () {}),
-          IconButton(icon: const Icon(Icons.call), onPressed: () {}),
-          PopupMenuButton<String>(
-            itemBuilder: (_) => [
-              const PopupMenuItem(value: 'clear', child: Text('Clear chat')),
-              const PopupMenuItem(value: 'mute', child: Text('Mute notifications')),
-              const PopupMenuItem(value: 'info', child: Text('Contact info')),
-            ],
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Colors.white, size: 22),
+            tooltip: 'Sync Messages',
+            onPressed: _syncMessagesSilently,
+          ),
+          IconButton(
+            icon: const Icon(Icons.more_vert, color: Colors.white),
+            onPressed: () {},
           ),
         ],
       ),
+
       body: Container(
         decoration: BoxDecoration(
-          color: isDark ? WhatsAppTheme.chatBgDark : WhatsAppTheme.chatBgLight,
+          color: isDark ? WhatsAppTheme.bgDark : WhatsAppTheme.bgLight,
         ),
         child: Column(
           children: [
-            // Messages ListView
+            // Messages List View
             Expanded(
               child: _isLoading && _messages.isEmpty
                   ? const Center(child: CircularProgressIndicator(color: WhatsAppTheme.primaryGreen))
@@ -246,14 +287,19 @@ class _ChatScreenState extends State<ChatScreen> {
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                             decoration: BoxDecoration(
-                              color: isDark ? Colors.black45 : Colors.white70,
+                              color: isDark ? Colors.black38 : Colors.white70,
                               borderRadius: BorderRadius.circular(8),
                             ),
-                            child: const Text('No messages yet. Send a message to start chatting!'),
+                            child: Text(
+                              'Messages are end-to-end encrypted.\nSay hello!',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                            ),
                           ),
                         )
                       : ListView.builder(
                           controller: _scrollController,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
                           itemCount: _messages.length,
                           itemBuilder: (context, index) {
                             final msg = _messages[index];
@@ -266,23 +312,22 @@ class _ChatScreenState extends State<ChatScreen> {
                         ),
             ),
 
-            // Chat Input Bar
-            SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            // Message Composer
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              color: Colors.transparent,
+              child: SafeArea(
                 child: Row(
                   children: [
-                    // Text Box Container
+                    // Text input bubble
                     Expanded(
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
                         decoration: BoxDecoration(
                           color: isDark ? WhatsAppTheme.surfaceDark : Colors.white,
-                          borderRadius: BorderRadius.circular(26),
+                          borderRadius: BorderRadius.circular(24),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.06),
+                              color: Colors.black.withOpacity(0.05),
                               blurRadius: 2,
                               offset: const Offset(0, 1),
                             ),
@@ -291,48 +336,49 @@ class _ChatScreenState extends State<ChatScreen> {
                         child: Row(
                           children: [
                             IconButton(
-                              icon: const Icon(Icons.sentiment_satisfied_alt_outlined, color: WhatsAppTheme.grayTick),
+                              icon: Icon(
+                                Icons.emoji_emotions_outlined,
+                                color: isDark ? Colors.white60 : Colors.grey.shade600,
+                              ),
                               onPressed: () {},
                             ),
                             Expanded(
                               child: TextField(
                                 controller: _textController,
-                                maxLines: 4,
+                                maxLines: 5,
                                 minLines: 1,
-                                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                                 decoration: const InputDecoration(
                                   hintText: 'Message',
                                   border: InputBorder.none,
+                                  contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
                                 ),
                                 onChanged: (val) {
-                                  setState(() {
-                                    _isComposing = val.trim().isNotEmpty;
-                                  });
+                                  final composing = val.trim().isNotEmpty;
+                                  if (composing != _isComposing) {
+                                    setState(() => _isComposing = composing);
+                                  }
                                 },
                               ),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.attach_file, color: WhatsAppTheme.grayTick),
+                              icon: Icon(
+                                Icons.attach_file,
+                                color: isDark ? Colors.white60 : Colors.grey.shade600,
+                              ),
                               onPressed: _showAttachmentSheet,
                             ),
-                            if (!_isComposing) ...[
-                              IconButton(
-                                icon: const Icon(Icons.camera_alt, color: WhatsAppTheme.grayTick),
-                                onPressed: () {},
-                              ),
-                            ],
                           ],
                         ),
                       ),
                     ),
                     const SizedBox(width: 6),
 
-                    // Send or Mic FAB
+                    // Send or Mic Button
                     GestureDetector(
-                      onTap: _isComposing ? _sendMessage : null,
+                      onTap: _sendMessage,
                       child: CircleAvatar(
                         radius: 24,
-                        backgroundColor: WhatsAppTheme.fabGreen,
+                        backgroundColor: WhatsAppTheme.primaryGreen,
                         child: Icon(
                           _isComposing ? Icons.send : Icons.mic,
                           color: Colors.white,

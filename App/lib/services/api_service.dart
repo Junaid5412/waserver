@@ -28,7 +28,7 @@ class ApiService {
       'Accept': 'application/json',
       'Origin': originStr,
       'Referer': '$originStr/',
-      'X-Requested-With': 'com.zelon.whatsapp',
+      'X-Requested-With': 'com.zelon.messenger',
     };
     if (_token != null && _token!.isNotEmpty) {
       headers['Authorization'] = 'Bearer $_token';
@@ -40,6 +40,8 @@ class ApiService {
     }
     return headers;
   }
+
+  Map<String, String> get authHeaders => _headers();
 
   Future<Map<String, dynamic>> login(String email, String password) async {
     final res = await http.post(

@@ -112,7 +112,7 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('New WhatsApp Instance'),
+        title: const Text('Create New Account'),
         content: TextField(
           controller: _newInstanceController,
           decoration: const InputDecoration(
@@ -157,7 +157,7 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Link WhatsApp Number'),
+        title: const Text('Link Account Device'),
         backgroundColor: isDark ? WhatsAppTheme.surfaceDark : WhatsAppTheme.primaryGreen,
         actions: [
           PopupMenuButton<InstanceModel>(
@@ -204,12 +204,12 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Text('No WhatsApp instance found'),
+                  const Text('No account found'),
                   const SizedBox(height: 12),
                   ElevatedButton(
                     onPressed: _showCreateInstanceDialog,
                     style: ElevatedButton.styleFrom(backgroundColor: WhatsAppTheme.primaryGreen),
-                    child: const Text('Create Instance', style: TextStyle(color: Colors.white)),
+                    child: const Text('Create Account', style: TextStyle(color: Colors.white)),
                   ),
                 ],
               ),
@@ -316,7 +316,7 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
                         controller: _phoneController,
                         keyboardType: TextInputType.phone,
                         decoration: InputDecoration(
-                          labelText: 'WhatsApp Phone Number',
+                          labelText: 'Phone Number',
                           hintText: '+923001234567',
                           prefixIcon: const Icon(Icons.phone, color: WhatsAppTheme.primaryGreen),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),

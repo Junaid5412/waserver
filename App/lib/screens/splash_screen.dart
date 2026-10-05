@@ -107,7 +107,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                     ),
                     const SizedBox(height: 18),
                     Text(
-                      'Zelon WhatsApp',
+                      'Zelon Messenger',
                       style: TextStyle(
                         fontSize: 26,
                         fontWeight: FontWeight.bold,

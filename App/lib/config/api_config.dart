@@ -40,6 +40,8 @@ class ApiConfig {
   static String chatsUrl(String instanceId) => '$_baseUrl/api/instances/$instanceId/chats';
   static String chatMessagesUrl(String instanceId, String chatJid) =>
       '$_baseUrl/api/instances/$instanceId/chats/$chatJid/messages';
+  static String chatPictureUrl(String instanceId, String chatJid) =>
+      '$_baseUrl/api/instances/$instanceId/chats/$chatJid/picture';
   static String sendMessageUrl(String instanceId) => '$_baseUrl/api/instances/$instanceId/messages';
   static String statusesUrl(String instanceId) => '$_baseUrl/api/instances/$instanceId/statuses';
   static String campaignsUrl(String instanceId) => '$_baseUrl/api/instances/$instanceId/campaigns';

@@ -1,4 +1,4 @@
-package com.zelon.whatsapp
+package com.zelon.messenger
 
 import io.flutter.embedding.android.FlutterActivity
 

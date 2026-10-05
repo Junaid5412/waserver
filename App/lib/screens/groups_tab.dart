@@ -10,18 +10,17 @@ import '../widgets/chat_avatar.dart';
 import 'chat_screen.dart';
 import 'connect_screen.dart';
 
-class ChatsTab extends StatefulWidget {
-  const ChatsTab({super.key});
+class GroupsTab extends StatefulWidget {
+  const GroupsTab({super.key});
 
   @override
-  State<ChatsTab> createState() => _ChatsTabState();
+  State<GroupsTab> createState() => _GroupsTabState();
 }
 
-class _ChatsTabState extends State<ChatsTab> {
-  List<ChatModel> _chats = [];
+class _GroupsTabState extends State<GroupsTab> {
+  List<ChatModel> _groups = [];
   bool _isLoading = false;
   String _searchQuery = '';
-  String _filter = 'all'; // 'all', 'unread'
   String? _lastInstanceId;
   StreamSubscription<RealtimeEvent>? _sub;
 
@@ -38,7 +37,7 @@ class _ChatsTabState extends State<ChatsTab> {
     final currentId = auth.selectedInstance?.id;
     if (currentId != _lastInstanceId) {
       _lastInstanceId = currentId;
-      _loadChats();
+      _loadGroups();
       _subscribeRealtime();
     }
   }
@@ -59,19 +58,19 @@ class _ChatsTabState extends State<ChatsTab> {
     super.dispose();
   }
 
-  Future<void> _loadChats() async {
+  Future<void> _loadGroups() async {
     final auth = Provider.of<AuthService>(context, listen: false);
     final inst = auth.selectedInstance;
     if (inst == null) {
-      if (mounted) setState(() => _chats = []);
+      if (mounted) setState(() => _groups = []);
       return;
     }
 
     // 1. Instant load from local cache
     final cached = await CacheService.getCachedChats(inst.id);
-    final cachedDirect = cached.where((c) => !c.isGroup).toList();
-    if (cachedDirect.isNotEmpty && mounted) {
-      setState(() => _chats = cachedDirect);
+    final cachedGroups = cached.where((c) => c.isGroup).toList();
+    if (cachedGroups.isNotEmpty && mounted) {
+      setState(() => _groups = cachedGroups);
     }
 
     // 2. Fresh network sync
@@ -85,10 +84,10 @@ class _ChatsTabState extends State<ChatsTab> {
 
     try {
       final fresh = await auth.api.getChats(inst.id);
-      final freshDirect = fresh.where((c) => !c.isGroup).toList();
+      final freshGroups = fresh.where((c) => c.isGroup).toList();
       if (mounted) {
         setState(() {
-          _chats = freshDirect;
+          _groups = freshGroups;
           _isLoading = false;
         });
         await CacheService.saveChats(inst.id, fresh);
@@ -115,8 +114,7 @@ class _ChatsTabState extends State<ChatsTab> {
     final auth = Provider.of<AuthService>(context);
     final inst = auth.selectedInstance;
 
-    final filtered = _chats.where((c) {
-      if (_filter == 'unread' && c.unread == 0) return false;
+    final filtered = _groups.where((c) {
       if (_searchQuery.isEmpty) return true;
       return c.displayTitle.toLowerCase().contains(_searchQuery.toLowerCase()) ||
           c.lastPreview.toLowerCase().contains(_searchQuery.toLowerCase());
@@ -128,74 +126,42 @@ class _ChatsTabState extends State<ChatsTab> {
         color: WhatsAppTheme.primaryGreen,
         child: Column(
           children: [
-            // Search Bar & Filter Chips
+            // Search Bar
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
-              child: Column(
-                children: [
-                  Container(
-                    height: 42,
-                    decoration: BoxDecoration(
-                      color: isDark ? WhatsAppTheme.surfaceDark : Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: TextField(
-                      decoration: const InputDecoration(
-                        hintText: 'Search direct chats...',
-                        prefixIcon: Icon(Icons.search, size: 20, color: WhatsAppTheme.grayTick),
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(vertical: 10),
-                      ),
-                      onChanged: (val) {
-                        setState(() => _searchQuery = val.trim());
-                      },
-                    ),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              child: Container(
+                height: 42,
+                decoration: BoxDecoration(
+                  color: isDark ? WhatsAppTheme.surfaceDark : Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: TextField(
+                  decoration: const InputDecoration(
+                    hintText: 'Search groups...',
+                    prefixIcon: Icon(Icons.search, size: 20, color: WhatsAppTheme.grayTick),
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.symmetric(vertical: 10),
                   ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      ChoiceChip(
-                        label: const Text('All'),
-                        selected: _filter == 'all',
-                        onSelected: (_) => setState(() => _filter = 'all'),
-                        selectedColor: WhatsAppTheme.primaryGreen.withOpacity(0.18),
-                        labelStyle: TextStyle(
-                          color: _filter == 'all' ? WhatsAppTheme.primaryGreen : Colors.grey.shade700,
-                          fontWeight: _filter == 'all' ? FontWeight.bold : FontWeight.normal,
-                          fontSize: 12.5,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      ChoiceChip(
-                        label: const Text('Unread'),
-                        selected: _filter == 'unread',
-                        onSelected: (_) => setState(() => _filter = 'unread'),
-                        selectedColor: WhatsAppTheme.primaryGreen.withOpacity(0.18),
-                        labelStyle: TextStyle(
-                          color: _filter == 'unread' ? WhatsAppTheme.primaryGreen : Colors.grey.shade700,
-                          fontWeight: _filter == 'unread' ? FontWeight.bold : FontWeight.normal,
-                          fontSize: 12.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+                  onChanged: (val) {
+                    setState(() => _searchQuery = val.trim());
+                  },
+                ),
               ),
             ),
 
-            // Chats List
+            // Groups List
             Expanded(
-              child: _isLoading && _chats.isEmpty
+              child: _isLoading && _groups.isEmpty
                   ? const Center(child: CircularProgressIndicator(color: WhatsAppTheme.primaryGreen))
                   : filtered.isEmpty
                       ? Center(
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.chat_bubble_outline, size: 64, color: Colors.grey.shade400),
+                              Icon(Icons.groups_outlined, size: 64, color: Colors.grey.shade400),
                               const SizedBox(height: 12),
                               Text(
-                                inst == null ? 'No account selected' : 'No direct chats found',
+                                inst == null ? 'No account selected' : 'No group chats found',
                                 style: TextStyle(color: Colors.grey.shade600, fontSize: 16),
                               ),
                               if (inst != null && !inst.isConnected) ...[
@@ -233,7 +199,7 @@ class _ChatsTabState extends State<ChatsTab> {
                               leading: ChatAvatar(
                                 chatId: chat.chatId,
                                 title: chat.displayTitle,
-                                isGroup: false,
+                                isGroup: true,
                                 radius: 25,
                               ),
                               title: Row(
@@ -263,7 +229,7 @@ class _ChatsTabState extends State<ChatsTab> {
                                 children: [
                                   Expanded(
                                     child: Text(
-                                      chat.lastPreview.isNotEmpty ? chat.lastPreview : 'No messages yet',
+                                      chat.lastPreview.isNotEmpty ? chat.lastPreview : 'No group messages yet',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(

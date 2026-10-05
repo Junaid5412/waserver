@@ -27,7 +27,7 @@ class ChatModel {
   String get displayTitle {
     if (name.isNotEmpty && name != chatId) return name;
     if (phone != null && phone!.isNotEmpty) return phone!;
-    if (isGroup) return 'WhatsApp Group';
+    if (isGroup) return 'Group Chat';
     final user = chatId.split('@')[0];
     return user.isNotEmpty ? '+$user' : chatId;
   }

@@ -5,9 +5,11 @@ import '../models/user.dart';
 import '../models/instance.dart';
 import 'api_service.dart';
 import 'cache_service.dart';
+import 'realtime_service.dart';
 
 class AuthService extends ChangeNotifier {
   final ApiService api;
+  late final RealtimeService realtime;
 
   UserModel? _currentUser;
   String? _token;
@@ -28,7 +30,9 @@ class AuthService extends ChangeNotifier {
   static const String _prefUserKey = 'zelon_auth_user';
   static const String _prefSelectedInstKey = 'zelon_selected_inst';
 
-  AuthService({required this.api});
+  AuthService({required this.api}) {
+    realtime = RealtimeService(api: api);
+  }
 
   Future<void> init() async {
     _isLoading = true;
@@ -111,6 +115,9 @@ class AuthService extends ChangeNotifier {
       if (_selectedInstance == null && _instances.isNotEmpty) {
         _selectedInstance = _instances.first;
       }
+      if (_selectedInstance != null) {
+        realtime.connect(_selectedInstance!.id);
+      }
       notifyListeners();
     } catch (_) {}
   }
@@ -119,10 +126,12 @@ class AuthService extends ChangeNotifier {
     _selectedInstance = inst;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefSelectedInstKey, inst.id);
+    realtime.connect(inst.id);
     notifyListeners();
   }
 
   Future<void> logout() async {
+    realtime.disconnect();
     await api.logout();
     _token = null;
     _currentUser = null;

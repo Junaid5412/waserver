@@ -23,7 +23,7 @@ if (flutterVersionName == null) {
 }
 
 android {
-    namespace "com.zelon.whatsapp"
+    namespace "com.zelon.messenger"
     compileSdk 36
     ndkVersion flutter.ndkVersion
 
@@ -41,7 +41,7 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.zelon.whatsapp"
+        applicationId "com.zelon.messenger"
         minSdkVersion 21
         targetSdkVersion 36
         versionCode flutterVersionCode.toInteger()

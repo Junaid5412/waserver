@@ -17,18 +17,18 @@ void main() {
           create: (_) => AuthService(api: apiService),
         ),
       ],
-      child: const ZelonWhatsAppApp(),
+      child: const ZelonMessengerApp(),
     ),
   );
 }
 
-class ZelonWhatsAppApp extends StatelessWidget {
-  const ZelonWhatsAppApp({super.key});
+class ZelonMessengerApp extends StatelessWidget {
+  const ZelonMessengerApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Zelon WhatsApp',
+      title: 'Zelon Messenger',
       debugShowCheckedModeBanner: false,
       theme: WhatsAppTheme.lightTheme,
       darkTheme: WhatsAppTheme.darkTheme,

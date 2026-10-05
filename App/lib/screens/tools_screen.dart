@@ -52,11 +52,11 @@ class _ToolsScreenState extends State<ToolsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // Section: WhatsApp Engine
-          _sectionHeader('WHATSAPP ENGINE'),
+          // Section: Engine
+          _sectionHeader('COMMUNICATION ENGINE'),
           _toolTile(
             icon: Icons.qr_code_2_rounded,
-            title: 'Link WhatsApp Number',
+            title: 'Link Account Device',
             subtitle: auth.selectedInstance?.isConnected == true
                 ? 'Connected (+${auth.selectedInstance?.phone ?? ""})'
                 : 'Disconnected · Scan QR or Pair',
@@ -69,7 +69,7 @@ class _ToolsScreenState extends State<ToolsScreen> {
           ),
           _toolTile(
             icon: Icons.sync_rounded,
-            title: 'Restart WhatsApp Connection',
+            title: 'Restart Engine Connection',
             subtitle: 'Restart socket connection safely without losing session',
             color: Colors.teal,
             onTap: () async {
@@ -77,7 +77,7 @@ class _ToolsScreenState extends State<ToolsScreen> {
                 try {
                   await auth.api.restartInstance(auth.selectedInstance!.id);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Restarting WhatsApp connection...')),
+                    const SnackBar(content: Text('Restarting connection...')),
                   );
                 } catch (e) {
                   ScaffoldMessenger.of(context).showSnackBar(

@@ -7,7 +7,8 @@ import '../services/auth_service.dart';
 import 'login_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
-  const SettingsScreen({super.key});
+  final bool showAppBar;
+  const SettingsScreen({super.key, this.showAppBar = false});
 
   @override
   Widget build(BuildContext context) {
@@ -17,10 +18,12 @@ class SettingsScreen extends StatelessWidget {
     final inst = auth.selectedInstance;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Settings'),
-        backgroundColor: isDark ? WhatsAppTheme.surfaceDark : WhatsAppTheme.primaryGreen,
-      ),
+      appBar: showAppBar
+          ? AppBar(
+              title: const Text('Settings'),
+              backgroundColor: isDark ? WhatsAppTheme.surfaceDark : WhatsAppTheme.primaryGreen,
+            )
+          : null,
       body: ListView(
         children: [
           // User Profile Card
@@ -80,7 +83,7 @@ class SettingsScreen extends StatelessWidget {
           // Active Instance Selector
           ListTile(
             leading: const Icon(Icons.phone_android, color: WhatsAppTheme.primaryGreen),
-            title: const Text('Active WhatsApp Instance'),
+            title: const Text('Active Connected Account'),
             subtitle: Text(inst != null ? '${inst.name} (${inst.status})' : 'None selected'),
             trailing: PopupMenuButton<InstanceModel>(
               icon: const Icon(Icons.arrow_drop_down),
