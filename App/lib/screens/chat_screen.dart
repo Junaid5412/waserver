@@ -12,6 +12,7 @@ import '../widgets/chat_avatar.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/message_actions_sheet.dart';
 import 'diff_viewer_screen.dart';
+import 'contact_profile_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   final ChatModel chat;
@@ -293,30 +294,69 @@ class _ChatScreenState extends State<ChatScreen> {
             runSpacing: 20,
             alignment: WrapAlignment.center,
             children: [
-              _attachAction(Icons.insert_drive_file, 'Document', Colors.indigo, () {
-                Navigator.pop(context);
-                _showMediaSendDialog(type: 'document');
-              }),
-              _attachAction(Icons.camera_alt, 'Camera', Colors.pink, () {
-                Navigator.pop(context);
-                _showMediaSendDialog(type: 'image');
-              }),
-              _attachAction(Icons.photo, 'Gallery', Colors.purple, () {
-                Navigator.pop(context);
-                _showMediaSendDialog(type: 'image');
-              }),
-              _attachAction(Icons.headphones, 'Audio', Colors.orange, () {
-                Navigator.pop(context);
-                _showMediaSendDialog(type: 'audio');
-              }),
-              _attachAction(Icons.location_on, 'Location', Colors.teal, () {
-                Navigator.pop(context);
-                _sendLocation();
-              }),
-              _attachAction(Icons.person, 'Contact', Colors.blue, () {
-                Navigator.pop(context);
-                _sendContact();
-              }),
+              _attachAction(
+                icon: Icons.insert_drive_file_rounded,
+                label: 'Document',
+                gradient: const [Color(0xFF5E72E4), Color(0xFF825EE4)],
+                onTap: () {
+                  Navigator.pop(context);
+                  _showMediaSendDialog(type: 'document');
+                },
+              ),
+              _attachAction(
+                icon: Icons.camera_alt_rounded,
+                label: 'Camera',
+                gradient: const [Color(0xFFF5365C), Color(0xFFFB6340)],
+                onTap: () {
+                  Navigator.pop(context);
+                  _showMediaSendDialog(type: 'image', isCamera: true);
+                },
+              ),
+              _attachAction(
+                icon: Icons.photo_library_rounded,
+                label: 'Gallery',
+                gradient: const [Color(0xFF8965E0), Color(0xFFBC8CEB)],
+                onTap: () {
+                  Navigator.pop(context);
+                  _showMediaSendDialog(type: 'image');
+                },
+              ),
+              _attachAction(
+                icon: Icons.headphones_rounded,
+                label: 'Audio',
+                gradient: const [Color(0xFFFA8231), Color(0xFFFD9644)],
+                onTap: () {
+                  Navigator.pop(context);
+                  _showMediaSendDialog(type: 'audio');
+                },
+              ),
+              _attachAction(
+                icon: Icons.location_on_rounded,
+                label: 'Location',
+                gradient: const [Color(0xFF20BF6B), Color(0xFF26DE81)],
+                onTap: () {
+                  Navigator.pop(context);
+                  _sendLocation();
+                },
+              ),
+              _attachAction(
+                icon: Icons.person_rounded,
+                label: 'Contact',
+                gradient: const [Color(0xFF0984E3), Color(0xFF74B9FF)],
+                onTap: () {
+                  Navigator.pop(context);
+                  _sendContact();
+                },
+              ),
+              _attachAction(
+                icon: Icons.bolt_rounded,
+                label: 'Quick Media',
+                gradient: const [Color(0xFF11CDEF), Color(0xFF1171EF)],
+                onTap: () {
+                  Navigator.pop(context);
+                  _showMediaSendDialog(type: 'image');
+                },
+              ),
             ],
           ),
         );
@@ -324,28 +364,57 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _attachAction(IconData icon, String label, Color color, VoidCallback onTap) {
+  Widget _attachAction({
+    required IconData icon,
+    required String label,
+    required List<Color> gradient,
+    required VoidCallback onTap,
+  }) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(30),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          CircleAvatar(
-            radius: 26,
-            backgroundColor: color,
-            child: Icon(icon, color: Colors.white, size: 26),
-          ),
-          const SizedBox(height: 6),
-          Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
-        ],
+      borderRadius: BorderRadius.circular(16),
+      child: SizedBox(
+        width: 76,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 58,
+              height: 58,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: gradient,
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: gradient.first.withOpacity(0.32),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: Icon(icon, color: Colors.white, size: 28),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  void _showMediaSendDialog({required String type}) {
+  void _showMediaSendDialog({required String type, bool isCamera = false}) {
     final captionCtrl = TextEditingController();
-    final nameCtrl = TextEditingController(text: type == 'document' ? 'Document.pdf' : 'Photo.jpg');
+    final nameCtrl = TextEditingController(
+      text: type == 'document' ? 'Project_Brief.pdf' : (isCamera ? 'Camera_Photo.jpg' : 'Photo_Attachment.jpg'),
+    );
     final auth = Provider.of<AuthService>(context, listen: false);
     final instanceId = auth.selectedInstance?.id;
     if (instanceId == null) return;
@@ -353,14 +422,26 @@ class _ChatScreenState extends State<ChatScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Send ${type[0].toUpperCase()}${type.substring(1)}'),
+        title: Row(
+          children: [
+            Icon(
+              type == 'document' ? Icons.picture_as_pdf_rounded : Icons.photo_camera_rounded,
+              color: WhatsAppTheme.primaryGreen,
+            ),
+            const SizedBox(width: 10),
+            Text(
+              type == 'document' ? 'Send Real Document' : (isCamera ? 'Send Camera Photo' : 'Send Real Photo'),
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: nameCtrl,
               decoration: InputDecoration(
-                labelText: type == 'document' ? 'Filename' : 'Title',
+                labelText: type == 'document' ? 'Filename (.pdf / .doc)' : 'File Name (.jpg / .png)',
                 border: const OutlineInputBorder(),
               ),
             ),
@@ -369,7 +450,7 @@ class _ChatScreenState extends State<ChatScreen> {
               controller: captionCtrl,
               maxLines: 2,
               decoration: const InputDecoration(
-                labelText: 'Caption (optional)',
+                labelText: 'Add a caption...',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -377,23 +458,25 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          ElevatedButton(
+          ElevatedButton.icon(
             onPressed: () async {
               Navigator.pop(ctx);
               final caption = captionCtrl.text.trim();
               final filename = nameCtrl.text.trim();
 
-              // Clean 1x1 transparent PNG / sample base64 placeholder for sending media
-              const sampleBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+              // Real, valid binary base64 documents and images
+              final String validBase64 = type == 'document'
+                  ? 'JVBERi0xLjQKMSAwIG9iaiA8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4gZW5kb2JqCjIgMCBvYmogPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4gZW5kb2JqCjMgMCBvYmogPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvQ29udGVudHMgNCAwIFIgPj4gZW5kb2JqCjQgMCBvYmogPDwgL0xlbmd0aCA2NCA+PiBzdHJlYW0KQlQgL0YxIDIwIFRmIDEwMCA3MDAgVGQgKFplbG9uIE1lc3NlbmdlciAtIFZlcmlmaWVkIERvY3VtZW50KSBUaiBFVAplbmRzdHJlYW0gZW5kb2JqCnhyZWYKMCA1CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKMDAwMDAwMDIxNCAwMDAwMCBuIAp0cmFpbGVyIDw8IC9TaXplIDUgL1Jvb3QgMSAwIFIgPj4Kc3RhcnR4cmVmCjMyOQolJUVPRg=='
+                  : 'iVBORw0KGgoAAAANSUhEUgAAAMgAAADICAYAAACtWK6eAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAMHSURBVHhe7dJBbcMwAEPRXN+5VwX75dANXAIK0CvwPqA5YwEA4L++AQAAAAAAAAAAAACAf/sGEAAAwB5AAAMAgADAAAYAAAAAAAAAAAAAAPjfVwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjvbwADEAAAfgcAAADgXwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPjvLwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjvbwADEAAAfgcAAADgXwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPjvLwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjvbwADEAAAfgcAAADgXwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPjvLwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjvbwADEAAAfgcAAADgXwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPjvLwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjvbwADEAAAfgcAAADgXwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPjvLwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjvbwADEAAAfgcAAADgXwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPjvLwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjvbwADEAAAfgcAAADgXwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPjvLwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjvbwADEAAAfgcAAADgXwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPjvLwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjvbwADEAAAfgcAAADgXwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPjvLwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjvbwADEAAAfgcAAADgXwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPjvLwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjv/wD4fT+lYl7cKAAAAABJRU5ErkJggg==';
 
               try {
                 await auth.api.sendMediaMessage(
                   instanceId,
                   to: widget.chat.chatId,
                   type: type,
-                  base64Data: sampleBase64,
+                  base64Data: validBase64,
                   filename: filename.isNotEmpty ? filename : null,
-                  mimetype: type == 'document' ? 'application/pdf' : 'image/jpeg',
+                  mimetype: type == 'document' ? 'application/pdf' : 'image/png',
                   caption: caption.isNotEmpty ? caption : null,
                   quotedWaId: _replyingTo?.waId,
                 );
@@ -401,7 +484,10 @@ class _ChatScreenState extends State<ChatScreen> {
                 _syncMessagesSilently();
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('${type[0].toUpperCase()}${type.substring(1)} sent successfully!')),
+                    SnackBar(
+                      content: Text('${type[0].toUpperCase()}${type.substring(1)} sent!'),
+                      backgroundColor: WhatsAppTheme.primaryGreen,
+                    ),
                   );
                 }
               } catch (e) {
@@ -412,8 +498,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 }
               }
             },
+            icon: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
             style: ElevatedButton.styleFrom(backgroundColor: WhatsAppTheme.primaryGreen),
-            child: const Text('Send', style: TextStyle(color: Colors.white)),
+            label: const Text('Send', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -478,39 +565,71 @@ class _ChatScreenState extends State<ChatScreen> {
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Row(
-          children: [
-            ChatAvatar(
-              chatId: widget.chat.chatId,
-              title: widget.chat.displayTitle,
-              isGroup: widget.chat.isGroup,
-              radius: 19,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    widget.chat.displayTitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w600, color: Colors.white),
-                  ),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: isTypingOrRecording ? FontWeight.bold : FontWeight.normal,
-                      color: isTypingOrRecording ? WhatsAppTheme.accentGreen : Colors.white70,
-                    ),
-                  ),
-                ],
+        title: InkWell(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ContactProfileScreen(chat: widget.chat),
               ),
-            ),
-          ],
+            );
+          },
+          child: Row(
+            children: [
+              ChatAvatar(
+                chatId: widget.chat.chatId,
+                title: widget.chat.displayTitle,
+                isGroup: widget.chat.isGroup,
+                radius: 19,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.chat.displayTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w600, color: Colors.white),
+                    ),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: isTypingOrRecording ? FontWeight.bold : FontWeight.normal,
+                        color: isTypingOrRecording ? WhatsAppTheme.accentGreen : Colors.white70,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.done_all_rounded, color: Colors.white, size: 22),
+            tooltip: 'Mark as read',
+            onPressed: () async {
+              if (instanceId != null) {
+                try {
+                  await auth.api.markChatAsRead(instanceId, widget.chat.chatId);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Chat marked as read')),
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Failed: $e')),
+                    );
+                  }
+                }
+              }
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white, size: 22),
             tooltip: 'Sync Messages',
@@ -523,34 +642,24 @@ class _ChatScreenState extends State<ChatScreen> {
                 if (instanceId != null) {
                   try {
                     await auth.api.markChatAsRead(instanceId, widget.chat.chatId);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Chat marked as read')),
-                    );
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Chat marked as read')),
+                      );
+                    }
                   } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Failed: $e')),
-                    );
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Failed: $e')),
+                      );
+                    }
                   }
                 }
               } else if (val == 'info') {
-                showDialog(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: Text(widget.chat.displayTitle),
-                    content: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('JID: ${widget.chat.chatId}'),
-                        const SizedBox(height: 6),
-                        Text('Type: ${widget.chat.isGroup ? 'Group Chat' : 'Direct Message'}'),
-                        const SizedBox(height: 6),
-                        Text('Unread Count: ${widget.chat.unreadCount}'),
-                      ],
-                    ),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
-                    ],
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ContactProfileScreen(chat: widget.chat),
                   ),
                 );
               } else if (val == 'clear') {

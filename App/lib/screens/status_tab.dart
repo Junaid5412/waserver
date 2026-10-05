@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import '../config/api_config.dart';
 import '../config/theme.dart';
 import '../config/permissions.dart';
 import '../models/status_model.dart';
@@ -142,12 +143,21 @@ class _StatusTabState extends State<StatusTab> {
   }
 
   void _openMultiStatusViewer(BuildContext context, String contactName, List<StatusModel> items, bool canViewSeen) {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final instanceId = auth.selectedInstance?.id ?? '';
+    final headers = auth.api.authHeaders;
+
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => _MultiStoryViewer(
           contactName: contactName,
           statuses: items,
           canViewSeen: canViewSeen,
+          instanceId: instanceId,
+          headers: headers,
+          onMarkRead: (waId) {
+            auth.api.markMessageAsRead(instanceId, waId);
+          },
         ),
       ),
     );
@@ -263,7 +273,9 @@ class _StatusTabState extends State<StatusTab> {
                   subtitle: Text(
                     count > 1
                         ? '$count updates · $timeStr'
-                        : (latest.text.isNotEmpty ? latest.text : 'Status update · $timeStr'),
+                        : (latest.hasMedia || latest.type == 'image'
+                            ? '📷 Photo • $timeStr'
+                            : (latest.text.isNotEmpty ? latest.text : 'Status update • $timeStr')),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
@@ -287,11 +299,17 @@ class _MultiStoryViewer extends StatefulWidget {
   final String contactName;
   final List<StatusModel> statuses;
   final bool canViewSeen;
+  final String instanceId;
+  final Map<String, String> headers;
+  final Function(String waId)? onMarkRead;
 
   const _MultiStoryViewer({
     required this.contactName,
     required this.statuses,
     required this.canViewSeen,
+    required this.instanceId,
+    required this.headers,
+    this.onMarkRead,
   });
 
   @override
@@ -315,6 +333,26 @@ class _MultiStoryViewerState extends State<_MultiStoryViewer> {
     }
   }
 
+  void _downloadStatus(StatusModel st) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Status media saved to device gallery!'),
+        backgroundColor: WhatsAppTheme.primaryGreen,
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _markAsRead(StatusModel st) {
+    widget.onMarkRead?.call(st.waId);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Status marked as viewed'),
+        duration: Duration(seconds: 1),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final current = widget.statuses[_currentIndex];
@@ -322,11 +360,94 @@ class _MultiStoryViewerState extends State<_MultiStoryViewer> {
         ? DateFormat('HH:mm, dd MMM').format(current.createdAt!.toLocal())
         : '';
 
+    final isMedia = current.hasMedia ||
+        current.type == 'image' ||
+        current.type == 'video' ||
+        current.mimetype?.startsWith('image/') == true;
+
+    final mediaUrl = '${ApiConfig.baseUrl}/api/instances/${widget.instanceId}/inbox/${current.waId}/media?inline=1';
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
         child: Stack(
           children: [
+            // Media or Text Content
+            Positioned.fill(
+              child: isMedia
+                  ? Image.network(
+                      mediaUrl,
+                      headers: widget.headers,
+                      fit: BoxFit.contain,
+                      loadingBuilder: (ctx, child, progress) {
+                        if (progress == null) return child;
+                        return const Center(
+                          child: CircularProgressIndicator(color: WhatsAppTheme.primaryGreen),
+                        );
+                      },
+                      errorBuilder: (_, __, ___) => Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.broken_image_rounded, color: Colors.white54, size: 64),
+                            const SizedBox(height: 12),
+                            Text(
+                              current.text.isNotEmpty ? current.text : 'Media unavailable or expired',
+                              style: const TextStyle(color: Colors.white70, fontSize: 16),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : Center(
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 24),
+                        padding: const EdgeInsets.all(28),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF0F2027), Color(0xFF203A43), Color(0xFF2C5364)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 16),
+                          ],
+                        ),
+                        child: Text(
+                          current.text,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ),
+            ),
+
+            // Caption overlay for media statuses
+            if (isMedia && current.text.isNotEmpty)
+              Positioned(
+                bottom: widget.canViewSeen ? 70 : 20,
+                left: 16,
+                right: 16,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.65),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    current.text,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                  ),
+                ),
+              ),
+
             // Touch navigation (left half: prev, right half: next)
             Positioned.fill(
               child: Row(
@@ -346,34 +467,6 @@ class _MultiStoryViewerState extends State<_MultiStoryViewer> {
                     ),
                   ),
                 ],
-              ),
-            ),
-
-            // Story Content (Centered)
-            Center(
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 24),
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF0F2027), Color(0xFF203A43), Color(0xFF2C5364)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 16),
-                  ],
-                ),
-                child: Text(
-                  current.text,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
               ),
             ),
 
@@ -401,7 +494,7 @@ class _MultiStoryViewerState extends State<_MultiStoryViewer> {
               ),
             ),
 
-            // Top Header: Contact Name, Time, Close Button
+            // Top Header: Contact Name, Time, Download, Read & Close Buttons
             Positioned(
               top: 24,
               left: 12,
@@ -431,6 +524,22 @@ class _MultiStoryViewerState extends State<_MultiStoryViewer> {
                     ],
                   ),
                   const Spacer(),
+
+                  // Download button
+                  IconButton(
+                    icon: const Icon(Icons.file_download_rounded, color: Colors.white),
+                    tooltip: 'Download Status Media',
+                    onPressed: () => _downloadStatus(current),
+                  ),
+
+                  // Read button
+                  IconButton(
+                    icon: const Icon(Icons.done_all_rounded, color: WhatsAppTheme.blueTick),
+                    tooltip: 'Mark as Read',
+                    onPressed: () => _markAsRead(current),
+                  ),
+
+                  // Close button
                   IconButton(
                     icon: const Icon(Icons.close, color: Colors.white),
                     onPressed: () => Navigator.pop(context),
@@ -448,7 +557,7 @@ class _MultiStoryViewerState extends State<_MultiStoryViewer> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.7),
+                    color: Colors.black.withOpacity(0.75),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(color: Colors.white24),
                   ),

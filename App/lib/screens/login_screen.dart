@@ -122,6 +122,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                   decoration: InputDecoration(
                     labelText: 'Email Address',
+                    labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
+                    floatingLabelStyle: const TextStyle(color: WhatsAppTheme.primaryGreen, fontWeight: FontWeight.bold),
                     prefixIcon: const Icon(Icons.email_outlined, color: WhatsAppTheme.primaryGreen),
                     filled: true,
                     fillColor: isDark ? WhatsAppTheme.surfaceDark : Colors.grey.shade50,
@@ -144,6 +146,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                   decoration: InputDecoration(
                     labelText: 'Password',
+                    labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
+                    floatingLabelStyle: const TextStyle(color: WhatsAppTheme.primaryGreen, fontWeight: FontWeight.bold),
                     prefixIcon: const Icon(Icons.lock_outline, color: WhatsAppTheme.primaryGreen),
                     suffixIcon: IconButton(
                       icon: Icon(
@@ -189,6 +193,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                     decoration: InputDecoration(
                       labelText: 'Server API URL',
+                      labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
+                      floatingLabelStyle: const TextStyle(color: WhatsAppTheme.primaryGreen, fontWeight: FontWeight.bold),
                       hintText: 'http://your-server-ip:3000',
                       prefixIcon: const Icon(Icons.dns_outlined, color: WhatsAppTheme.primaryGreen),
                       filled: true,

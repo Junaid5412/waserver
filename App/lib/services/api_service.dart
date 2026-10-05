@@ -331,4 +331,16 @@ class ApiService {
       throw Exception(d['error'] ?? 'Failed to send media');
     }
   }
+
+  Future<void> markMessageAsRead(String instanceId, String waId) async {
+    final res = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/api/instances/$instanceId/inbox/$waId/read'),
+      headers: _headers(),
+      body: jsonEncode({}),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to mark message as read');
+    }
+  }
 }

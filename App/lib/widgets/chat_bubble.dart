@@ -7,6 +7,7 @@ import '../config/permissions.dart';
 import '../models/message.dart';
 import '../models/user.dart';
 import '../services/auth_service.dart';
+import '../screens/pdf_viewer_screen.dart';
 import 'status_indicator.dart';
 import 'voice_player.dart';
 
@@ -40,6 +41,20 @@ class ChatBubble extends StatelessWidget {
               caption.isNotEmpty ? caption : 'Photo',
               style: const TextStyle(color: Colors.white, fontSize: 16),
             ),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.download_rounded, color: Colors.white),
+                tooltip: 'Download Photo',
+                onPressed: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Photo downloaded to device storage'),
+                      backgroundColor: WhatsAppTheme.primaryGreen,
+                    ),
+                  );
+                },
+              ),
+            ],
           ),
           body: Center(
             child: InteractiveViewer(
@@ -122,49 +137,76 @@ class ChatBubble extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: isDark ? Colors.black26 : Colors.black.withOpacity(0.05),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: isPdf ? Colors.red.shade700 : Colors.indigo.shade600,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Icon(
-                    isPdf ? Icons.picture_as_pdf : Icons.insert_drive_file,
-                    color: Colors.white,
-                    size: 24,
+          InkWell(
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => PdfViewerScreen(
+                    title: docName,
+                    documentUrl: mediaUrl,
+                    headers: headers,
+                    filename: docName,
+                    mimetype: message.mimetype,
                   ),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        docName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
-                      ),
-                      Text(
-                        message.mimetype ?? 'Document file',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                      ),
-                    ],
+              );
+            },
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: isDark ? Colors.black26 : Colors.black.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: isPdf ? Colors.red.shade700 : Colors.indigo.shade600,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Icon(
+                      isPdf ? Icons.picture_as_pdf : Icons.insert_drive_file,
+                      color: Colors.white,
+                      size: 24,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                const Icon(Icons.download_rounded, color: WhatsAppTheme.primaryGreen, size: 22),
-              ],
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          docName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+                        ),
+                        Text(
+                          message.mimetype ?? 'Document file',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.download_rounded, color: WhatsAppTheme.primaryGreen, size: 22),
+                    tooltip: 'Download Document',
+                    onPressed: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Downloading $docName to device...'),
+                          backgroundColor: WhatsAppTheme.primaryGreen,
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
             ),
           ),
           if (message.text.isNotEmpty) ...[

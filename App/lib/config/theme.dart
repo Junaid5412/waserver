@@ -54,6 +54,10 @@ class WhatsAppTheme {
         backgroundColor: fabGreen,
         foregroundColor: Colors.white,
       ),
+      inputDecorationTheme: const InputDecorationTheme(
+        labelStyle: TextStyle(color: Colors.black54),
+        floatingLabelStyle: TextStyle(color: primaryGreen, fontWeight: FontWeight.w600),
+      ),
     );
   }
 
@@ -63,9 +67,13 @@ class WhatsAppTheme {
       primaryColor: surfaceDark,
       scaffoldBackgroundColor: bgDark,
       colorScheme: const ColorScheme.dark(
-        primary: surfaceDark,
+        primary: accentGreen,
         secondary: fabGreen,
         surface: surfaceDark,
+      ),
+      inputDecorationTheme: const InputDecorationTheme(
+        labelStyle: TextStyle(color: Colors.white70),
+        floatingLabelStyle: TextStyle(color: accentGreen, fontWeight: FontWeight.w600),
       ),
       appBarTheme: const AppBarTheme(
         backgroundColor: surfaceDark,

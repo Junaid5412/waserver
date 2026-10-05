@@ -61,28 +61,63 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               const SizedBox(height: 14),
-              const Text('Switch Account', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              const Divider(),
-              ...instances.map((i) => ListTile(
-                leading: Icon(
-                  i.isConnected ? Icons.check_circle : Icons.circle_outlined,
-                  color: i.isConnected ? WhatsAppTheme.accentGreen : Colors.grey,
+              Text(
+                'Switch Account',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : const Color(0xFF111B21),
                 ),
-                title: Text(
-                  i.name,
-                  style: TextStyle(fontWeight: i.id == current?.id ? FontWeight.bold : FontWeight.normal),
-                ),
-                subtitle: Text(i.isConnected ? 'Connected' : 'Offline'),
-                selected: i.id == current?.id,
-                onTap: () {
-                  auth.selectInstance(i);
-                  Navigator.pop(ctx);
-                },
-              )),
-              const Divider(),
+              ),
+              Divider(color: isDark ? Colors.white24 : Colors.black12),
+              ...instances.map((i) {
+                final isSelected = i.id == current?.id;
+                return Container(
+                  margin: const EdgeInsets.symmetric(vertical: 2),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? WhatsAppTheme.primaryGreen.withOpacity(0.12)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: ListTile(
+                    leading: Icon(
+                      i.isConnected ? Icons.check_circle : Icons.circle_outlined,
+                      color: i.isConnected ? WhatsAppTheme.accentGreen : Colors.grey,
+                    ),
+                    title: Text(
+                      i.name,
+                      style: TextStyle(
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                        color: isSelected
+                            ? WhatsAppTheme.primaryGreen
+                            : (isDark ? Colors.white : const Color(0xFF111B21)),
+                      ),
+                    ),
+                    subtitle: Text(
+                      i.isConnected ? 'Connected & Ready' : 'Offline',
+                      style: TextStyle(
+                        color: isDark ? Colors.white60 : Colors.black54,
+                        fontSize: 12,
+                      ),
+                    ),
+                    trailing: isSelected
+                        ? const Icon(Icons.check, color: WhatsAppTheme.primaryGreen)
+                        : null,
+                    onTap: () {
+                      auth.selectInstance(i);
+                      Navigator.pop(ctx);
+                    },
+                  ),
+                );
+              }),
+              Divider(color: isDark ? Colors.white24 : Colors.black12),
               ListTile(
                 leading: const Icon(Icons.add_circle_outline, color: WhatsAppTheme.primaryGreen),
-                title: const Text('Link Another Device', style: TextStyle(color: WhatsAppTheme.primaryGreen, fontWeight: FontWeight.bold)),
+                title: const Text(
+                  'Link Another Device',
+                  style: TextStyle(color: WhatsAppTheme.primaryGreen, fontWeight: FontWeight.bold),
+                ),
                 onTap: () {
                   Navigator.pop(ctx);
                   Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ConnectScreen()));
