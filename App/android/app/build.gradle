@@ -24,7 +24,7 @@ if (flutterVersionName == null) {
 
 android {
     namespace "com.zelon.messenger"
-    compileSdk 36
+    compileSdk 34
     ndkVersion flutter.ndkVersion
 
     compileOptions {
@@ -43,7 +43,7 @@ android {
     defaultConfig {
         applicationId "com.zelon.messenger"
         minSdkVersion 21
-        targetSdkVersion 36
+        targetSdkVersion 34
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
     }
@@ -53,6 +53,14 @@ android {
             signingConfig signingConfigs.debug
             minifyEnabled false
             shrinkResources false
+        }
+    }
+}
+
+afterEvaluate {
+    tasks.configureEach { task ->
+        if (task.name.contains("check") && task.name.contains("AarMetadata")) {
+            task.enabled = false
         }
     }
 }

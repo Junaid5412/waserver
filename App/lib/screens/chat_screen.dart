@@ -253,7 +253,6 @@ class _ChatScreenState extends State<ChatScreen> {
               status: old.status,
               type: old.type,
               text: text,
-              hasMedia: old.hasMedia,
               mimetype: old.mimetype,
               filename: old.filename,
               quotedText: old.quotedText,
@@ -454,7 +453,6 @@ class _ChatScreenState extends State<ChatScreen> {
     final privateChat = ChatModel(
       chatId: sender,
       name: msg.senderName.isNotEmpty ? msg.senderName : sender.split('@')[0],
-      isGroup: false,
     );
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -474,7 +472,6 @@ class _ChatScreenState extends State<ChatScreen> {
     final privateChat = ChatModel(
       chatId: sender,
       name: msg.senderName.isNotEmpty ? msg.senderName : sender.split('@')[0],
-      isGroup: false,
     );
     Navigator.of(context).push(
       MaterialPageRoute(
