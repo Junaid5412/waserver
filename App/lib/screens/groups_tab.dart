@@ -290,7 +290,7 @@ class _GroupsTabState extends State<GroupsTab> {
               style: TextStyle(
                 fontSize: 17,
                 fontWeight: FontWeight.w600,
-                color: isDark ? Colors.white87 : Colors.grey.shade800,
+                color: isDark ? Colors.white.withOpacity(0.87) : Colors.grey.shade800,
               ),
             ),
             const SizedBox(height: 8),
