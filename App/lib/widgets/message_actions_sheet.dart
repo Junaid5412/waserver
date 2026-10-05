@@ -340,7 +340,7 @@ class MessageActionsSheet {
                     ],
                   ),
                   if (canViewEdits) ...[
-                    if (message.originalText.isNotEmpty) ...[
+                    if (message.originalText?.isNotEmpty == true) ...[
                       const SizedBox(height: 4),
                       Text('Original text: ${message.originalText}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
                     ],

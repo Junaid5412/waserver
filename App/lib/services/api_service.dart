@@ -169,7 +169,7 @@ class ApiService {
       'type': type,
     };
     if (text != null) body['text'] = text;
-    if (quotedWaId != null) body['quoted'] = quotedWaId;
+    if (quotedWaId != null) body['quotedId'] = quotedWaId;
 
     final res = await http.post(
       Uri.parse(ApiConfig.sendMessageUrl(instanceId)),
@@ -371,5 +371,85 @@ class ApiService {
       throw Exception(d['error'] ?? 'Failed to forward message');
     }
   }
+
+  Future<void> sendLocationMessage(String instanceId, {
+    required String to,
+    required double latitude,
+    required double longitude,
+    String? name,
+    String? quotedWaId,
+  }) async {
+    final body = <String, dynamic>{
+      'to': to,
+      'type': 'location',
+      'latitude': latitude,
+      'longitude': longitude,
+    };
+    if (name != null && name.isNotEmpty) body['name'] = name;
+    if (quotedWaId != null && quotedWaId.isNotEmpty) body['quotedId'] = quotedWaId;
+
+    final res = await http.post(
+      Uri.parse(ApiConfig.sendMessageUrl(instanceId)),
+      headers: _headers(),
+      body: jsonEncode(body),
+    );
+    if (res.statusCode != 200 && res.statusCode != 202) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to send location');
+    }
+  }
+
+  Future<void> sendContactMessage(String instanceId, {
+    required String to,
+    required String name,
+    required String phone,
+    String? quotedWaId,
+  }) async {
+    final body = <String, dynamic>{
+      'to': to,
+      'type': 'contact',
+      'name': name,
+      'phone': phone,
+    };
+    if (quotedWaId != null && quotedWaId.isNotEmpty) body['quotedId'] = quotedWaId;
+
+    final res = await http.post(
+      Uri.parse(ApiConfig.sendMessageUrl(instanceId)),
+      headers: _headers(),
+      body: jsonEncode(body),
+    );
+    if (res.statusCode != 200 && res.statusCode != 202) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to send contact');
+    }
+  }
+
+  Future<void> sendPollMessage(String instanceId, {
+    required String to,
+    required String question,
+    required List<String> options,
+    int selectableCount = 1,
+    String? quotedWaId,
+  }) async {
+    final body = <String, dynamic>{
+      'to': to,
+      'type': 'poll',
+      'text': question,
+      'options': options,
+      'selectableCount': selectableCount,
+    };
+    if (quotedWaId != null && quotedWaId.isNotEmpty) body['quotedId'] = quotedWaId;
+
+    final res = await http.post(
+      Uri.parse(ApiConfig.sendMessageUrl(instanceId)),
+      headers: _headers(),
+      body: jsonEncode(body),
+    );
+    if (res.statusCode != 200 && res.statusCode != 202) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to send poll');
+    }
+  }
 }
+
 

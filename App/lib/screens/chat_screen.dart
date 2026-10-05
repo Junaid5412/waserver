@@ -1,7 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
+import '../config/api_config.dart';
 import '../config/theme.dart';
 import '../models/chat.dart';
 import '../models/message.dart';
@@ -13,6 +19,7 @@ import '../widgets/chat_bubble.dart';
 import '../widgets/message_actions_sheet.dart';
 import 'diff_viewer_screen.dart';
 import 'contact_profile_screen.dart';
+import 'pdf_viewer_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   final ChatModel chat;
@@ -644,6 +651,12 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
 
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
   void _showAttachmentSheet() {
     showModalBottomSheet(
       context: context,
@@ -657,7 +670,7 @@ class _ChatScreenState extends State<ChatScreen> {
             borderRadius: BorderRadius.circular(16),
           ),
           child: Wrap(
-            spacing: 24,
+            spacing: 20,
             runSpacing: 20,
             alignment: WrapAlignment.center,
             children: [
@@ -667,7 +680,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 gradient: const [Color(0xFF5E72E4), Color(0xFF825EE4)],
                 onTap: () {
                   Navigator.pop(context);
-                  _showMediaSendDialog(type: 'document');
+                  _pickDocument();
                 },
               ),
               _attachAction(
@@ -676,7 +689,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 gradient: const [Color(0xFFF5365C), Color(0xFFFB6340)],
                 onTap: () {
                   Navigator.pop(context);
-                  _showMediaSendDialog(type: 'image', isCamera: true);
+                  _pickImage(ImageSource.camera);
                 },
               ),
               _attachAction(
@@ -685,7 +698,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 gradient: const [Color(0xFF8965E0), Color(0xFFBC8CEB)],
                 onTap: () {
                   Navigator.pop(context);
-                  _showMediaSendDialog(type: 'image');
+                  _pickImage(ImageSource.gallery);
                 },
               ),
               _attachAction(
@@ -694,7 +707,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 gradient: const [Color(0xFFFA8231), Color(0xFFFD9644)],
                 onTap: () {
                   Navigator.pop(context);
-                  _showMediaSendDialog(type: 'audio');
+                  _pickAudio();
                 },
               ),
               _attachAction(
@@ -703,7 +716,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 gradient: const [Color(0xFF20BF6B), Color(0xFF26DE81)],
                 onTap: () {
                   Navigator.pop(context);
-                  _sendLocation();
+                  _showLocationDialog();
                 },
               ),
               _attachAction(
@@ -712,16 +725,16 @@ class _ChatScreenState extends State<ChatScreen> {
                 gradient: const [Color(0xFF0984E3), Color(0xFF74B9FF)],
                 onTap: () {
                   Navigator.pop(context);
-                  _sendContact();
+                  _showContactDialog();
                 },
               ),
               _attachAction(
-                icon: Icons.bolt_rounded,
-                label: 'Quick Media',
+                icon: Icons.poll_rounded,
+                label: 'Poll',
                 gradient: const [Color(0xFF11CDEF), Color(0xFF1171EF)],
                 onTap: () {
                   Navigator.pop(context);
-                  _showMediaSendDialog(type: 'image');
+                  _showPollDialog();
                 },
               ),
             ],
@@ -777,131 +790,966 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _showMediaSendDialog({required String type, bool isCamera = false}) {
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final picker = ImagePicker();
+      final picked = await picker.pickImage(
+        source: source,
+        maxWidth: 1920,
+        maxHeight: 1920,
+        imageQuality: 85,
+      );
+      if (picked == null) return;
+
+      final file = File(picked.path);
+      final bytes = await file.readAsBytes();
+      final base64Data = base64Encode(bytes);
+      final filename = picked.name.isNotEmpty
+          ? picked.name
+          : (source == ImageSource.camera ? 'camera_photo.jpg' : 'gallery_photo.jpg');
+      final ext = filename.split('.').last.toLowerCase();
+      final mimetype = ext == 'png' ? 'image/png' : (ext == 'webp' ? 'image/webp' : 'image/jpeg');
+
+      if (!mounted) return;
+      _showMediaConfirmation(
+        type: 'image',
+        filename: filename,
+        fileBytes: bytes,
+        mimetype: mimetype,
+        base64Data: base64Data,
+        previewFile: file,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to pick image: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _pickDocument() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv', 'zip', 'rar', 'json'],
+        withData: true,
+      );
+      if (result == null || result.files.isEmpty) return;
+
+      final pickedFile = result.files.first;
+      List<int>? bytes = pickedFile.bytes;
+      if (bytes == null && pickedFile.path != null) {
+        bytes = await File(pickedFile.path!).readAsBytes();
+      }
+      if (bytes == null || bytes.isEmpty) {
+        throw Exception('Selected file is empty');
+      }
+
+      final base64Data = base64Encode(bytes);
+      final filename = pickedFile.name;
+      final ext = pickedFile.extension?.toLowerCase() ?? '';
+      String mimetype = 'application/octet-stream';
+      if (ext == 'pdf') mimetype = 'application/pdf';
+      else if (ext == 'docx') mimetype = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      else if (ext == 'doc') mimetype = 'application/msword';
+      else if (ext == 'xlsx') mimetype = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      else if (ext == 'xls') mimetype = 'application/vnd.ms-excel';
+      else if (ext == 'txt' || ext == 'csv' || ext == 'json') mimetype = 'text/plain';
+      else if (ext == 'zip') mimetype = 'application/zip';
+
+      if (!mounted) return;
+      _showMediaConfirmation(
+        type: 'document',
+        filename: filename,
+        fileBytes: bytes,
+        mimetype: mimetype,
+        base64Data: base64Data,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to pick document: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _pickAudio() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.audio,
+        withData: true,
+      );
+      if (result == null || result.files.isEmpty) return;
+
+      final pickedFile = result.files.first;
+      List<int>? bytes = pickedFile.bytes;
+      if (bytes == null && pickedFile.path != null) {
+        bytes = await File(pickedFile.path!).readAsBytes();
+      }
+      if (bytes == null || bytes.isEmpty) return;
+
+      final base64Data = base64Encode(bytes);
+      final filename = pickedFile.name;
+      final ext = pickedFile.extension?.toLowerCase() ?? 'mp3';
+      String mimetype = 'audio/mpeg';
+      if (ext == 'ogg') mimetype = 'audio/ogg';
+      else if (ext == 'wav') mimetype = 'audio/wav';
+      else if (ext == 'm4a') mimetype = 'audio/mp4';
+
+      if (!mounted) return;
+      _showMediaConfirmation(
+        type: 'audio',
+        filename: filename,
+        fileBytes: bytes,
+        mimetype: mimetype,
+        base64Data: base64Data,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to pick audio: $e')),
+        );
+      }
+    }
+  }
+
+  void _showMediaConfirmation({
+    required String type,
+    required String filename,
+    required List<int> fileBytes,
+    required String mimetype,
+    required String base64Data,
+    File? previewFile,
+  }) {
     final captionCtrl = TextEditingController();
-    final nameCtrl = TextEditingController(
-      text: type == 'document' ? 'Project_Brief.pdf' : (isCamera ? 'Camera_Photo.jpg' : 'Photo_Attachment.jpg'),
-    );
-    final auth = Provider.of<AuthService>(context, listen: false);
-    final instanceId = auth.selectedInstance?.id;
-    if (instanceId == null) return;
+    bool isSending = false;
 
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(
-              type == 'document' ? Icons.picture_as_pdf_rounded : Icons.photo_camera_rounded,
-              color: WhatsAppTheme.primaryGreen,
-            ),
-            const SizedBox(width: 10),
-            Text(
-              type == 'document' ? 'Send Real Document' : (isCamera ? 'Send Camera Photo' : 'Send Real Photo'),
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameCtrl,
-              decoration: InputDecoration(
-                labelText: type == 'document' ? 'Filename (.pdf / .doc)' : 'File Name (.jpg / .png)',
-                border: const OutlineInputBorder(),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+                top: 16,
+                left: 16,
+                right: 16,
               ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: captionCtrl,
-              maxLines: 2,
-              decoration: const InputDecoration(
-                labelText: 'Add a caption...',
-                border: OutlineInputBorder(),
+              decoration: BoxDecoration(
+                color: isDark ? WhatsAppTheme.surfaceDark : Colors.white,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          ElevatedButton.icon(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              final caption = captionCtrl.text.trim();
-              final filename = nameCtrl.text.trim();
-
-              // Real, valid binary base64 documents and images
-              final String validBase64 = type == 'document'
-                  ? 'JVBERi0xLjQKMSAwIG9iaiA8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4gZW5kb2JqCjIgMCBvYmogPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4gZW5kb2JqCjMgMCBvYmogPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvQ29udGVudHMgNCAwIFIgPj4gZW5kb2JqCjQgMCBvYmogPDwgL0xlbmd0aCA2NCA+PiBzdHJlYW0KQlQgL0YxIDIwIFRmIDEwMCA3MDAgVGQgKFplbG9uIE1lc3NlbmdlciAtIFZlcmlmaWVkIERvY3VtZW50KSBUaiBFVAplbmRzdHJlYW0gZW5kb2JqCnhyZWYKMCA1CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKMDAwMDAwMDIxNCAwMDAwMCBuIAp0cmFpbGVyIDw8IC9TaXplIDUgL1Jvb3QgMSAwIFIgPj4Kc3RhcnR4cmVmCjMyOQolJUVPRg=='
-                  : 'iVBORw0KGgoAAAANSUhEUgAAAMgAAADICAYAAACtWK6eAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAMHSURBVHhe7dJBbcMwAEPRXN+5VwX75dANXAIK0CvwPqA5YwEA4L++AQAAAAAAAAAAAACAf/sGEAAAwB5AAAMAgADAAAYAAAAAAAAAAAAAAPjfVwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjvbwADEAAAfgcAAADgXwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPjvLwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjvbwADEAAAfgcAAADgXwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPjvLwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjvbwADEAAAfgcAAADgXwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPjvLwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjvbwADEAAAfgcAAADgXwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPjvLwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjvbwADEAAAfgcAAADgXwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPjvLwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjvbwADEAAAfgcAAADgXwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPjvLwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjvbwADEAAAfgcAAADgXwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPjvLwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjvbwADEAAAfgcAAADgXwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPjvLwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjvbwADEAAAfgcAAADgXwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPjvLwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjvbwADEAAAfgcAAADgXwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPjvLwADEAAAfgcAAAAAAAAAAAAAAAAAAAAAAAAAAPjv/wD4fT+lYl7cKAAAAABJRU5ErkJggg==';
-
-              try {
-                await auth.api.sendMediaMessage(
-                  instanceId,
-                  to: widget.chat.chatId,
-                  type: type,
-                  base64Data: validBase64,
-                  filename: filename.isNotEmpty ? filename : null,
-                  mimetype: type == 'document' ? 'application/pdf' : 'image/png',
-                  caption: caption.isNotEmpty ? caption : null,
-                  quotedWaId: _replyingTo?.waId,
-                );
-                setState(() => _replyingTo = null);
-                _syncMessagesSilently();
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('${type[0].toUpperCase()}${type.substring(1)} sent!'),
-                      backgroundColor: WhatsAppTheme.primaryGreen,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade400,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
-                  );
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Failed to send media: $e')),
-                  );
-                }
-              }
-            },
-            icon: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
-            style: ElevatedButton.styleFrom(backgroundColor: WhatsAppTheme.primaryGreen),
-            label: const Text('Send', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Icon(
+                        type == 'image'
+                            ? Icons.image_rounded
+                            : (type == 'audio' ? Icons.audiotrack_rounded : Icons.insert_drive_file_rounded),
+                        color: WhatsAppTheme.primaryGreen,
+                        size: 24,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              filename,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                            ),
+                            Text(
+                              '${_formatBytes(fileBytes.length)} • $mimetype',
+                              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  if (type == 'image' && previewFile != null)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        constraints: const BoxConstraints(maxHeight: 220),
+                        width: double.infinity,
+                        color: Colors.black12,
+                        child: Image.file(
+                          previewFile,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                    ),
+                  if (type == 'image' && previewFile == null)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        constraints: const BoxConstraints(maxHeight: 220),
+                        width: double.infinity,
+                        color: Colors.black12,
+                        child: Image.memory(
+                          Uint8List.fromList(fileBytes),
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                    ),
+                  if (type == 'document')
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white10 : Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.picture_as_pdf_rounded, size: 40, color: Colors.redAccent),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              filename,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (type == 'audio')
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white10 : Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.headphones_rounded, size: 40, color: Colors.deepOrangeAccent),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              filename,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  const SizedBox(height: 12),
+                  if (_replyingTo != null)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: WhatsAppTheme.primaryGreen.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(8),
+                        border: const Border(left: BorderSide(color: WhatsAppTheme.primaryGreen, width: 3)),
+                      ),
+                      child: Text(
+                        'Replying to: ${_replyingTo!.text}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+                      ),
+                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: captionCtrl,
+                          decoration: InputDecoration(
+                            hintText: type == 'document' ? 'Add document note...' : 'Add a caption...',
+                            filled: true,
+                            fillColor: isDark ? Colors.black26 : Colors.grey.shade100,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                              borderSide: BorderSide.none,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      FloatingActionButton.small(
+                        heroTag: 'send_media_fab',
+                        backgroundColor: WhatsAppTheme.primaryGreen,
+                        onPressed: isSending
+                            ? null
+                            : () async {
+                                setModalState(() => isSending = true);
+                                final auth = Provider.of<AuthService>(this.context, listen: false);
+                                final instanceId = auth.selectedInstance?.id;
+                                if (instanceId == null) {
+                                  Navigator.pop(ctx);
+                                  return;
+                                }
+                                try {
+                                  await auth.api.sendMediaMessage(
+                                    instanceId,
+                                    to: widget.chat.chatId,
+                                    type: type,
+                                    base64Data: base64Data,
+                                    filename: filename,
+                                    mimetype: mimetype,
+                                    caption: captionCtrl.text.trim().isNotEmpty ? captionCtrl.text.trim() : null,
+                                    quotedWaId: _replyingTo?.waId,
+                                  );
+                                  if (mounted) {
+                                    setState(() => _replyingTo = null);
+                                    _syncMessagesSilently();
+                                    Navigator.pop(ctx);
+                                    ScaffoldMessenger.of(this.context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('${type[0].toUpperCase()}${type.substring(1)} sent!'),
+                                        backgroundColor: WhatsAppTheme.primaryGreen,
+                                      ),
+                                    );
+                                  }
+                                } catch (e) {
+                                  setModalState(() => isSending = false);
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(this.context).showSnackBar(
+                                      SnackBar(content: Text('Failed to send media: $e')),
+                                    );
+                                  }
+                                }
+                              },
+                        child: isSending
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                              )
+                            : const Icon(Icons.send_rounded, color: Colors.white, size: 20),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
-  void _sendLocation() async {
+  void _showLocationDialog() {
     final auth = Provider.of<AuthService>(context, listen: false);
     final instanceId = auth.selectedInstance?.id;
     if (instanceId == null) return;
 
-    try {
-      await auth.api.sendMessage(
-        instanceId,
-        to: widget.chat.chatId,
-        text: '📍 Current Location: https://maps.google.com/?q=24.8607,67.0011',
-      );
-      _syncMessagesSilently();
-    } catch (_) {}
+    final nameCtrl = TextEditingController(text: 'Current Location');
+    final latCtrl = TextEditingController(text: '24.8607');
+    final lngCtrl = TextEditingController(text: '67.0011');
+    bool isSending = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+                top: 16,
+                left: 16,
+                right: 16,
+              ),
+              decoration: BoxDecoration(
+                color: isDark ? WhatsAppTheme.surfaceDark : Colors.white,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade400,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Row(
+                    children: [
+                      Icon(Icons.location_on_rounded, color: Color(0xFF20BF6B), size: 24),
+                      SizedBox(width: 8),
+                      Text(
+                        'Share Location Pin',
+                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: InputDecoration(
+                      labelText: 'Place / Location Name',
+                      hintText: 'e.g. Head Office, Central Station',
+                      filled: true,
+                      fillColor: isDark ? Colors.black26 : Colors.grey.shade100,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: latCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                          decoration: InputDecoration(
+                            labelText: 'Latitude',
+                            filled: true,
+                            fillColor: isDark ? Colors.black26 : Colors.grey.shade100,
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: lngCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                          decoration: InputDecoration(
+                            labelText: 'Longitude',
+                            filled: true,
+                            fillColor: isDark ? Colors.black26 : Colors.grey.shade100,
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      ActionChip(
+                        avatar: const Icon(Icons.my_location, size: 16),
+                        label: const Text('Current'),
+                        onPressed: () {
+                          setModalState(() {
+                            nameCtrl.text = 'Current Location';
+                            latCtrl.text = '24.8607';
+                            lngCtrl.text = '67.0011';
+                          });
+                        },
+                      ),
+                      ActionChip(
+                        avatar: const Icon(Icons.business_rounded, size: 16),
+                        label: const Text('Office'),
+                        onPressed: () {
+                          setModalState(() {
+                            nameCtrl.text = 'Head Office';
+                            latCtrl.text = '24.8615';
+                            lngCtrl.text = '67.0099';
+                          });
+                        },
+                      ),
+                      ActionChip(
+                        avatar: const Icon(Icons.home_rounded, size: 16),
+                        label: const Text('Home'),
+                        onPressed: () {
+                          setModalState(() {
+                            nameCtrl.text = 'Home';
+                            latCtrl.text = '24.8710';
+                            lngCtrl.text = '67.0200';
+                          });
+                        },
+                      ),
+                      ActionChip(
+                        avatar: const Icon(Icons.flight_rounded, size: 16),
+                        label: const Text('Airport'),
+                        onPressed: () {
+                          setModalState(() {
+                            nameCtrl.text = 'International Airport';
+                            latCtrl.text = '24.9065';
+                            lngCtrl.text = '67.1608';
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: WhatsAppTheme.primaryGreen,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: isSending
+                        ? null
+                        : () async {
+                            final lat = double.tryParse(latCtrl.text.trim());
+                            final lng = double.tryParse(lngCtrl.text.trim());
+                            if (lat == null || lng == null) {
+                              ScaffoldMessenger.of(this.context).showSnackBar(
+                                const SnackBar(content: Text('Please enter valid numeric latitude and longitude')),
+                              );
+                              return;
+                            }
+                            setModalState(() => isSending = true);
+                            try {
+                              await auth.api.sendLocationMessage(
+                                instanceId,
+                                to: widget.chat.chatId,
+                                latitude: lat,
+                                longitude: lng,
+                                name: nameCtrl.text.trim().isNotEmpty ? nameCtrl.text.trim() : null,
+                                quotedWaId: _replyingTo?.waId,
+                              );
+                              if (mounted) {
+                                setState(() => _replyingTo = null);
+                                _syncMessagesSilently();
+                                Navigator.pop(ctx);
+                                ScaffoldMessenger.of(this.context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('📍 Location sent!'),
+                                    backgroundColor: WhatsAppTheme.primaryGreen,
+                                  ),
+                                );
+                              }
+                            } catch (e) {
+                              setModalState(() => isSending = false);
+                              if (mounted) {
+                                ScaffoldMessenger.of(this.context).showSnackBar(
+                                  SnackBar(content: Text('Failed to send location: $e')),
+                                );
+                              }
+                            }
+                          },
+                    icon: isSending
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                          )
+                        : const Icon(Icons.send_rounded, color: Colors.white),
+                    label: Text(
+                      isSending ? 'Sending...' : 'Send Location',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
-  void _sendContact() async {
+  void _showContactDialog() {
     final auth = Provider.of<AuthService>(context, listen: false);
     final instanceId = auth.selectedInstance?.id;
     if (instanceId == null) return;
 
-    try {
-      await auth.api.sendMessage(
-        instanceId,
-        to: widget.chat.chatId,
-        text: '👤 Contact Shared: Support Team (+1234567890)',
-      );
-      _syncMessagesSilently();
-    } catch (_) {}
+    final nameCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    bool isSending = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+                top: 16,
+                left: 16,
+                right: 16,
+              ),
+              decoration: BoxDecoration(
+                color: isDark ? WhatsAppTheme.surfaceDark : Colors.white,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade400,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Row(
+                    children: [
+                      Icon(Icons.person_rounded, color: Color(0xFF0984E3), size: 24),
+                      SizedBox(width: 8),
+                      Text(
+                        'Share Contact Card',
+                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: InputDecoration(
+                      labelText: 'Contact Full Name *',
+                      hintText: 'e.g. John Doe',
+                      filled: true,
+                      fillColor: isDark ? Colors.black26 : Colors.grey.shade100,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: phoneCtrl,
+                    keyboardType: TextInputType.phone,
+                    decoration: InputDecoration(
+                      labelText: 'Phone Number *',
+                      hintText: 'e.g. +1 555 123 4567 or 15551234567',
+                      filled: true,
+                      fillColor: isDark ? Colors.black26 : Colors.grey.shade100,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      ActionChip(
+                        avatar: const Icon(Icons.support_agent_rounded, size: 16),
+                        label: const Text('Support (+1234567890)'),
+                        onPressed: () {
+                          setModalState(() {
+                            nameCtrl.text = 'Zelon Support';
+                            phoneCtrl.text = '+1234567890';
+                          });
+                        },
+                      ),
+                      ActionChip(
+                        avatar: const Icon(Icons.storefront_rounded, size: 16),
+                        label: const Text('Sales (+1987654321)'),
+                        onPressed: () {
+                          setModalState(() {
+                            nameCtrl.text = 'Sales Team';
+                            phoneCtrl.text = '+1987654321';
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: WhatsAppTheme.primaryGreen,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: isSending
+                        ? null
+                        : () async {
+                            final name = nameCtrl.text.trim();
+                            final phone = phoneCtrl.text.trim();
+                            if (name.isEmpty || phone.isEmpty) {
+                              ScaffoldMessenger.of(this.context).showSnackBar(
+                                const SnackBar(content: Text('Name and phone number are required')),
+                              );
+                              return;
+                            }
+                            setModalState(() => isSending = true);
+                            try {
+                              await auth.api.sendContactMessage(
+                                instanceId,
+                                to: widget.chat.chatId,
+                                name: name,
+                                phone: phone,
+                                quotedWaId: _replyingTo?.waId,
+                              );
+                              if (mounted) {
+                                setState(() => _replyingTo = null);
+                                _syncMessagesSilently();
+                                Navigator.pop(ctx);
+                                ScaffoldMessenger.of(this.context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('👤 Contact shared!'),
+                                    backgroundColor: WhatsAppTheme.primaryGreen,
+                                  ),
+                                );
+                              }
+                            } catch (e) {
+                              setModalState(() => isSending = false);
+                              if (mounted) {
+                                ScaffoldMessenger.of(this.context).showSnackBar(
+                                  SnackBar(content: Text('Failed to share contact: $e')),
+                                );
+                              }
+                            }
+                          },
+                    icon: isSending
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                          )
+                        : const Icon(Icons.send_rounded, color: Colors.white),
+                    label: Text(
+                      isSending ? 'Sending...' : 'Send Contact',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showPollDialog() {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final instanceId = auth.selectedInstance?.id;
+    if (instanceId == null) return;
+
+    final questionCtrl = TextEditingController();
+    final optionCtrls = [
+      TextEditingController(),
+      TextEditingController(),
+    ];
+    bool allowMultiple = false;
+    bool isSending = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.8,
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+                top: 16,
+                left: 16,
+                right: 16,
+              ),
+              decoration: BoxDecoration(
+                color: isDark ? WhatsAppTheme.surfaceDark : Colors.white,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade400,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Row(
+                    children: [
+                      Icon(Icons.poll_rounded, color: Color(0xFF11CDEF), size: 24),
+                      SizedBox(width: 8),
+                      Text(
+                        'Create Poll',
+                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: questionCtrl,
+                    decoration: InputDecoration(
+                      labelText: 'Question *',
+                      hintText: 'Ask a question...',
+                      filled: true,
+                      fillColor: isDark ? Colors.black26 : Colors.grey.shade100,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('Options (min 2, max 12):', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                  const SizedBox(height: 6),
+                  Expanded(
+                    child: ListView.separated(
+                      itemCount: optionCtrls.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (context, i) {
+                        return Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: optionCtrls[i],
+                                decoration: InputDecoration(
+                                  labelText: 'Option ${i + 1}',
+                                  hintText: 'Enter option text',
+                                  filled: true,
+                                  fillColor: isDark ? Colors.black26 : Colors.grey.shade100,
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                ),
+                              ),
+                            ),
+                            if (optionCtrls.length > 2)
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
+                                onPressed: () {
+                                  setModalState(() {
+                                    optionCtrls.removeAt(i);
+                                  });
+                                },
+                              ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                  if (optionCtrls.length < 12)
+                    TextButton.icon(
+                      onPressed: () {
+                        setModalState(() {
+                          optionCtrls.add(TextEditingController());
+                        });
+                      },
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Add Option'),
+                      style: TextButton.styleFrom(foregroundColor: WhatsAppTheme.primaryGreen),
+                    ),
+                  SwitchListTile(
+                    title: const Text('Allow multiple answers', style: TextStyle(fontSize: 14)),
+                    value: allowMultiple,
+                    activeColor: WhatsAppTheme.primaryGreen,
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: (val) {
+                      setModalState(() => allowMultiple = val);
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: WhatsAppTheme.primaryGreen,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: isSending
+                        ? null
+                        : () async {
+                            final question = questionCtrl.text.trim();
+                            final validOptions = optionCtrls
+                                .map((c) => c.text.trim())
+                                .where((t) => t.isNotEmpty)
+                                .toList();
+
+                            if (question.isEmpty) {
+                              ScaffoldMessenger.of(this.context).showSnackBar(
+                                const SnackBar(content: Text('Please enter a poll question')),
+                              );
+                              return;
+                            }
+                            if (validOptions.length < 2) {
+                              ScaffoldMessenger.of(this.context).showSnackBar(
+                                const SnackBar(content: Text('Please provide at least 2 non-empty options')),
+                              );
+                              return;
+                            }
+
+                            setModalState(() => isSending = true);
+                            try {
+                              await auth.api.sendPollMessage(
+                                instanceId,
+                                to: widget.chat.chatId,
+                                question: question,
+                                options: validOptions,
+                                selectableCount: allowMultiple ? validOptions.length : 1,
+                                quotedWaId: _replyingTo?.waId,
+                              );
+                              if (mounted) {
+                                setState(() => _replyingTo = null);
+                                _syncMessagesSilently();
+                                Navigator.pop(ctx);
+                                ScaffoldMessenger.of(this.context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('📊 Poll created!'),
+                                    backgroundColor: WhatsAppTheme.primaryGreen,
+                                  ),
+                                );
+                              }
+                            } catch (e) {
+                              setModalState(() => isSending = false);
+                              if (mounted) {
+                                ScaffoldMessenger.of(this.context).showSnackBar(
+                                  SnackBar(content: Text('Failed to create poll: $e')),
+                                );
+                              }
+                            }
+                          },
+                    icon: isSending
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                          )
+                        : const Icon(Icons.send_rounded, color: Colors.white),
+                    label: Text(
+                      isSending ? 'Sending...' : 'Create & Send Poll',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   String _buildSubtitle() {

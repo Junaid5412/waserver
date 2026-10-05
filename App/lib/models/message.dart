@@ -38,6 +38,14 @@ class MessageModel {
   final String quotedText;
   final String? mimetype;
   final String? filename;
+  final bool starred;
+
+  String get senderName => name;
+  String get senderJid => participant;
+  bool get hasMedia =>
+      type != 'text' &&
+      type != 'deleted' &&
+      (mimetype != null || ['image', 'video', 'document', 'audio'].contains(type));
 
   MessageModel({
     required this.id,
@@ -60,6 +68,7 @@ class MessageModel {
     this.quotedText = '',
     this.mimetype,
     this.filename,
+    this.starred = false,
   });
 
   factory MessageModel.fromJson(Map<String, dynamic> json) {
@@ -100,6 +109,7 @@ class MessageModel {
       quotedText: json['quotedText']?.toString() ?? '',
       mimetype: json['mimetype']?.toString(),
       filename: json['filename']?.toString(),
+      starred: json['starred'] == true,
     );
   }
 
@@ -120,6 +130,7 @@ class MessageModel {
       'edited': edited,
       'editedAt': editedAt?.toIso8601String(),
       'originalText': originalText,
+      'starred': starred,
       'edits': edits.map((e) => e.toJson()).toList(),
       'reactions': reactions,
       'quotedText': quotedText,
@@ -128,3 +139,4 @@ class MessageModel {
     };
   }
 }
+
