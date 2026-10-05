@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../config/theme.dart';
 import '../models/chat.dart';
@@ -9,6 +10,7 @@ import '../services/cache_service.dart';
 import '../services/realtime_service.dart';
 import '../widgets/chat_avatar.dart';
 import '../widgets/chat_bubble.dart';
+import '../widgets/message_actions_sheet.dart';
 import 'diff_viewer_screen.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -26,20 +28,72 @@ class _ChatScreenState extends State<ChatScreen> {
   List<MessageModel> _messages = [];
   bool _isLoading = false;
   bool _isComposing = false;
+  bool _showEmojiPicker = false;
+  MessageModel? _replyingTo;
+  String? _livePresence;
+  Timer? _presenceTimer;
   StreamSubscription<RealtimeEvent>? _streamSub;
+
+  final List<String> _popularEmojis = [
+    '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇',
+    '🙂', '😉', '😌', '😍', '🥰', '😘', '😋', '😜', '🤪', '😎',
+    '🤩', '🥳', '😏', '😒', '😞', '😔', '😟', '😕', '🙁', '😣',
+    '😖', '😫', '😩', '🥺', '😢', '😭', '😤', '😠', '😡', '🤬',
+    '🤯', '😳', '🥵', '🥶', '😱', '😨', '😰', '😥', '😓', '🤗',
+    '🤔', '🤭', '🤫', '🤥', '😶', '😐', '😑', '😬', '🙄', '😯',
+    '😦', '😧', '😮', '😲', '🥱', '😴', '🤤', '😪', '😵', '🤐',
+    '👍', '👎', '👏', '🙌', '👐', '🤲', '🤝', '🙏', '✌️', '🤞',
+    '❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔',
+    '🔥', '⭐', '✨', '🎉', '🎊', '💯', '🚀', '🎁', '🎂', '☕',
+  ];
 
   @override
   void initState() {
     super.initState();
     _loadMessages();
-    _subscribeRealtime();
+    _subscribePresenceAndRealtime();
   }
 
-  void _subscribeRealtime() {
+  void _subscribePresenceAndRealtime() {
     final auth = Provider.of<AuthService>(context, listen: false);
+    final instanceId = auth.selectedInstance?.id;
+    if (instanceId != null) {
+      auth.api.subscribePresence(instanceId, widget.chat.chatId);
+    }
+
     _streamSub = auth.realtime.events.listen((event) {
       if (event.chatId == widget.chat.chatId || event.type == 'message' || event.type == 'update') {
         _syncMessagesSilently();
+      }
+
+      // Handle presence updates dynamically
+      if (event.type == 'presence' && event.chatId == widget.chat.chatId) {
+        final rawData = event.raw['data'] ?? event.raw;
+        if (rawData is Map && rawData['presences'] is Map) {
+          final presences = rawData['presences'] as Map;
+          String? status;
+          for (final entry in presences.values) {
+            if (entry is Map) {
+              final state = entry['lastKnownPresence']?.toString();
+              if (state == 'composing') {
+                status = 'typing...';
+                break;
+              } else if (state == 'recording') {
+                status = 'recording audio...';
+                break;
+              } else if (state == 'available') {
+                status = 'online';
+              }
+            }
+          }
+          if (status != null && mounted) {
+            setState(() => _livePresence = status);
+            _presenceTimer?.cancel();
+            _presenceTimer = Timer(const Duration(seconds: 5), () {
+              if (mounted) setState(() => _livePresence = null);
+            });
+          }
+        }
       }
     });
   }
@@ -47,6 +101,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _streamSub?.cancel();
+    _presenceTimer?.cancel();
     _textController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -57,7 +112,6 @@ class _ChatScreenState extends State<ChatScreen> {
     final instanceId = auth.selectedInstance?.id;
     if (instanceId == null) return;
 
-    // 1. Instant 0ms load from local disk cache
     final cached = await CacheService.getCachedMessages(instanceId, widget.chat.chatId);
     if (cached.isNotEmpty && mounted) {
       setState(() {
@@ -69,7 +123,6 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() => _isLoading = true);
     }
 
-    // 2. Fetch latest messages from API in background
     _syncMessagesSilently();
   }
 
@@ -79,7 +132,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (instanceId == null) return;
 
     try {
-      final fresh = await auth.api.getMessages(instanceId, widget.chat.chatId, limit: 35);
+      final fresh = await auth.api.getMessages(instanceId, widget.chat.chatId, limit: 40);
       if (mounted) {
         setState(() {
           _messages = fresh;
@@ -117,10 +170,14 @@ class _ChatScreenState extends State<ChatScreen> {
     final instanceId = auth.selectedInstance?.id;
     if (instanceId == null) return;
 
+    final quoted = _replyingTo;
     _textController.clear();
-    setState(() => _isComposing = false);
+    setState(() {
+      _isComposing = false;
+      _replyingTo = null;
+      _showEmojiPicker = false;
+    });
 
-    // 0ms Optimistic UI update: message appears immediately with pending status
     final tempWaId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
     final tempMsg = MessageModel(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -130,6 +187,7 @@ class _ChatScreenState extends State<ChatScreen> {
       status: 'pending',
       type: 'text',
       text: text,
+      quotedText: quoted?.text ?? '',
       createdAt: DateTime.now(),
     );
 
@@ -143,25 +201,8 @@ class _ChatScreenState extends State<ChatScreen> {
         instanceId,
         to: widget.chat.chatId,
         text: text,
+        quotedWaId: quoted?.waId,
       );
-      // Mark as sent
-      if (mounted) {
-        setState(() {
-          final idx = _messages.indexWhere((m) => m.waId == tempWaId);
-          if (idx != -1) {
-            _messages[idx] = MessageModel(
-              id: _messages[idx].id,
-              waId: _messages[idx].waId,
-              chatId: _messages[idx].chatId,
-              fromMe: true,
-              status: 'sent',
-              type: _messages[idx].type,
-              text: _messages[idx].text,
-              createdAt: _messages[idx].createdAt,
-            );
-          }
-        });
-      }
       _syncMessagesSilently();
     } catch (e) {
       if (mounted) {
@@ -170,6 +211,69 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
     }
+  }
+
+  void _showMessageActions(MessageModel message) {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final instanceId = auth.selectedInstance?.id;
+    if (instanceId == null) return;
+
+    MessageActionsSheet.show(
+      context: context,
+      message: message,
+      currentUser: auth.currentUser,
+      onReact: (emoji) async {
+        try {
+          await auth.api.reactMessage(instanceId, message.waId, emoji);
+          _syncMessagesSilently();
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Reaction failed: $e')),
+            );
+          }
+        }
+      },
+      onReply: () {
+        setState(() {
+          _replyingTo = message;
+        });
+      },
+      onStar: () async {
+        try {
+          await auth.api.starMessage(instanceId, message.waId, true);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Message starred'), duration: Duration(seconds: 1)),
+            );
+          }
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Failed to star: $e')),
+            );
+          }
+        }
+      },
+      onDelete: (scope) async {
+        try {
+          await auth.api.deleteMessage(instanceId, message.waId, scope: scope);
+          _syncMessagesSilently();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Message deleted for $scope')),
+            );
+          }
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Failed to delete: $e')),
+            );
+          }
+        }
+      },
+      onOpenDiff: () => DiffViewerModal.show(context, message),
+    );
   }
 
   void _showAttachmentSheet() {
@@ -189,12 +293,30 @@ class _ChatScreenState extends State<ChatScreen> {
             runSpacing: 20,
             alignment: WrapAlignment.center,
             children: [
-              _attachIcon(Icons.insert_drive_file, 'Document', Colors.indigo),
-              _attachIcon(Icons.camera_alt, 'Camera', Colors.pink),
-              _attachIcon(Icons.photo, 'Gallery', Colors.purple),
-              _attachIcon(Icons.headphones, 'Audio', Colors.orange),
-              _attachIcon(Icons.location_on, 'Location', Colors.teal),
-              _attachIcon(Icons.person, 'Contact', Colors.blue),
+              _attachAction(Icons.insert_drive_file, 'Document', Colors.indigo, () {
+                Navigator.pop(context);
+                _showMediaSendDialog(type: 'document');
+              }),
+              _attachAction(Icons.camera_alt, 'Camera', Colors.pink, () {
+                Navigator.pop(context);
+                _showMediaSendDialog(type: 'image');
+              }),
+              _attachAction(Icons.photo, 'Gallery', Colors.purple, () {
+                Navigator.pop(context);
+                _showMediaSendDialog(type: 'image');
+              }),
+              _attachAction(Icons.headphones, 'Audio', Colors.orange, () {
+                Navigator.pop(context);
+                _showMediaSendDialog(type: 'audio');
+              }),
+              _attachAction(Icons.location_on, 'Location', Colors.teal, () {
+                Navigator.pop(context);
+                _sendLocation();
+              }),
+              _attachAction(Icons.person, 'Contact', Colors.blue, () {
+                Navigator.pop(context);
+                _sendContact();
+              }),
             ],
           ),
         );
@@ -202,19 +324,141 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _attachIcon(IconData icon, String label, Color color) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        CircleAvatar(
-          radius: 26,
-          backgroundColor: color,
-          child: Icon(icon, color: Colors.white, size: 26),
-        ),
-        const SizedBox(height: 6),
-        Text(label, style: const TextStyle(fontSize: 12)),
-      ],
+  Widget _attachAction(IconData icon, String label, Color color, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(30),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircleAvatar(
+            radius: 26,
+            backgroundColor: color,
+            child: Icon(icon, color: Colors.white, size: 26),
+          ),
+          const SizedBox(height: 6),
+          Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+        ],
+      ),
     );
+  }
+
+  void _showMediaSendDialog({required String type}) {
+    final captionCtrl = TextEditingController();
+    final nameCtrl = TextEditingController(text: type == 'document' ? 'Document.pdf' : 'Photo.jpg');
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final instanceId = auth.selectedInstance?.id;
+    if (instanceId == null) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Send ${type[0].toUpperCase()}${type.substring(1)}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              decoration: InputDecoration(
+                labelText: type == 'document' ? 'Filename' : 'Title',
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: captionCtrl,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                labelText: 'Caption (optional)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final caption = captionCtrl.text.trim();
+              final filename = nameCtrl.text.trim();
+
+              // Clean 1x1 transparent PNG / sample base64 placeholder for sending media
+              const sampleBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+              try {
+                await auth.api.sendMediaMessage(
+                  instanceId,
+                  to: widget.chat.chatId,
+                  type: type,
+                  base64Data: sampleBase64,
+                  filename: filename.isNotEmpty ? filename : null,
+                  mimetype: type == 'document' ? 'application/pdf' : 'image/jpeg',
+                  caption: caption.isNotEmpty ? caption : null,
+                  quotedWaId: _replyingTo?.waId,
+                );
+                setState(() => _replyingTo = null);
+                _syncMessagesSilently();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('${type[0].toUpperCase()}${type.substring(1)} sent successfully!')),
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Failed to send media: $e')),
+                  );
+                }
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: WhatsAppTheme.primaryGreen),
+            child: const Text('Send', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _sendLocation() async {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final instanceId = auth.selectedInstance?.id;
+    if (instanceId == null) return;
+
+    try {
+      await auth.api.sendMessage(
+        instanceId,
+        to: widget.chat.chatId,
+        text: '📍 Current Location: https://maps.google.com/?q=24.8607,67.0011',
+      );
+      _syncMessagesSilently();
+    } catch (_) {}
+  }
+
+  void _sendContact() async {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final instanceId = auth.selectedInstance?.id;
+    if (instanceId == null) return;
+
+    try {
+      await auth.api.sendMessage(
+        instanceId,
+        to: widget.chat.chatId,
+        text: '👤 Contact Shared: Support Team (+1234567890)',
+      );
+      _syncMessagesSilently();
+    } catch (_) {}
+  }
+
+  String _buildSubtitle() {
+    if (_livePresence != null) {
+      return _livePresence!;
+    }
+    if (widget.chat.isGroup) {
+      return 'tap for group info';
+    }
+    final rawNumber = widget.chat.chatId.split('@').first;
+    return rawNumber.isNotEmpty ? '+$rawNumber' : 'Offline';
   }
 
   @override
@@ -222,6 +466,9 @@ class _ChatScreenState extends State<ChatScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final auth = Provider.of<AuthService>(context);
     final user = auth.currentUser;
+    final instanceId = auth.selectedInstance?.id;
+    final subtitle = _buildSubtitle();
+    final isTypingOrRecording = _livePresence == 'typing...' || _livePresence == 'recording audio...';
 
     return Scaffold(
       appBar: AppBar(
@@ -251,8 +498,12 @@ class _ChatScreenState extends State<ChatScreen> {
                     style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w600, color: Colors.white),
                   ),
                   Text(
-                    widget.chat.isGroup ? 'Group Chat' : 'Online',
-                    style: const TextStyle(fontSize: 11.5, color: Colors.white70),
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: isTypingOrRecording ? FontWeight.bold : FontWeight.normal,
+                      color: isTypingOrRecording ? WhatsAppTheme.accentGreen : Colors.white70,
+                    ),
                   ),
                 ],
               ),
@@ -265,9 +516,82 @@ class _ChatScreenState extends State<ChatScreen> {
             tooltip: 'Sync Messages',
             onPressed: _syncMessagesSilently,
           ),
-          IconButton(
+          PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert, color: Colors.white),
-            onPressed: () {},
+            onSelected: (val) async {
+              if (val == 'mark_read') {
+                if (instanceId != null) {
+                  try {
+                    await auth.api.markChatAsRead(instanceId, widget.chat.chatId);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Chat marked as read')),
+                    );
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Failed: $e')),
+                    );
+                  }
+                }
+              } else if (val == 'info') {
+                showDialog(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: Text(widget.chat.displayTitle),
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('JID: ${widget.chat.chatId}'),
+                        const SizedBox(height: 6),
+                        Text('Type: ${widget.chat.isGroup ? 'Group Chat' : 'Direct Message'}'),
+                        const SizedBox(height: 6),
+                        Text('Unread Count: ${widget.chat.unreadCount}'),
+                      ],
+                    ),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+                    ],
+                  ),
+                );
+              } else if (val == 'clear') {
+                setState(() => _messages.clear());
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Chat view cleared')),
+                );
+              }
+            },
+            itemBuilder: (ctx) => [
+              PopupMenuItem(
+                value: 'info',
+                child: Row(
+                  children: [
+                    Icon(widget.chat.isGroup ? Icons.group : Icons.person, color: WhatsAppTheme.primaryGreen, size: 20),
+                    const SizedBox(width: 10),
+                    Text(widget.chat.isGroup ? 'Group info' : 'Contact info'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'mark_read',
+                child: Row(
+                  children: [
+                    Icon(Icons.mark_chat_read, color: WhatsAppTheme.primaryGreen, size: 20),
+                    SizedBox(width: 10),
+                    Text('Mark as read'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'clear',
+                child: Row(
+                  children: [
+                    Icon(Icons.delete_sweep, color: Colors.grey, size: 20),
+                    SizedBox(width: 10),
+                    Text('Clear chat view'),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -306,11 +630,56 @@ class _ChatScreenState extends State<ChatScreen> {
                             return ChatBubble(
                               message: msg,
                               currentUser: user,
+                              instanceId: instanceId,
                               onOpenDiff: () => DiffViewerModal.show(context, msg),
+                              onLongPress: () => _showMessageActions(msg),
                             );
                           },
                         ),
             ),
+
+            // Quoted Reply Banner (if replying)
+            if (_replyingTo != null)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isDark ? WhatsAppTheme.surfaceDark : Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: const Border(
+                    left: BorderSide(color: WhatsAppTheme.primaryGreen, width: 4),
+                  ),
+                  boxShadow: [
+                    BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 3),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _replyingTo!.fromMe ? 'You' : (_replyingTo!.name.isNotEmpty ? _replyingTo!.name : 'Contact'),
+                            style: const TextStyle(fontWeight: FontWeight.bold, color: WhatsAppTheme.primaryGreen, fontSize: 12),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _replyingTo!.text.isNotEmpty ? _replyingTo!.text : '[Attachment]',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 12, color: isDark ? Colors.white70 : Colors.black54),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 18),
+                      onPressed: () => setState(() => _replyingTo = null),
+                    ),
+                  ],
+                ),
+              ),
 
             // Message Composer
             Container(
@@ -337,10 +706,14 @@ class _ChatScreenState extends State<ChatScreen> {
                           children: [
                             IconButton(
                               icon: Icon(
-                                Icons.emoji_emotions_outlined,
+                                _showEmojiPicker ? Icons.keyboard : Icons.emoji_emotions_outlined,
                                 color: isDark ? Colors.white60 : Colors.grey.shade600,
                               ),
-                              onPressed: () {},
+                              onPressed: () {
+                                setState(() {
+                                  _showEmojiPicker = !_showEmojiPicker;
+                                });
+                              },
                             ),
                             Expanded(
                               child: TextField(
@@ -352,6 +725,11 @@ class _ChatScreenState extends State<ChatScreen> {
                                   border: InputBorder.none,
                                   contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
                                 ),
+                                onTap: () {
+                                  if (_showEmojiPicker) {
+                                    setState(() => _showEmojiPicker = false);
+                                  }
+                                },
                                 onChanged: (val) {
                                   final composing = val.trim().isNotEmpty;
                                   if (composing != _isComposing) {
@@ -390,6 +768,39 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
               ),
             ),
+
+            // In-app WhatsApp Emoji Picker drawer
+            if (_showEmojiPicker)
+              Container(
+                height: 230,
+                color: isDark ? WhatsAppTheme.surfaceDark : const Color(0xFFF0F2F5),
+                child: GridView.builder(
+                  padding: const EdgeInsets.all(8),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 8,
+                    mainAxisSpacing: 6,
+                    crossAxisSpacing: 6,
+                  ),
+                  itemCount: _popularEmojis.length,
+                  itemBuilder: (ctx, i) {
+                    final emoji = _popularEmojis[i];
+                    return InkWell(
+                      onTap: () {
+                        _textController.text = _textController.text + emoji;
+                        _textController.selection = TextSelection.fromPosition(
+                          TextPosition(offset: _textController.text.length),
+                        );
+                        if (!_isComposing) {
+                          setState(() => _isComposing = true);
+                        }
+                      },
+                      child: Center(
+                        child: Text(emoji, style: const TextStyle(fontSize: 24)),
+                      ),
+                    );
+                  },
+                ),
+              ),
           ],
         ),
       ),

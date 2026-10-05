@@ -21,11 +21,30 @@ class RealtimeEvent {
   });
 
   factory RealtimeEvent.fromJson(Map<String, dynamic> json) {
+    final eventType = json['type']?.toString() ?? 'unknown';
+    String? chat = json['chatId']?.toString();
+    String? msgWaId = json['waId']?.toString();
+    bool? isFromMe = json['fromMe'] is bool ? json['fromMe'] : null;
+
+    if (chat == null && json['id'] != null && json['id'].toString().contains('@')) {
+      chat = json['id'].toString();
+    }
+    if (json['data'] is Map) {
+      final d = json['data'] as Map;
+      if (chat == null && d['id'] != null) chat = d['id'].toString();
+      if (chat == null && d['chatId'] != null) chat = d['chatId'].toString();
+      if (d['key'] is Map) {
+        chat ??= d['key']['remoteJid']?.toString();
+        msgWaId ??= d['key']['id']?.toString();
+        isFromMe ??= (d['key']['fromMe'] == true);
+      }
+    }
+
     return RealtimeEvent(
-      type: json['type']?.toString() ?? 'unknown',
-      chatId: json['chatId']?.toString(),
-      waId: json['waId']?.toString(),
-      fromMe: json['fromMe'] is bool ? json['fromMe'] : null,
+      type: eventType,
+      chatId: chat,
+      waId: msgWaId,
+      fromMe: isFromMe,
       raw: json,
     );
   }

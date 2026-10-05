@@ -29,35 +29,120 @@ class _HomeScreenState extends State<HomeScreen> {
     SettingsScreen(),
   ];
 
+  void _showInstanceQuickPicker(BuildContext context) {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final instances = auth.instances;
+    final current = auth.selectedInstance;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: BoxDecoration(
+          color: isDark ? WhatsAppTheme.surfaceDark : Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade400,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text('Switch Account', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const Divider(),
+              ...instances.map((i) => ListTile(
+                leading: Icon(
+                  i.isConnected ? Icons.check_circle : Icons.circle_outlined,
+                  color: i.isConnected ? WhatsAppTheme.accentGreen : Colors.grey,
+                ),
+                title: Text(
+                  i.name,
+                  style: TextStyle(fontWeight: i.id == current?.id ? FontWeight.bold : FontWeight.normal),
+                ),
+                subtitle: Text(i.isConnected ? 'Connected' : 'Offline'),
+                selected: i.id == current?.id,
+                onTap: () {
+                  auth.selectInstance(i);
+                  Navigator.pop(ctx);
+                },
+              )),
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.add_circle_outline, color: WhatsAppTheme.primaryGreen),
+                title: const Text('Link Another Device', style: TextStyle(color: WhatsAppTheme.primaryGreen, fontWeight: FontWeight.bold)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ConnectScreen()));
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final auth = Provider.of<AuthService>(context);
     final user = auth.currentUser;
+    final inst = auth.selectedInstance;
+    final headerTitle = (inst != null && inst.name.isNotEmpty) ? inst.name : 'Zelon';
 
     return Scaffold(
       appBar: AppBar(
         backgroundColor: isDark ? WhatsAppTheme.surfaceDark : WhatsAppTheme.primaryGreen,
         elevation: 1,
         titleSpacing: 16,
-        title: const Text(
-          'Zelon Messenger',
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-            letterSpacing: -0.3,
-            color: Colors.white,
+        title: InkWell(
+          onTap: () => _showInstanceQuickPicker(context),
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  headerTitle,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: -0.3,
+                    color: Colors.white,
+                  ),
+                ),
+                if (inst != null) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: inst.isConnected ? const Color(0xFF25D366) : const Color(0xFFFF5252),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  const Icon(Icons.arrow_drop_down, color: Colors.white70, size: 20),
+                ],
+              ],
+            ),
           ),
         ),
         actions: [
-          // Instant Header Instance Switcher Chip
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: 4),
-              child: InstanceSwitcherHeader(),
-            ),
-          ),
-
           // Link Device Quick Button
           IconButton(
             icon: const Icon(Icons.qr_code_scanner_rounded, color: Colors.white, size: 22),

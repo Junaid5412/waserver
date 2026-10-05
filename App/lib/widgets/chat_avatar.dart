@@ -43,32 +43,45 @@ class ChatAvatar extends StatelessWidget {
     final bg = _getDeterministicColor(chatId.isNotEmpty ? chatId : title);
 
     if (isGroup) {
-      return CircleAvatar(
-        radius: radius,
-        backgroundColor: isDark ? WhatsAppTheme.surfaceDark : Colors.grey.shade300,
-        child: Icon(
-          Icons.groups_rounded,
-          size: radius * 1.1,
-          color: isDark ? Colors.white70 : Colors.black54,
+      return Container(
+        width: radius * 2,
+        height: radius * 2,
+        decoration: BoxDecoration(
+          color: isDark ? WhatsAppTheme.surfaceDark : Colors.grey.shade300,
+          shape: BoxShape.circle,
+        ),
+        child: Center(
+          child: Icon(
+            Icons.groups_rounded,
+            size: radius * 1.15,
+            color: isDark ? Colors.white70 : Colors.black54,
+          ),
         ),
       );
     }
 
-    final initial = title.trim().isNotEmpty
-        ? (title.trim().startsWith('+') && title.trim().length > 1
-            ? title.trim().substring(1, 2).toUpperCase()
-            : title.trim()[0].toUpperCase())
+    final trimmed = title.trim();
+    final initial = trimmed.isNotEmpty
+        ? (trimmed.startsWith('+') && trimmed.length > 1
+            ? trimmed.substring(1, 2).toUpperCase()
+            : trimmed[0].toUpperCase())
         : '?';
 
-    return CircleAvatar(
-      radius: radius,
-      backgroundColor: bg.withOpacity(0.18),
-      child: Text(
-        initial,
-        style: TextStyle(
-          fontSize: radius * 0.85,
-          fontWeight: FontWeight.bold,
-          color: bg,
+    return Container(
+      width: radius * 2,
+      height: radius * 2,
+      decoration: BoxDecoration(
+        color: bg.withOpacity(0.18),
+        shape: BoxShape.circle,
+      ),
+      child: Center(
+        child: Text(
+          initial,
+          style: TextStyle(
+            fontSize: radius * 0.9,
+            fontWeight: FontWeight.bold,
+            color: bg,
+          ),
         ),
       ),
     );
@@ -90,17 +103,24 @@ class ChatAvatar extends StatelessWidget {
       child: SizedBox(
         width: radius * 2,
         height: radius * 2,
-        child: Image.network(
-          imageUrl,
-          headers: headers,
-          fit: BoxFit.cover,
-          loadingBuilder: (ctx, child, progress) {
-            if (progress == null) return child;
-            return _buildFallback(context);
-          },
-          errorBuilder: (ctx, error, stackTrace) {
-            return _buildFallback(context);
-          },
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // Layer 1: Frame 0 instant fallback: ALWAYS visible underneath, zero blank space
+            _buildFallback(context),
+            // Layer 2: Network image overlaid on top with gapless playback
+            Image.network(
+              imageUrl,
+              headers: headers,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+              loadingBuilder: (ctx, child, progress) {
+                if (progress == null) return child;
+                return const SizedBox.shrink(); // keep fallback visible underneath with 0 empty space
+              },
+              errorBuilder: (ctx, error, stackTrace) => const SizedBox.shrink(),
+            ),
+          ],
         ),
       ),
     );

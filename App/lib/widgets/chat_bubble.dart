@@ -1,29 +1,232 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../models/message.dart';
-import '../models/user.dart';
+import 'package:provider/provider.dart';
+import '../config/api_config.dart';
 import '../config/theme.dart';
 import '../config/permissions.dart';
+import '../models/message.dart';
+import '../models/user.dart';
+import '../services/auth_service.dart';
 import 'status_indicator.dart';
+import 'voice_player.dart';
 
 class ChatBubble extends StatelessWidget {
   final MessageModel message;
   final UserModel? currentUser;
+  final String? instanceId;
   final VoidCallback? onOpenDiff;
+  final VoidCallback? onLongPress;
   final Function(String emoji)? onReact;
 
   const ChatBubble({
     super.key,
     required this.message,
     this.currentUser,
+    this.instanceId,
     this.onOpenDiff,
+    this.onLongPress,
     this.onReact,
   });
+
+  void _openFullImage(BuildContext context, String imageUrl, Map<String, String> headers, String caption) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            backgroundColor: Colors.black,
+            iconTheme: const IconThemeData(color: Colors.white),
+            title: Text(
+              caption.isNotEmpty ? caption : 'Photo',
+              style: const TextStyle(color: Colors.white, fontSize: 16),
+            ),
+          ),
+          body: Center(
+            child: InteractiveViewer(
+              panEnabled: true,
+              minScale: 0.8,
+              maxScale: 4.0,
+              child: Image.network(
+                imageUrl,
+                headers: headers,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => const Center(
+                  child: Icon(Icons.broken_image, color: Colors.white54, size: 64),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMediaBody(BuildContext context, String instId, Map<String, String> headers, Color textColor) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final mediaUrl = '${ApiConfig.baseUrl}/api/instances/$instId/inbox/${message.waId}/media?inline=1';
+    final type = message.type.toLowerCase();
+
+    if (type == 'image' || message.mimetype?.startsWith('image/') == true) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          GestureDetector(
+            onTap: () => _openFullImage(context, mediaUrl, headers, message.text),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 280, maxWidth: 280),
+                child: Image.network(
+                  mediaUrl,
+                  headers: headers,
+                  fit: BoxFit.cover,
+                  loadingBuilder: (ctx, child, progress) {
+                    if (progress == null) return child;
+                    return Container(
+                      height: 180,
+                      width: 220,
+                      color: isDark ? Colors.black26 : Colors.black12,
+                      child: const Center(
+                        child: CircularProgressIndicator(strokeWidth: 2, color: WhatsAppTheme.primaryGreen),
+                      ),
+                    );
+                  },
+                  errorBuilder: (ctx, err, stack) => Container(
+                    height: 130,
+                    width: 200,
+                    color: isDark ? Colors.black26 : Colors.black.withOpacity(0.06),
+                    padding: const EdgeInsets.all(8),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: const [
+                        Icon(Icons.image_not_supported_outlined, color: Colors.grey, size: 34),
+                        SizedBox(height: 6),
+                        Text('Image expired or unavailable', style: TextStyle(fontSize: 11, color: Colors.grey), textAlign: TextAlign.center),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          if (message.text.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(message.text, style: TextStyle(fontSize: 15, color: textColor)),
+          ],
+        ],
+      );
+    } else if (type == 'document' || message.mimetype?.startsWith('application/') == true) {
+      final docName = message.filename?.isNotEmpty == true ? message.filename! : 'Document';
+      final isPdf = docName.toLowerCase().endsWith('.pdf') || message.mimetype == 'application/pdf';
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: isDark ? Colors.black26 : Colors.black.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: isPdf ? Colors.red.shade700 : Colors.indigo.shade600,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Icon(
+                    isPdf ? Icons.picture_as_pdf : Icons.insert_drive_file,
+                    color: Colors.white,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        docName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+                      ),
+                      Text(
+                        message.mimetype ?? 'Document file',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Icon(Icons.download_rounded, color: WhatsAppTheme.primaryGreen, size: 22),
+              ],
+            ),
+          ),
+          if (message.text.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(message.text, style: TextStyle(fontSize: 15, color: textColor)),
+          ],
+        ],
+      );
+    } else if (type == 'audio' || message.mimetype?.startsWith('audio/') == true) {
+      return VoicePlayerWidget(
+        audioUrl: mediaUrl,
+        durationSeconds: 15,
+      );
+    } else if (type == 'video' || message.mimetype?.startsWith('video/') == true) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            height: 160,
+            width: 220,
+            decoration: BoxDecoration(
+              color: Colors.black87,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: const [
+                CircleAvatar(
+                  radius: 24,
+                  backgroundColor: Colors.white30,
+                  child: Icon(Icons.play_arrow, color: Colors.white, size: 30),
+                ),
+                Positioned(
+                  bottom: 8,
+                  left: 8,
+                  child: Icon(Icons.videocam, color: Colors.white70, size: 16),
+                ),
+              ],
+            ),
+          ),
+          if (message.text.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(message.text, style: TextStyle(fontSize: 15, color: textColor)),
+          ],
+        ],
+      );
+    }
+
+    // Default: Plain text
+    return Text(
+      message.text,
+      style: TextStyle(fontSize: 15, color: textColor),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isMe = message.fromMe;
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final activeInstId = instanceId ?? auth.selectedInstance?.id ?? '';
+    final headers = auth.api.authHeaders;
 
     final bubbleBg = isMe
         ? (isDark ? WhatsAppTheme.bubbleOutDark : WhatsAppTheme.bubbleOutLight)
@@ -39,219 +242,216 @@ class ChatBubble extends StatelessWidget {
 
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.78,
-        ),
-        decoration: BoxDecoration(
-          color: bubbleBg,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(12),
-            topRight: const Radius.circular(12),
-            bottomLeft: Radius.circular(isMe ? 12 : 2),
-            bottomRight: Radius.circular(isMe ? 2 : 12),
+      child: GestureDetector(
+        onLongPress: onLongPress,
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.78,
           ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.06),
-              blurRadius: 2,
-              offset: const Offset(0, 1),
+          decoration: BoxDecoration(
+            color: bubbleBg,
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(12),
+              topRight: const Radius.circular(12),
+              bottomLeft: Radius.circular(isMe ? 12 : 2),
+              bottomRight: Radius.circular(isMe ? 2 : 12),
             ),
-          ],
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Group / counterparty name if incoming
-              if (!isMe && message.name.isNotEmpty) ...[
-                Text(
-                  message.name,
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.bold,
-                    color: WhatsAppTheme.primaryGreen,
-                  ),
-                ),
-                const SizedBox(height: 2),
-              ],
-
-              // Quoted reply banner
-              if (message.quotedText.isNotEmpty) ...[
-                Container(
-                  margin: const EdgeInsets.only(bottom: 4),
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: isDark ? Colors.black26 : Colors.black.withOpacity(0.04),
-                    borderRadius: BorderRadius.circular(6),
-                    border: const Border(
-                      left: BorderSide(color: WhatsAppTheme.primaryGreen, width: 3.5),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.06),
+                blurRadius: 2,
+                offset: const Offset(0, 1),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Group / counterparty name if incoming
+                if (!isMe && message.name.isNotEmpty) ...[
+                  Text(
+                    message.name,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.bold,
+                      color: WhatsAppTheme.primaryGreen,
                     ),
                   ),
-                  child: Text(
-                    message.quotedText,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: isDark ? Colors.white70 : Colors.black54,
-                    ),
-                  ),
-                ),
-              ],
+                  const SizedBox(height: 2),
+                ],
 
-              // Deleted Message Handling
-              if (message.deleted) ...[
-                if (canViewDeleted) ...[
-                  // Super Admin / Allowed user: Show deleted warning badge + recovered text!
+                // Quoted reply banner
+                if (message.quotedText.isNotEmpty) ...[
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     margin: const EdgeInsets.only(bottom: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: WhatsAppTheme.deletedRed.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(4),
+                      color: isDark ? Colors.black26 : Colors.black.withOpacity(0.04),
+                      borderRadius: BorderRadius.circular(6),
+                      border: const Border(
+                        left: BorderSide(color: WhatsAppTheme.primaryGreen, width: 3.5),
+                      ),
                     ),
-                    child: Row(
+                    child: Text(
+                      message.quotedText,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white70 : Colors.black54,
+                      ),
+                    ),
+                  ),
+                ],
+
+                // Deleted Message Handling
+                if (message.deleted) ...[
+                  if (canViewDeleted) ...[
+                    // Super Admin / Allowed user: Show deleted warning badge + recovered text!
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      margin: const EdgeInsets.only(bottom: 4),
+                      decoration: BoxDecoration(
+                        color: WhatsAppTheme.deletedRed.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: const [
+                          Icon(Icons.block, size: 13, color: WhatsAppTheme.deletedRed),
+                          SizedBox(width: 4),
+                          Text(
+                            'Deleted by sender (Recovered)',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: WhatsAppTheme.deletedRed,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    _buildMediaBody(context, activeInstId, headers, textColor),
+                  ] else ...[
+                    // Normal User: Standard WhatsApp "This message was deleted"
+                    Row(
                       mainAxisSize: MainAxisSize.min,
-                      children: const [
-                        Icon(Icons.block, size: 13, color: WhatsAppTheme.deletedRed),
-                        SizedBox(width: 4),
+                      children: [
+                        Icon(Icons.block, size: 14, color: isDark ? Colors.white60 : Colors.black45),
+                        const SizedBox(width: 6),
                         Text(
-                          'Deleted by sender (Recovered)',
+                          'This message was deleted',
                           style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: WhatsAppTheme.deletedRed,
+                            fontSize: 14,
+                            fontStyle: FontStyle.italic,
+                            color: isDark ? Colors.white60 : Colors.black54,
                           ),
                         ),
                       ],
                     ),
-                  ),
-                  Text(
-                    message.text.isNotEmpty ? message.text : 'Original text preserved',
-                    style: TextStyle(fontSize: 15, color: textColor),
-                  ),
+                  ],
                 ] else ...[
-                  // Normal User: Standard WhatsApp "This message was deleted"
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.block, size: 14, color: isDark ? Colors.white60 : Colors.black45),
-                      const SizedBox(width: 6),
-                      Text(
-                        'This message was deleted',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontStyle: FontStyle.italic,
-                          color: isDark ? Colors.white60 : Colors.black54,
+                  // Normal Active Message Content (Media or Text)
+                  _buildMediaBody(context, activeInstId, headers, textColor),
+                ],
+
+                const SizedBox(height: 3),
+
+                // Bottom row: Edited chip + Timestamp + Delivery ticks
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    const Spacer(),
+                    // Edited chip (Only shown if permitted)
+                    if (message.edited && canViewEdits) ...[
+                      InkWell(
+                        onTap: onOpenDiff,
+                        borderRadius: BorderRadius.circular(4),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          margin: const EdgeInsets.only(right: 6),
+                          decoration: BoxDecoration(
+                            color: WhatsAppTheme.editedChip.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: const [
+                              Icon(Icons.edit, size: 11, color: WhatsAppTheme.editedChip),
+                              SizedBox(width: 3),
+                              Text(
+                                'Edited · View history',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: WhatsAppTheme.editedChip,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ] else if (message.edited) ...[
+                      // Subtle edited text indicator for regular users
+                      Padding(
+                        padding: const EdgeInsets.only(right: 4),
+                        child: Text(
+                          'Edited',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontStyle: FontStyle.italic,
+                            color: isDark ? Colors.white54 : Colors.black45,
+                          ),
                         ),
                       ),
                     ],
-                  ),
-                ],
-              ] else ...[
-                // Normal Active Message Content
-                Text(
-                  message.text,
-                  style: TextStyle(fontSize: 15, color: textColor),
-                ),
-              ],
 
-              const SizedBox(height: 3),
-
-              // Bottom row: Edited chip + Timestamp + Delivery ticks
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  const Spacer(),
-                  // Edited chip (Only shown if permitted)
-                  if (message.edited && canViewEdits) ...[
-                    InkWell(
-                      onTap: onOpenDiff,
-                      borderRadius: BorderRadius.circular(4),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                        margin: const EdgeInsets.only(right: 6),
-                        decoration: BoxDecoration(
-                          color: WhatsAppTheme.editedChip.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: const [
-                            Icon(Icons.edit, size: 11, color: WhatsAppTheme.editedChip),
-                            SizedBox(width: 3),
-                            Text(
-                              'Edited · View history',
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.w600,
-                                color: WhatsAppTheme.editedChip,
-                              ),
-                            ),
-                          ],
-                        ),
+                    // Time
+                    Text(
+                      timeStr,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isDark ? Colors.white60 : Colors.black45,
                       ),
                     ),
-                  ] else if (message.edited) ...[
-                    // Subtle edited text indicator for regular users
-                    Padding(
-                      padding: const EdgeInsets.only(right: 4),
-                      child: Text(
-                        'Edited',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontStyle: FontStyle.italic,
-                          color: isDark ? Colors.white54 : Colors.black45,
-                        ),
-                      ),
-                    ),
+
+                    // Ticks for outgoing
+                    if (isMe) ...[
+                      const SizedBox(width: 4),
+                      StatusIndicator(status: message.status),
+                    ],
                   ],
-
-                  // Time
-                  Text(
-                    timeStr,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: isDark ? Colors.white60 : Colors.black45,
-                    ),
-                  ),
-
-                  // Ticks for outgoing
-                  if (isMe) ...[
-                    const SizedBox(width: 4),
-                    StatusIndicator(status: message.status),
-                  ],
-                ],
-              ),
-
-              // Reactions
-              if (message.reactions.isNotEmpty) ...[
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Wrap(
-                    spacing: 4,
-                    children: message.reactions.values.toSet().map((emoji) {
-                      return Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: isDark ? Colors.black38 : Colors.white,
-                          borderRadius: BorderRadius.circular(10),
-                          boxShadow: [
-                            BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 2),
-                          ],
-                        ),
-                        child: Text(emoji, style: const TextStyle(fontSize: 13)),
-                      );
-                    }).toList(),
-                  ),
                 ),
+
+                // Reactions
+                if (message.reactions.isNotEmpty) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Wrap(
+                      spacing: 4,
+                      children: message.reactions.values.toSet().map((emoji) {
+                        return Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: isDark ? Colors.black38 : Colors.white,
+                            borderRadius: BorderRadius.circular(10),
+                            boxShadow: [
+                              BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 2),
+                            ],
+                          ),
+                          child: Text(emoji, style: const TextStyle(fontSize: 13)),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),

@@ -243,4 +243,92 @@ class ApiService {
       throw Exception(d['error'] ?? 'Failed to update user');
     }
   }
+
+  Future<void> reactMessage(String instanceId, String waId, String emoji) async {
+    final res = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/api/instances/$instanceId/inbox/$waId/reaction'),
+      headers: _headers(),
+      body: jsonEncode({'emoji': emoji}),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to react to message');
+    }
+  }
+
+  Future<void> starMessage(String instanceId, String waId, bool star) async {
+    final res = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/api/instances/$instanceId/inbox/$waId/star'),
+      headers: _headers(),
+      body: jsonEncode({'star': star}),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to star message');
+    }
+  }
+
+  Future<void> deleteMessage(String instanceId, String waId, {String scope = 'everyone'}) async {
+    final res = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/api/instances/$instanceId/inbox/$waId/delete'),
+      headers: _headers(),
+      body: jsonEncode({'scope': scope}),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to delete message');
+    }
+  }
+
+  Future<void> markChatAsRead(String instanceId, String chatJid) async {
+    final res = await http.put(
+      Uri.parse('${ApiConfig.baseUrl}/api/instances/$instanceId/chats/${Uri.encodeComponent(chatJid)}/settings'),
+      headers: _headers(),
+      body: jsonEncode({'read': true}),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to mark chat as read');
+    }
+  }
+
+  Future<void> subscribePresence(String instanceId, String chatJid) async {
+    try {
+      await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/api/instances/$instanceId/chats/${Uri.encodeComponent(chatJid)}/subscribe'),
+        headers: _headers(),
+        body: jsonEncode({}),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> sendMediaMessage(String instanceId, {
+    required String to,
+    required String type,
+    required String base64Data,
+    String? filename,
+    String? mimetype,
+    String? caption,
+    String? quotedWaId,
+  }) async {
+    final body = <String, dynamic>{
+      'to': to,
+      'type': type,
+      'data': base64Data,
+    };
+    if (filename != null && filename.isNotEmpty) body['filename'] = filename;
+    if (mimetype != null && mimetype.isNotEmpty) body['mimetype'] = mimetype;
+    if (caption != null && caption.isNotEmpty) body['text'] = caption;
+    if (quotedWaId != null && quotedWaId.isNotEmpty) body['quotedId'] = quotedWaId;
+
+    final res = await http.post(
+      Uri.parse(ApiConfig.sendMessageUrl(instanceId)),
+      headers: _headers(),
+      body: jsonEncode(body),
+    );
+    if (res.statusCode != 200 && res.statusCode != 202) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to send media');
+    }
+  }
 }
