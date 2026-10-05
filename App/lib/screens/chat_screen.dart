@@ -264,8 +264,8 @@ class _ChatScreenState extends State<ChatScreen> {
               edits: [...old.edits, {'text': old.text, 'at': DateTime.now().toIso8601String()}],
               reactions: old.reactions,
               createdAt: old.createdAt,
-              senderName: old.senderName,
-              senderJid: old.senderJid,
+              name: old.name,
+              participant: old.participant,
             );
           });
         }
