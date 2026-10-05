@@ -97,7 +97,7 @@ app.use("/api", (req, res, next) => {
     !["GET", "HEAD"].includes(req.method) &&
     !/^Bearer [a-f0-9]{64}$/.test(req.headers.authorization || "")
   ) {
-    if (req.headers.origin !== origin)
+    if (req.headers.origin && req.headers.origin !== origin)
       return res.status(403).json({ error: "Request origin is not allowed" });
   }
   next();

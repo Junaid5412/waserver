@@ -16,9 +16,19 @@ class ApiService {
   }
 
   Map<String, String> _headers([Map<String, String>? extra]) {
+    String originStr = ApiConfig.baseUrl;
+    try {
+      final uri = Uri.parse(ApiConfig.baseUrl);
+      final portPart = (uri.hasPort && uri.port != 80 && uri.port != 443) ? ':${uri.port}' : '';
+      originStr = '${uri.scheme}://${uri.host}$portPart';
+    } catch (_) {}
+
     final headers = <String, String>{
       'Content-Type': 'application/json',
       'Accept': 'application/json',
+      'Origin': originStr,
+      'Referer': '$originStr/',
+      'X-Requested-With': 'com.zelon.whatsapp',
     };
     if (_token != null && _token!.isNotEmpty) {
       headers['Authorization'] = 'Bearer $_token';
