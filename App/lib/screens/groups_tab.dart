@@ -42,18 +42,24 @@ class _GroupsTabState extends State<GroupsTab> {
     }
   }
 
+  Timer? _debounceTimer;
+
   void _subscribeRealtime() {
     _sub?.cancel();
     final auth = Provider.of<AuthService>(context, listen: false);
     _sub = auth.realtime.events.listen((event) {
-      if (event.type == 'message' || event.type == 'update' || event.type == 'poll_tick') {
-        _syncInBackground();
+      if (event.type == 'message' || event.type == 'update' || event.type == 'poll_tick' || event.type == 'ready') {
+        _debounceTimer?.cancel();
+        _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+          if (mounted) _syncInBackground();
+        });
       }
     });
   }
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     _sub?.cancel();
     super.dispose();
   }

@@ -31,9 +31,12 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isComposing = false;
   bool _showEmojiPicker = false;
   MessageModel? _replyingTo;
+  MessageModel? _editingMessage;
   String? _livePresence;
   Timer? _presenceTimer;
   StreamSubscription<RealtimeEvent>? _streamSub;
+  Timer? _foregroundPollTimer;
+  Timer? _debounceTimer;
 
   final List<String> _popularEmojis = [
     '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇',
@@ -53,22 +56,53 @@ class _ChatScreenState extends State<ChatScreen> {
     super.initState();
     _loadMessages();
     _subscribePresenceAndRealtime();
+    _startForegroundPolling();
+  }
+
+  void _startForegroundPolling() {
+    _foregroundPollTimer?.cancel();
+    // Fast active poll every 2.5s guarantees incoming messages never stall or require manual refresh
+    _foregroundPollTimer = Timer.periodic(const Duration(milliseconds: 2500), (_) {
+      if (mounted) {
+        _syncMessagesSilently(checkForNewOnly: true);
+      }
+    });
+  }
+
+  bool _isSameChat(String? incomingChatId) {
+    if (incomingChatId == null || incomingChatId.isEmpty) return true;
+    final a = RealtimeEvent.normalizeJid(incomingChatId);
+    final b = RealtimeEvent.normalizeJid(widget.chat.chatId);
+    if (a == b) return true;
+    final phoneA = a.split('@')[0].replaceAll(RegExp(r'\D'), '');
+    final phoneB = b.split('@')[0].replaceAll(RegExp(r'\D'), '');
+    if (phoneA.isNotEmpty && phoneB.isNotEmpty && phoneA == phoneB) return true;
+    return false;
+  }
+
+  void _debouncedSync() {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 200), () {
+      if (mounted) _syncMessagesSilently();
+    });
   }
 
   void _subscribePresenceAndRealtime() {
     final auth = Provider.of<AuthService>(context, listen: false);
     final instanceId = auth.selectedInstance?.id;
     if (instanceId != null) {
+      auth.realtime.ensureConnected(instanceId);
       auth.api.subscribePresence(instanceId, widget.chat.chatId);
     }
 
+    _streamSub?.cancel();
     _streamSub = auth.realtime.events.listen((event) {
-      if (event.chatId == widget.chat.chatId || event.type == 'message' || event.type == 'update') {
-        _syncMessagesSilently();
+      if (_isSameChat(event.chatId) || event.type == 'message' || event.type == 'update' || event.type == 'receipt') {
+        _debouncedSync();
       }
 
       // Handle presence updates dynamically
-      if (event.type == 'presence' && event.chatId == widget.chat.chatId) {
+      if (event.type == 'presence' && _isSameChat(event.chatId)) {
         final rawData = event.raw['data'] ?? event.raw;
         if (rawData is Map && rawData['presences'] is Map) {
           final presences = rawData['presences'] as Map;
@@ -101,6 +135,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    _foregroundPollTimer?.cancel();
+    _debounceTimer?.cancel();
     _streamSub?.cancel();
     _presenceTimer?.cancel();
     _textController.dispose();
@@ -124,26 +160,43 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() => _isLoading = true);
     }
 
-    _syncMessagesSilently();
+    _syncMessagesSilently(forceScroll: true);
   }
 
-  Future<void> _syncMessagesSilently() async {
+  Future<void> _syncMessagesSilently({bool checkForNewOnly = false, bool forceScroll = false}) async {
     final auth = Provider.of<AuthService>(context, listen: false);
     final instanceId = auth.selectedInstance?.id;
     if (instanceId == null) return;
 
     try {
       final fresh = await auth.api.getMessages(instanceId, widget.chat.chatId, limit: 40);
-      if (mounted) {
-        setState(() {
-          _messages = fresh;
-          _isLoading = false;
-        });
-        await CacheService.saveMessages(instanceId, widget.chat.chatId, fresh);
-        _scrollToBottom(smooth: true);
+      if (!mounted) return;
+
+      if (_messages.isNotEmpty && fresh.length == _messages.length) {
+        if (fresh.last.waId == _messages.last.waId &&
+            fresh.last.text == _messages.last.text &&
+            fresh.last.status == _messages.last.status &&
+            fresh.last.edited == _messages.last.edited &&
+            fresh.last.deleted == _messages.last.deleted) {
+          return;
+        }
+      }
+
+      final hadMessages = _messages.isNotEmpty;
+      final isNearBottom = !_scrollController.hasClients ||
+          (_scrollController.position.maxScrollExtent - _scrollController.offset < 120);
+
+      setState(() {
+        _messages = fresh;
+        _isLoading = false;
+      });
+      await CacheService.saveMessages(instanceId, widget.chat.chatId, fresh);
+
+      if (forceScroll || !hadMessages || (isNearBottom && fresh.length > _messages.length)) {
+        _scrollToBottom(smooth: hadMessages);
       }
     } catch (_) {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted && _messages.isEmpty) setState(() => _isLoading = false);
     }
   }
 
@@ -170,6 +223,64 @@ class _ChatScreenState extends State<ChatScreen> {
     final auth = Provider.of<AuthService>(context, listen: false);
     final instanceId = auth.selectedInstance?.id;
     if (instanceId == null) return;
+
+    // Handle Message Editing
+    if (_editingMessage != null) {
+      final target = _editingMessage!;
+      _textController.clear();
+      setState(() {
+        _editingMessage = null;
+        _isComposing = false;
+      });
+      try {
+        await auth.api.editMessageText(instanceId, target.waId, text);
+        final idx = _messages.indexWhere((m) => m.waId == target.waId);
+        if (idx != -1 && mounted) {
+          setState(() {
+            final old = _messages[idx];
+            _messages[idx] = MessageModel(
+              id: old.id,
+              waId: old.waId,
+              chatId: old.chatId,
+              fromMe: old.fromMe,
+              status: old.status,
+              type: old.type,
+              text: text,
+              hasMedia: old.hasMedia,
+              mimetype: old.mimetype,
+              filename: old.filename,
+              quotedText: old.quotedText,
+              starred: old.starred,
+              deleted: old.deleted,
+              edited: true,
+              editedAt: DateTime.now(),
+              originalText: old.originalText.isNotEmpty ? old.originalText : old.text,
+              edits: [...old.edits, {'text': old.text, 'at': DateTime.now().toIso8601String()}],
+              reactions: old.reactions,
+              createdAt: old.createdAt,
+              senderName: old.senderName,
+              senderJid: old.senderJid,
+            );
+          });
+        }
+        _debouncedSync();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Message edited successfully'),
+              backgroundColor: WhatsAppTheme.primaryGreen,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to edit: $e'), backgroundColor: Colors.red),
+          );
+        }
+      }
+      return;
+    }
 
     final quoted = _replyingTo;
     _textController.clear();
@@ -204,7 +315,7 @@ class _ChatScreenState extends State<ChatScreen> {
         text: text,
         quotedWaId: quoted?.waId,
       );
-      _syncMessagesSilently();
+      _debouncedSync();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -223,10 +334,11 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       message: message,
       currentUser: auth.currentUser,
+      isGroup: widget.chat.isGroup,
       onReact: (emoji) async {
         try {
           await auth.api.reactMessage(instanceId, message.waId, emoji);
-          _syncMessagesSilently();
+          _debouncedSync();
         } catch (e) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -238,20 +350,34 @@ class _ChatScreenState extends State<ChatScreen> {
       onReply: () {
         setState(() {
           _replyingTo = message;
+          _editingMessage = null;
         });
       },
+      onEdit: (msg) {
+        setState(() {
+          _editingMessage = msg;
+          _replyingTo = null;
+          _textController.text = msg.text;
+          _isComposing = msg.text.isNotEmpty;
+        });
+      },
+      onForward: (msg) => _openForwardDialog(msg),
       onStar: () async {
         try {
-          await auth.api.starMessage(instanceId, message.waId, true);
+          await auth.api.starMessage(instanceId, message.waId, !message.starred);
+          _debouncedSync();
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Message starred'), duration: Duration(seconds: 1)),
+              SnackBar(
+                content: Text(message.starred ? 'Message unstarred' : 'Message starred'),
+                duration: const Duration(seconds: 1),
+              ),
             );
           }
         } catch (e) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Failed to star: $e')),
+              SnackBar(content: Text('Failed: $e')),
             );
           }
         }
@@ -259,7 +385,7 @@ class _ChatScreenState extends State<ChatScreen> {
       onDelete: (scope) async {
         try {
           await auth.api.deleteMessage(instanceId, message.waId, scope: scope);
-          _syncMessagesSilently();
+          _debouncedSync();
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('Message deleted for $scope')),
@@ -273,9 +399,250 @@ class _ChatScreenState extends State<ChatScreen> {
           }
         }
       },
+      onDownload: () => _downloadMedia(message),
+      onViewPdf: () => _viewPdf(message),
+      onReplyPrivately: () => _replyPrivately(message),
+      onMessageSender: () => _messageSender(message),
+      onMarkSeen: () => _markMessageSeen(message),
       onOpenDiff: () => DiffViewerModal.show(context, message),
     );
   }
+
+  void _downloadMedia(MessageModel msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Saved ${msg.filename ?? "media attachment"} to device gallery'),
+        backgroundColor: WhatsAppTheme.primaryGreen,
+      ),
+    );
+  }
+
+  void _viewPdf(MessageModel msg) {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final instanceId = auth.selectedInstance?.id;
+    if (instanceId == null) return;
+    final mediaUrl = '${ApiConfig.baseUrl}/api/instances/$instanceId/inbox/${msg.waId}/media?inline=1';
+    final docName = msg.filename ?? (msg.text.isNotEmpty ? msg.text : 'Document.pdf');
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PdfViewerScreen(
+          title: docName,
+          documentUrl: mediaUrl,
+          headers: auth.api.authHeaders,
+          filename: docName,
+          mimetype: msg.mimetype,
+        ),
+      ),
+    );
+  }
+
+  void _replyPrivately(MessageModel msg) {
+    final sender = msg.senderJid.isNotEmpty ? msg.senderJid : (msg.fromMe ? '' : widget.chat.chatId);
+    if (sender.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sender JID not available for private reply')),
+      );
+      return;
+    }
+    final privateChat = ChatModel(
+      chatId: sender,
+      name: msg.senderName.isNotEmpty ? msg.senderName : sender.split('@')[0],
+      isGroup: false,
+    );
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(chat: privateChat),
+      ),
+    );
+  }
+
+  void _messageSender(MessageModel msg) {
+    final sender = msg.senderJid.isNotEmpty ? msg.senderJid : (msg.fromMe ? '' : widget.chat.chatId);
+    if (sender.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sender JID not available')),
+      );
+      return;
+    }
+    final privateChat = ChatModel(
+      chatId: sender,
+      name: msg.senderName.isNotEmpty ? msg.senderName : sender.split('@')[0],
+      isGroup: false,
+    );
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(chat: privateChat),
+      ),
+    );
+  }
+
+  void _markMessageSeen(MessageModel msg) async {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final instanceId = auth.selectedInstance?.id;
+    if (instanceId == null) return;
+    try {
+      await auth.api.markMessageAsRead(instanceId, msg.waId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Message marked as seen ✓ (read receipt sent)'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
+    } catch (_) {}
+  }
+
+  void _openForwardDialog(MessageModel message) async {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final instanceId = auth.selectedInstance?.id;
+    if (instanceId == null) return;
+
+    List<ChatModel> chatOptions = [];
+    try {
+      final cached = await CacheService.getCachedChats(instanceId);
+      chatOptions = cached;
+      if (chatOptions.isEmpty) {
+        chatOptions = await auth.api.getChats(instanceId);
+      }
+    } catch (_) {}
+
+    if (!mounted) return;
+
+    final selectedChatIds = <String>{};
+    String filterQuery = '';
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final filtered = chatOptions.where((c) {
+              final query = filterQuery.toLowerCase();
+              return c.displayTitle.toLowerCase().contains(query) ||
+                     c.chatId.toLowerCase().contains(query);
+            }).toList();
+
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.75,
+              decoration: BoxDecoration(
+                color: isDark ? WhatsAppTheme.surfaceDark : Colors.white,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Column(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade400,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Forward message',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      TextButton(
+                        onPressed: selectedChatIds.isEmpty ? null : () async {
+                          Navigator.pop(ctx);
+                          int count = 0;
+                          for (final targetId in selectedChatIds) {
+                            try {
+                              await auth.api.forwardMessage(
+                                instanceId,
+                                to: targetId,
+                                forwardWaId: message.waId,
+                              );
+                              count++;
+                            } catch (_) {}
+                          }
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Forwarded to $count conversation${count == 1 ? "" : "s"}'),
+                                backgroundColor: WhatsAppTheme.primaryGreen,
+                              ),
+                            );
+                          }
+                        },
+                        child: Text(
+                          selectedChatIds.isEmpty ? 'Select' : 'Send (${selectedChatIds.length})',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: selectedChatIds.isEmpty ? Colors.grey : WhatsAppTheme.primaryGreen,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    decoration: InputDecoration(
+                      hintText: 'Search chats...',
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      filled: true,
+                      fillColor: isDark ? Colors.black26 : Colors.grey.shade100,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(20),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
+                    ),
+                    onChanged: (q) {
+                      setModalState(() => filterQuery = q);
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: filtered.isEmpty
+                        ? const Center(child: Text('No matching chats found', style: TextStyle(color: Colors.grey)))
+                        : ListView.builder(
+                            itemCount: filtered.length,
+                            itemBuilder: (ctx, i) {
+                              final c = filtered[i];
+                              final isSelected = selectedChatIds.contains(c.chatId);
+                              return CheckboxListTile(
+                                value: isSelected,
+                                activeColor: WhatsAppTheme.primaryGreen,
+                                secondary: ChatAvatar(
+                                  chatId: c.chatId,
+                                  title: c.displayTitle,
+                                  isGroup: c.isGroup,
+                                  radius: 18,
+                                ),
+                                title: Text(c.displayTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                subtitle: Text(c.isGroup ? 'Group' : c.chatId, style: const TextStyle(fontSize: 12)),
+                                onChanged: (v) {
+                                  setModalState(() {
+                                    if (v == true) {
+                                      selectedChatIds.add(c.chatId);
+                                    } else {
+                                      selectedChatIds.remove(c.chatId);
+                                    }
+                                  });
+                                },
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
 
   void _showAttachmentSheet() {
     showModalBottomSheet(
@@ -746,6 +1113,62 @@ class _ChatScreenState extends State<ChatScreen> {
                           },
                         ),
             ),
+
+            // Editing Message Banner (if editing)
+            if (_editingMessage != null)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isDark ? WhatsAppTheme.surfaceDark : Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: const Border(
+                    left: BorderSide(color: WhatsAppTheme.editedChip, width: 4),
+                  ),
+                  boxShadow: [
+                    BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 3),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Editing message',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: WhatsAppTheme.editedChip,
+                              fontSize: 12,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _editingMessage!.text,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark ? Colors.white70 : Colors.black54,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 18),
+                      onPressed: () {
+                        setState(() {
+                          _editingMessage = null;
+                          _textController.clear();
+                          _isComposing = false;
+                        });
+                      },
+                    ),
+                  ],
+                ),
+              ),
 
             // Quoted Reply Banner (if replying)
             if (_replyingTo != null)

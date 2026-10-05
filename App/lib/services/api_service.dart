@@ -334,7 +334,7 @@ class ApiService {
 
   Future<void> markMessageAsRead(String instanceId, String waId) async {
     final res = await http.post(
-      Uri.parse('${ApiConfig.baseUrl}/api/instances/$instanceId/inbox/$waId/read'),
+      Uri.parse('${ApiConfig.baseUrl}/api/instances/$instanceId/inbox/${Uri.encodeComponent(waId)}/read'),
       headers: _headers(),
       body: jsonEncode({}),
     );
@@ -343,4 +343,33 @@ class ApiService {
       throw Exception(d['error'] ?? 'Failed to mark message as read');
     }
   }
+
+  Future<void> editMessageText(String instanceId, String waId, String newText) async {
+    final res = await http.put(
+      Uri.parse('${ApiConfig.baseUrl}/api/instances/$instanceId/inbox/${Uri.encodeComponent(waId)}/text'),
+      headers: _headers(),
+      body: jsonEncode({'text': newText}),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to edit message');
+    }
+  }
+
+  Future<void> forwardMessage(String instanceId, {required String to, required String forwardWaId}) async {
+    final res = await http.post(
+      Uri.parse(ApiConfig.sendMessageUrl(instanceId)),
+      headers: _headers(),
+      body: jsonEncode({
+        'to': to,
+        'type': 'forward',
+        'forwardId': forwardWaId,
+      }),
+    );
+    if (res.statusCode != 200 && res.statusCode != 202) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to forward message');
+    }
+  }
 }
+
