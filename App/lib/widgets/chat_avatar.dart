@@ -154,10 +154,6 @@ class ChatAvatar extends StatelessWidget {
               headers: headers,
               fit: BoxFit.cover,
               gaplessPlayback: true,
-              loadingBuilder: (ctx, child, progress) {
-                if (progress == null) return child;
-                return const SizedBox.shrink(); // keep fallback visible underneath with 0 empty space
-              },
               errorBuilder: (ctx, error, stackTrace) => const SizedBox.shrink(),
             ),
           ],

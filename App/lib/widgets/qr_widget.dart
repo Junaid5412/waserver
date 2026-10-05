@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../config/theme.dart';
@@ -41,19 +42,26 @@ class QrWidget extends StatelessWidget {
               ),
             )
           else if (qrData.isNotEmpty)
-            QrImageView(
-              data: qrData,
-              version: QrVersions.auto,
-              size: 210.0,
-              eyeStyle: const QrEyeStyle(
-                eyeShape: QrEyeShape.square,
-                color: Color(0xFF111B21),
-              ),
-              dataModuleStyle: const QrDataModuleStyle(
-                dataModuleShape: QrDataModuleShape.square,
-                color: Color(0xFF111B21),
-              ),
-            )
+            qrData.startsWith('data:image')
+                ? Image.memory(
+                    base64Decode(qrData.split(',').last),
+                    width: 210,
+                    height: 210,
+                    fit: BoxFit.contain,
+                  )
+                : QrImageView(
+                    data: qrData,
+                    version: QrVersions.auto,
+                    size: 210.0,
+                    eyeStyle: const QrEyeStyle(
+                      eyeShape: QrEyeShape.square,
+                      color: Color(0xFF111B21),
+                    ),
+                    dataModuleStyle: const QrDataModuleStyle(
+                      dataModuleShape: QrDataModuleShape.square,
+                      color: Color(0xFF111B21),
+                    ),
+                  )
           else
             Container(
               width: 200,

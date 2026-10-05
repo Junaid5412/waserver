@@ -6,6 +6,7 @@ import '../models/instance.dart';
 import '../services/auth_service.dart';
 import '../services/lock_service.dart';
 import '../services/chat_design_service.dart';
+import 'admin_control_center_screen.dart';
 import 'lock_screen.dart';
 import 'login_screen.dart';
 
@@ -239,6 +240,51 @@ class SettingsScreen extends StatelessWidget {
             const Divider(height: 1),
           ],
 
+          // Super Admin Control Center (Admins only)
+          if (user != null && user.isAdmin) ...[
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [WhatsAppTheme.primaryGreen, Color(0xFF075E54)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: WhatsAppTheme.primaryGreen.withOpacity(0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                leading: const CircleAvatar(
+                  backgroundColor: Colors.white24,
+                  radius: 22,
+                  child: Icon(Icons.admin_panel_settings_rounded, color: Colors.white, size: 26),
+                ),
+                title: const Text(
+                  'Super Admin Control Center',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15.5),
+                ),
+                subtitle: const Text(
+                  'All Users, Add User, Health, Server Profile',
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                trailing: const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white70, size: 16),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const AdminControlCenterScreen()),
+                  );
+                },
+              ),
+            ),
+            const Divider(height: 1),
+          ],
+
           // Active Instance Selector
           ListTile(
             leading: const Icon(Icons.phone_android, color: WhatsAppTheme.primaryGreen),
@@ -282,6 +328,16 @@ class SettingsScreen extends StatelessWidget {
             ),
           ),
           if (lock.isLockEnabled) ...[
+            SwitchListTile(
+              contentPadding: const EdgeInsets.only(left: 72, right: 16),
+              title: const Text('Unlock with Fingerprint', style: TextStyle(fontSize: 14)),
+              subtitle: const Text('Use biometric sensor to unlock immediately', style: TextStyle(fontSize: 12, color: Colors.grey)),
+              value: lock.isBiometricsEnabled,
+              activeColor: WhatsAppTheme.primaryGreen,
+              onChanged: (val) {
+                lock.setBiometricsEnabled(val);
+              },
+            ),
             ListTile(
               contentPadding: const EdgeInsets.only(left: 72, right: 16),
               title: const Text('Auto-lock duration', style: TextStyle(fontSize: 14)),
@@ -339,37 +395,6 @@ class SettingsScreen extends StatelessWidget {
           ),
           const Divider(height: 1),
 
-          // Server Endpoint
-          ListTile(
-            leading: const Icon(Icons.dns, color: WhatsAppTheme.primaryGreen),
-            title: const Text('Server API Endpoint'),
-            subtitle: Text(ApiConfig.baseUrl),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              final controller = TextEditingController(text: ApiConfig.baseUrl);
-              showDialog(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('Change Server URL'),
-                  content: TextField(
-                    controller: controller,
-                    decoration: const InputDecoration(border: OutlineInputBorder()),
-                  ),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-                    ElevatedButton(
-                      onPressed: () async {
-                        await ApiConfig.setBaseUrl(controller.text.trim());
-                        Navigator.pop(ctx);
-                      },
-                      child: const Text('Save'),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-          const Divider(height: 1),
 
           // Permissions Summary for Normal Users
           if (user != null && !user.isAdmin) ...[

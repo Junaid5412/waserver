@@ -49,7 +49,11 @@ class MessageModel {
   bool get hasMedia =>
       type != 'text' &&
       type != 'deleted' &&
-      (mimetype != null || ['image', 'video', 'document', 'audio'].contains(type));
+      type != 'location' &&
+      type != 'contact' &&
+      type != 'poll' &&
+      ((mimetype != null && mimetype!.isNotEmpty && mimetype != 'text/plain') ||
+          ['image', 'video', 'document', 'audio', 'sticker'].contains(type));
   bool get isLocation =>
       type == 'location' || (latitude != null && longitude != null);
 
@@ -102,15 +106,21 @@ class MessageModel {
     double? lng;
     String? locName;
     String? locAddr;
+    double? parseCoord(dynamic val) {
+      if (val == null) return null;
+      if (val is num) return val.toDouble();
+      return double.tryParse(val.toString());
+    }
+
     if (json['location'] is Map) {
       final loc = json['location'] as Map;
-      lat = (loc['latitude'] as num?)?.toDouble();
-      lng = (loc['longitude'] as num?)?.toDouble();
+      lat = parseCoord(loc['latitude']);
+      lng = parseCoord(loc['longitude']);
       locName = loc['name']?.toString();
       locAddr = loc['address']?.toString();
     } else {
-      if (json['latitude'] != null) lat = (json['latitude'] as num?)?.toDouble();
-      if (json['longitude'] != null) lng = (json['longitude'] as num?)?.toDouble();
+      lat = parseCoord(json['latitude']);
+      lng = parseCoord(json['longitude']);
       locName = json['locationName']?.toString();
       locAddr = json['locationAddress']?.toString();
     }

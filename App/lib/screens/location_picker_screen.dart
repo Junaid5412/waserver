@@ -223,8 +223,8 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
         if (ty < 0 || ty > maxTile) continue;
         final wrappedTx = (tx % (1 << _zoom) + (1 << _zoom)) % (1 << _zoom);
 
-        // CartoDB Voyager English tile layer
-        final tileUrl = 'https://basemaps.cartocdn.com/rastertiles/voyager/$_zoom/$wrappedTx/$ty.png';
+        // Google English raster tile layer with OpenStreetMap fallback
+        final tileUrl = 'https://mt1.google.com/vt/lyrs=m&hl=en&x=$wrappedTx&y=$ty&z=$_zoom';
 
         final left = (size.width / 2) + (dx * tileSize) + offsetX;
         final top = (size.height / 2) + (dy * tileSize) + offsetY;
@@ -238,10 +238,14 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
             child: Image.network(
               tileUrl,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(
-                color: const Color(0xFFE8ECEF),
-                child: const Center(
-                  child: Icon(Icons.map_outlined, color: Colors.black12, size: 24),
+              errorBuilder: (_, __, ___) => Image.network(
+                'https://tile.openstreetmap.org/$_zoom/$wrappedTx/$ty.png',
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                  color: const Color(0xFFE8ECEF),
+                  child: const Center(
+                    child: Icon(Icons.map_outlined, color: Colors.black12, size: 24),
+                  ),
                 ),
               ),
             ),

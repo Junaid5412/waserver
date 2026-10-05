@@ -283,7 +283,7 @@ class ChatBubble extends StatelessWidget {
 
     final tileX = _lon2tile(lng, 15);
     final tileY = _lat2tile(lat, 15);
-    final tileUrl = 'https://basemaps.cartocdn.com/rastertiles/voyager/15/$tileX/$tileY.png';
+    final tileUrl = 'https://mt1.google.com/vt/lyrs=m&hl=en&x=$tileX&y=$tileY&z=15';
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(10),
@@ -303,10 +303,14 @@ class ChatBubble extends StatelessWidget {
                   child: Image.network(
                     tileUrl,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(
-                      color: const Color(0xFFE5E9EC),
-                      child: const Center(
-                        child: Icon(Icons.map_rounded, color: Colors.black26, size: 36),
+                    errorBuilder: (_, __, ___) => Image.network(
+                      'https://tile.openstreetmap.org/15/$tileX/$tileY.png',
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        color: const Color(0xFFE5E9EC),
+                        child: const Center(
+                          child: Icon(Icons.map_rounded, color: Colors.black26, size: 36),
+                        ),
                       ),
                     ),
                   ),

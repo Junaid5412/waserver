@@ -66,16 +66,36 @@ class _StatusTabState extends State<StatusTab> {
   List<StatusModel> _statuses = [];
   bool _isLoading = false;
 
+  String? _lastInstanceId;
+
   @override
   void initState() {
     super.initState();
-    _loadStatuses();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadStatuses();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final auth = Provider.of<AuthService>(context);
+    final currentId = auth.selectedInstance?.id;
+    if (currentId != null && currentId != _lastInstanceId) {
+      _lastInstanceId = currentId;
+      _loadStatuses();
+    }
   }
 
   Future<void> _loadStatuses() async {
     final auth = Provider.of<AuthService>(context, listen: false);
-    final inst = auth.selectedInstance;
+    var inst = auth.selectedInstance;
+    if (inst == null && auth.instances.isNotEmpty) {
+      auth.selectInstance(auth.instances.first);
+      inst = auth.selectedInstance;
+    }
     if (inst == null) return;
+    _lastInstanceId = inst.id;
 
     setState(() => _isLoading = true);
     try {

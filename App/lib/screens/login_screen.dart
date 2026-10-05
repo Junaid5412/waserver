@@ -170,42 +170,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 12),
 
-                // Server Configuration Toggle
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton.icon(
-                    onPressed: () => setState(() => _showServerConfig = !_showServerConfig),
-                    icon: Icon(
-                      _showServerConfig ? Icons.keyboard_arrow_up : Icons.settings,
-                      size: 16,
-                      color: WhatsAppTheme.primaryGreen,
-                    ),
-                    label: Text(
-                      _showServerConfig ? 'Hide Server URL' : 'Server Settings',
-                      style: const TextStyle(fontSize: 13, color: WhatsAppTheme.primaryGreen),
-                    ),
-                  ),
-                ),
-
-                if (_showServerConfig) ...[
-                  TextField(
-                    controller: _serverController,
-                    style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-                    decoration: InputDecoration(
-                      labelText: 'Server API URL',
-                      labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
-                      floatingLabelStyle: const TextStyle(color: WhatsAppTheme.primaryGreen, fontWeight: FontWeight.bold),
-                      hintText: 'http://your-server-ip:3000',
-                      prefixIcon: const Icon(Icons.dns_outlined, color: WhatsAppTheme.primaryGreen),
-                      filled: true,
-                      fillColor: isDark ? WhatsAppTheme.surfaceDark : Colors.grey.shade50,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                ],
+                const SizedBox(height: 16),
 
                 const SizedBox(height: 16),
 

@@ -114,7 +114,7 @@ class _ContactProfileScreenState extends State<ContactProfileScreen> {
               background: Stack(
                 fit: StackFit.expand,
                 children: [
-                  if (instanceId != null && !isGroup && !chat.isChannel && !chat.isCommunity)
+                  if (instanceId != null && !chat.isChannel && !chat.isCommunity)
                     Image.network(
                       ApiConfig.chatPictureUrl(instanceId, chat.chatId),
                       headers: auth.api.authHeaders,

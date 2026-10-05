@@ -25,6 +25,26 @@ class _LockScreenState extends State<LockScreen> {
   bool _confirmMode = false;
   String _firstPin = '';
 
+  @override
+  void initState() {
+    super.initState();
+    if (!widget.isSetup) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _triggerBiometrics();
+      });
+    }
+  }
+
+  Future<void> _triggerBiometrics() async {
+    final lockService = Provider.of<LockService>(context, listen: false);
+    if (lockService.isBiometricsEnabled || lockService.canCheckBiometrics) {
+      final success = await lockService.authenticateBiometrics();
+      if (success && mounted) {
+        widget.onUnlocked();
+      }
+    }
+  }
+
   void _onDigitPress(String digit) {
     if (_enteredPin.length >= 6) return;
     setState(() {
@@ -244,12 +264,7 @@ class _LockScreenState extends State<LockScreen> {
                       children: [
                         // Biometric icon placeholder
                         InkWell(
-                          onTap: () {
-                            // Biometric quick check
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Touch fingerprint sensor on device')),
-                            );
-                          },
+                          onTap: _triggerBiometrics,
                           borderRadius: BorderRadius.circular(40),
                           child: Container(
                             width: 72,

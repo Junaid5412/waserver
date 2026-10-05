@@ -42,10 +42,16 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
   }
 
   void _startLinkingFlow([InstanceModel? targetInstance]) {
-    final auth = Provider.of<AuthService>(context, listen: false);
-    if (targetInstance != null) {
-      auth.selectInstance(targetInstance);
+    if (targetInstance == null) {
+      _showCreateInstanceDialog();
+      return;
     }
+    _proceedToLinkFlow(targetInstance);
+  }
+
+  void _proceedToLinkFlow(InstanceModel targetInstance) {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    auth.selectInstance(targetInstance);
     setState(() {
       _showLinkFlow = true;
       _pairingCode = '';
@@ -121,6 +127,21 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
         _pairingCode = code;
         _isLoadingPair = false;
       });
+      _qrPollTimer?.cancel();
+      _qrPollTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
+        await auth.refreshInstances();
+        final current = auth.selectedInstance;
+        if (current?.isConnected == true && mounted) {
+          _qrPollTimer?.cancel();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('WhatsApp linked successfully!'),
+              backgroundColor: WhatsAppTheme.primaryGreen,
+            ),
+          );
+          setState(() => _showLinkFlow = false);
+        }
+      });
     } catch (e) {
       setState(() => _isLoadingPair = false);
       if (mounted) {
@@ -132,17 +153,33 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
   }
 
   void _showCreateInstanceDialog() {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    if (_newInstanceController.text.trim().isEmpty) {
+      _newInstanceController.text = 'WhatsApp ${auth.instances.length + 1}';
+    }
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Add New Account'),
-        content: TextField(
-          controller: _newInstanceController,
-          decoration: const InputDecoration(
-            labelText: 'Account Name',
-            hintText: 'e.g. Sales WhatsApp',
-            border: OutlineInputBorder(),
-          ),
+        title: const Text('Name Your WhatsApp Account'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Give this WhatsApp connection a name to easily identify it:',
+              style: TextStyle(fontSize: 13, color: Colors.grey),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _newInstanceController,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Account Name *',
+                hintText: 'e.g. Personal WhatsApp',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
@@ -582,7 +619,33 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
                                 color: WhatsAppTheme.primaryGreen,
                               ),
                             ),
-                            const SizedBox(height: 8),
+                            const SizedBox(height: 12),
+                            ElevatedButton.icon(
+                              onPressed: () {
+                                Clipboard.setData(ClipboardData(text: _pairingCode));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Row(
+                                      children: [
+                                        const Icon(Icons.check_circle, color: Colors.white, size: 20),
+                                        const SizedBox(width: 8),
+                                        Text('Pairing code copied: $_pairingCode'),
+                                      ],
+                                    ),
+                                    backgroundColor: WhatsAppTheme.primaryGreen,
+                                    duration: const Duration(seconds: 2),
+                                  ),
+                                );
+                              },
+                              icon: const Icon(Icons.copy_rounded, size: 18, color: Colors.white),
+                              label: const Text('Copy Pairing Code', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: WhatsAppTheme.primaryGreen,
+                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
                             const Text(
                               'Open WhatsApp > Linked Devices > Link with phone number and enter this code.',
                               textAlign: TextAlign.center,

@@ -566,7 +566,12 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
   };
   const candidates = async (instance, chat) => {
     const resolved = await inbox.resolve(instance, chat);
-    return [...new Set([resolved, chat])];
+    const set = new Set();
+    if (chat) set.add(chat);
+    if (resolved) set.add(resolved);
+    const primary = [...set].filter((x) => x.endsWith("@s.whatsapp.net") || x.endsWith("@g.us"));
+    const secondary = [...set].filter((x) => !primary.includes(x));
+    return [...primary, ...secondary];
   };
   router.get(
     "/chats/:chat/picture",
@@ -579,17 +584,17 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
         key = req.instance.id + "|" + raw + (full ? "|full" : ""),
         hit = pictures.get(key);
       const send = (p) => {
-        if (!p.buf) return res.set("Cache-Control", "private, max-age=600").status(404).end();
+        if (!p.buf) return res.set("Cache-Control", "no-cache").status(404).end();
         res.set({ "Content-Type": p.type, "Cache-Control": "private, max-age=21600" }).send(p.buf);
       };
-      if (hit && Date.now() - hit.at < (hit.buf ? 6 : 0.5) * 3600000) return send(hit);
+      if (hit && Date.now() - hit.at < (hit.buf ? 6 * 3600000 : 30000)) return send(hit);
       const entry = { at: Date.now(), buf: null, type: "image/jpeg" };
       await slot(async () => {
         const list = own ? [jidNormalizedUser(s.user.id)] : await candidates(req.instance, chatJid(raw));
         for (const j of list) {
           try {
             let url = null;
-            for (const kind of ["image", "preview"]) {
+            for (const kind of (full ? ["image", "preview"] : ["preview", "image"])) {
               try { url = await s.profilePictureUrl(j, kind, 8000); } catch { url = null; }
               if (url) break;
             }

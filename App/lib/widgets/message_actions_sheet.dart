@@ -187,7 +187,7 @@ class MessageActionsSheet {
                     ),
 
                   // 6. Download media
-                  if (message.hasMedia && (!message.deleted || canViewDeleted))
+                  if (message.hasMedia && !['text', 'deleted', 'location', 'contact', 'poll'].contains(message.type) && (!message.deleted || canViewDeleted))
                     ListTile(
                       leading: const Icon(Icons.file_download_rounded, color: WhatsAppTheme.primaryGreen),
                       title: Text(message.deleted ? 'Download Preserved Media' : 'Download Media'),

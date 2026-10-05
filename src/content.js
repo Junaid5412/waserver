@@ -24,10 +24,10 @@ export const messageSchema = z.object({
   mimetype: z.string().max(120).optional(),
   filename: z.string().max(200).optional(),
   ptt: z.boolean().optional(),
-  latitude: z.number().min(-90).max(90).optional(),
-  longitude: z.number().min(-180).max(180).optional(),
-  name: z.string().max(100).optional(),
-  address: z.string().max(300).optional(),
+  latitude: z.coerce.number().min(-90).max(90).optional(),
+  longitude: z.coerce.number().min(-180).max(180).optional(),
+  name: z.string().max(250).optional(),
+  address: z.string().max(1000).optional(),
   phone: z
     .string()
     .regex(/^\+?[1-9]\d{6,14}$/)
@@ -134,10 +134,10 @@ export function buildContent(media, loadMessage) {
     } else if (d.type === "location")
       content = {
         location: {
-          degreesLatitude: d.latitude,
-          degreesLongitude: d.longitude,
-          name: d.name,
-          address: d.address,
+          degreesLatitude: Number(d.latitude),
+          degreesLongitude: Number(d.longitude),
+          name: d.name || "",
+          address: d.address || "",
         },
       };
     else if (d.type === "poll")

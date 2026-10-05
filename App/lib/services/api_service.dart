@@ -244,6 +244,128 @@ class ApiService {
     }
   }
 
+  Future<Map<String, dynamic>> createAdminUser({
+    required String email,
+    String? name,
+    String role = 'user',
+    Map<String, dynamic>? permissions,
+  }) async {
+    final body = <String, dynamic>{
+      'email': email.trim().toLowerCase(),
+      'role': role,
+    };
+    if (name != null && name.trim().isNotEmpty) body['name'] = name.trim();
+    if (permissions != null) body['permissions'] = permissions;
+
+    final res = await http.post(
+      Uri.parse(ApiConfig.adminUsersUrl),
+      headers: _headers(),
+      body: jsonEncode(body),
+    );
+    final d = jsonDecode(res.body);
+    if (res.statusCode != 200 && res.statusCode != 201) {
+      throw Exception(d['error'] ?? 'Failed to create user');
+    }
+    return Map<String, dynamic>.from(d);
+  }
+
+  Future<void> deleteAdminUser(String userId) async {
+    final res = await http.delete(
+      Uri.parse('${ApiConfig.adminUsersUrl}/$userId'),
+      headers: _headers(),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to delete user');
+    }
+  }
+
+  Future<String> resetAdminUserPassword(String userId) async {
+    final res = await http.post(
+      Uri.parse('${ApiConfig.adminUsersUrl}/$userId/reset-password'),
+      headers: _headers(),
+    );
+    final d = jsonDecode(res.body);
+    if (res.statusCode != 200) {
+      throw Exception(d['error'] ?? 'Failed to reset password');
+    }
+    return d['password']?.toString() ?? '';
+  }
+
+  Future<void> signOutAdminUser(String userId) async {
+    final res = await http.post(
+      Uri.parse('${ApiConfig.adminUsersUrl}/$userId/sign-out'),
+      headers: _headers(),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to sign out user');
+    }
+  }
+
+  Future<Map<String, dynamic>> getAdminSystemHealth() async {
+    final res = await http.get(
+      Uri.parse('${ApiConfig.baseUrl}/api/admin/system'),
+      headers: _headers(),
+    );
+    if (res.statusCode != 200) {
+      throw Exception('Failed to load server health status');
+    }
+    return Map<String, dynamic>.from(jsonDecode(res.body));
+  }
+
+  Future<void> triggerKeepAlive() async {
+    final res = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/api/admin/keepalive/run'),
+      headers: _headers(),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to trigger keepalive');
+    }
+  }
+
+  Future<Map<String, dynamic>> getAccountProfile() async {
+    final res = await http.get(
+      Uri.parse('${ApiConfig.baseUrl}/api/account'),
+      headers: _headers(),
+    );
+    if (res.statusCode != 200) {
+      throw Exception('Failed to fetch account profile');
+    }
+    return Map<String, dynamic>.from(jsonDecode(res.body));
+  }
+
+  Future<void> updateAccountProfile({required String name}) async {
+    final res = await http.put(
+      Uri.parse('${ApiConfig.baseUrl}/api/account/profile'),
+      headers: _headers(),
+      body: jsonEncode({'name': name}),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to update profile');
+    }
+  }
+
+  Future<void> updateAccountPassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final res = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/api/account/password'),
+      headers: _headers(),
+      body: jsonEncode({
+        'currentPassword': currentPassword,
+        'newPassword': newPassword,
+      }),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to update password');
+    }
+  }
+
   Future<void> reactMessage(String instanceId, String waId, String emoji) async {
     final res = await http.post(
       Uri.parse('${ApiConfig.baseUrl}/api/instances/$instanceId/inbox/$waId/reaction'),
@@ -409,8 +531,14 @@ class ApiService {
       'latitude': latitude,
       'longitude': longitude,
     };
-    if (name != null && name.isNotEmpty) body['name'] = name;
-    if (address != null && address.isNotEmpty) body['address'] = address;
+    if (name != null && name.trim().isNotEmpty) {
+      final trimmed = name.trim();
+      body['name'] = trimmed.length > 90 ? trimmed.substring(0, 90) : trimmed;
+    }
+    if (address != null && address.trim().isNotEmpty) {
+      final trimmed = address.trim();
+      body['address'] = trimmed.length > 250 ? trimmed.substring(0, 250) : trimmed;
+    }
     if (quotedWaId != null && quotedWaId.isNotEmpty) body['quotedId'] = quotedWaId;
 
     final res = await http.post(

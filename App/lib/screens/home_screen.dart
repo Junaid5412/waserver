@@ -8,7 +8,7 @@ import 'groups_tab.dart';
 import 'status_tab.dart';
 import 'tools_screen.dart';
 import 'connect_screen.dart';
-import 'admin_screen.dart';
+import 'admin_control_center_screen.dart';
 import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -199,7 +199,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 );
               } else if (value == 'admin') {
                 Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const AdminScreen()),
+                  MaterialPageRoute(builder: (_) => const AdminControlCenterScreen()),
                 );
               } else if (value == 'settings') {
                 setState(() => _currentIndex = 4);
