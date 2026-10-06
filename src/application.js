@@ -519,6 +519,211 @@ app.post(
   }),
 );
 
+// --- Broadcasts & Urgent Announcements ---
+app.get(
+  "/api/admin/broadcasts",
+  adminOnly,
+  wrap(async (req, res) => {
+    const list = (await store.all("broadcasts")) || [];
+    list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    const allUsers = (await store.all("users")) || [];
+    const totalUsers = allUsers.length;
+
+    const results = list.map((b) => {
+      const rec = b.recipients || {};
+      const seenCount = Object.values(rec).filter((r) => r.seenAt).length;
+      const ackCount = Object.values(rec).filter((r) => r.acknowledgedAt).length;
+      const replyCount = Object.values(rec).filter((r) => r.reply).length;
+      return {
+        ...b,
+        totalUsers,
+        seenCount,
+        ackCount,
+        pendingCount: Math.max(0, totalUsers - ackCount),
+        replyCount,
+      };
+    });
+    res.json(results);
+  }),
+);
+
+app.post(
+  "/api/admin/broadcasts",
+  adminOnly,
+  wrap(async (req, res) => {
+    const data = z
+      .object({
+        title: z.string().trim().min(1).max(200),
+        body: z.string().trim().min(1).max(4000),
+        requireAck: z.boolean().default(true),
+        allowReply: z.boolean().default(true),
+        urgency: z.enum(["normal", "urgent"]).default("normal"),
+      })
+      .parse(req.body);
+
+    const id = `bcast_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const broadcast = {
+      id,
+      title: data.title,
+      body: data.body,
+      requireAck: data.requireAck,
+      allowReply: data.allowReply,
+      urgency: data.urgency,
+      senderId: req.user.id,
+      senderName: req.user.name || "Administrator",
+      createdAt: Date.now(),
+      createdAtIso: new Date().toISOString(),
+      recipients: {},
+    };
+
+    await store.set("broadcasts", id, broadcast);
+    await audit(req, req.user.id, "broadcast_sent", `Sent broadcast: ${data.title}`);
+
+    // Push notification to all active SSE streams
+    const eventPayload = {
+      type: "admin_broadcast",
+      data: {
+        id: broadcast.id,
+        title: broadcast.title,
+        body: broadcast.body,
+        requireAck: broadcast.requireAck,
+        allowReply: broadcast.allowReply,
+        urgency: broadcast.urgency,
+        senderName: broadcast.senderName,
+        createdAt: broadcast.createdAt,
+        createdAtIso: broadcast.createdAtIso,
+      },
+    };
+    for (const s of streams) {
+      try {
+        s.write("data: " + JSON.stringify(eventPayload) + "\n\n");
+      } catch (_) {}
+    }
+
+    res.json({ ok: true, broadcast });
+  }),
+);
+
+app.get(
+  "/api/admin/broadcasts/:id/audit",
+  adminOnly,
+  wrap(async (req, res) => {
+    const broadcast = await store.get("broadcasts", req.params.id);
+    if (!broadcast) fail(404, "Broadcast not found");
+    const allUsers = (await store.all("users")) || [];
+    const rec = broadcast.recipients || {};
+
+    const auditList = allUsers.map((u) => {
+      const r = rec[u.id] || {};
+      return {
+        userId: u.id,
+        name: u.name || "User",
+        email: u.email,
+        role: u.role,
+        seen: !!r.seenAt,
+        seenAt: r.seenAt || null,
+        acknowledged: !!r.acknowledgedAt,
+        acknowledgedAt: r.acknowledgedAt || null,
+        reply: r.reply || null,
+        repliedAt: r.repliedAt || null,
+      };
+    });
+
+    res.json({
+      broadcast: {
+        id: broadcast.id,
+        title: broadcast.title,
+        body: broadcast.body,
+        requireAck: broadcast.requireAck,
+        allowReply: broadcast.allowReply,
+        urgency: broadcast.urgency,
+        createdAt: broadcast.createdAt,
+      },
+      audit: auditList,
+    });
+  }),
+);
+
+app.get(
+  "/api/user/broadcasts",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const list = (await store.all("broadcasts")) || [];
+    list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    const userId = req.user.id;
+
+    const userBroadcasts = list.map((b) => {
+      const userState = (b.recipients && b.recipients[userId]) || {};
+      return {
+        id: b.id,
+        title: b.title,
+        body: b.body,
+        requireAck: b.requireAck,
+        allowReply: b.allowReply,
+        urgency: b.urgency,
+        senderName: b.senderName,
+        createdAt: b.createdAt,
+        createdAtIso: b.createdAtIso,
+        seen: !!userState.seenAt,
+        seenAt: userState.seenAt || null,
+        acknowledged: !!userState.acknowledgedAt,
+        acknowledgedAt: userState.acknowledgedAt || null,
+        reply: userState.reply || null,
+        repliedAt: userState.repliedAt || null,
+      };
+    });
+    res.json(userBroadcasts);
+  }),
+);
+
+app.post(
+  "/api/user/broadcasts/:id/seen",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const broadcast = await store.get("broadcasts", req.params.id);
+    if (!broadcast) fail(404, "Broadcast not found");
+    broadcast.recipients = broadcast.recipients || {};
+    broadcast.recipients[req.user.id] = broadcast.recipients[req.user.id] || {};
+    if (!broadcast.recipients[req.user.id].seenAt) {
+      broadcast.recipients[req.user.id].seenAt = new Date().toISOString();
+      await store.set("broadcasts", broadcast.id, broadcast);
+    }
+    res.json({ ok: true });
+  }),
+);
+
+app.post(
+  "/api/user/broadcasts/:id/ack",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const broadcast = await store.get("broadcasts", req.params.id);
+    if (!broadcast) fail(404, "Broadcast not found");
+    broadcast.recipients = broadcast.recipients || {};
+    broadcast.recipients[req.user.id] = broadcast.recipients[req.user.id] || {};
+    broadcast.recipients[req.user.id].seenAt = broadcast.recipients[req.user.id].seenAt || new Date().toISOString();
+    broadcast.recipients[req.user.id].acknowledgedAt = new Date().toISOString();
+    await store.set("broadcasts", broadcast.id, broadcast);
+    res.json({ ok: true, acknowledgedAt: broadcast.recipients[req.user.id].acknowledgedAt });
+  }),
+);
+
+app.post(
+  "/api/user/broadcasts/:id/reply",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const { reply } = z.object({ reply: z.string().trim().min(1).max(1000) }).parse(req.body);
+    const broadcast = await store.get("broadcasts", req.params.id);
+    if (!broadcast) fail(404, "Broadcast not found");
+    broadcast.recipients = broadcast.recipients || {};
+    broadcast.recipients[req.user.id] = broadcast.recipients[req.user.id] || {};
+    broadcast.recipients[req.user.id].seenAt = broadcast.recipients[req.user.id].seenAt || new Date().toISOString();
+    broadcast.recipients[req.user.id].reply = reply;
+    broadcast.recipients[req.user.id].repliedAt = new Date().toISOString();
+    await store.set("broadcasts", broadcast.id, broadcast);
+    res.json({ ok: true, reply, repliedAt: broadcast.recipients[req.user.id].repliedAt });
+  }),
+);
+
 app.post(
   "/api/admin/users",
   adminOnly,

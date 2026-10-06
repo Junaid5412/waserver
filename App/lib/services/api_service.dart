@@ -97,6 +97,18 @@ class ApiService {
     return InstanceModel.fromJson(jsonDecode(res.body));
   }
 
+  Future<void> deleteInstance(String instanceId) async {
+    final res = await http.post(
+      Uri.parse(ApiConfig.deleteInstanceUrl(instanceId)),
+      headers: _headers(),
+      body: jsonEncode({}),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to delete account');
+    }
+  }
+
   Future<void> connectInstance(String instanceId) async {
     final res = await http.post(
       Uri.parse(ApiConfig.connectUrl(instanceId)),
@@ -877,6 +889,77 @@ class ApiService {
         .where((l) => l.isNotEmpty && !l.startsWith('{') && !l.startsWith('['))
         .take(3)
         .toList();
+  }
+
+  // Admin Broadcasts
+  Future<List<Map<String, dynamic>>> getAdminBroadcasts() async {
+    final res = await http.get(Uri.parse(ApiConfig.adminBroadcastsUrl), headers: _headers());
+    if (res.statusCode != 200) throw Exception('Failed to load broadcasts');
+    final list = jsonDecode(res.body) as List;
+    return list.map((e) => Map<String, dynamic>.from(e)).toList();
+  }
+
+  Future<Map<String, dynamic>> createAdminBroadcast({
+    required String title,
+    required String body,
+    bool requireAck = true,
+    bool allowReply = true,
+    String urgency = 'normal',
+  }) async {
+    final res = await http.post(
+      Uri.parse(ApiConfig.adminBroadcastsUrl),
+      headers: _headers(),
+      body: jsonEncode({
+        'title': title,
+        'body': body,
+        'requireAck': requireAck,
+        'allowReply': allowReply,
+        'urgency': urgency,
+      }),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to send broadcast');
+    }
+    return Map<String, dynamic>.from(jsonDecode(res.body));
+  }
+
+  Future<Map<String, dynamic>> getBroadcastAudit(String broadcastId) async {
+    final res = await http.get(Uri.parse(ApiConfig.adminBroadcastAuditUrl(broadcastId)), headers: _headers());
+    if (res.statusCode != 200) throw Exception('Failed to load audit data');
+    return Map<String, dynamic>.from(jsonDecode(res.body));
+  }
+
+  // User Broadcasts
+  Future<List<Map<String, dynamic>>> getUserBroadcasts() async {
+    final res = await http.get(Uri.parse(ApiConfig.userBroadcastsUrl), headers: _headers());
+    if (res.statusCode != 200) throw Exception('Failed to load announcements');
+    final list = jsonDecode(res.body) as List;
+    return list.map((e) => Map<String, dynamic>.from(e)).toList();
+  }
+
+  Future<void> markBroadcastSeen(String broadcastId) async {
+    try {
+      await http.post(Uri.parse(ApiConfig.broadcastSeenUrl(broadcastId)), headers: _headers(), body: jsonEncode({}));
+    } catch (_) {}
+  }
+
+  Future<void> acknowledgeBroadcast(String broadcastId) async {
+    final res = await http.post(
+      Uri.parse(ApiConfig.broadcastAckUrl(broadcastId)),
+      headers: _headers(),
+      body: jsonEncode({}),
+    );
+    if (res.statusCode != 200) throw Exception('Failed to acknowledge message');
+  }
+
+  Future<void> replyToBroadcast(String broadcastId, String reply) async {
+    final res = await http.post(
+      Uri.parse(ApiConfig.broadcastReplyUrl(broadcastId)),
+      headers: _headers(),
+      body: jsonEncode({'reply': reply}),
+    );
+    if (res.statusCode != 200) throw Exception('Failed to send reply');
   }
 }
 

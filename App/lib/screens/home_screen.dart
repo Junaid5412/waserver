@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../config/theme.dart';
 import '../services/auth_service.dart';
+import '../services/realtime_service.dart';
 import '../widgets/instance_switcher_header.dart';
 import 'chats_tab.dart';
 import 'groups_tab.dart';
@@ -10,6 +13,7 @@ import 'tools_screen.dart';
 import 'connect_screen.dart';
 import 'admin_control_center_screen.dart';
 import 'settings_screen.dart';
+import 'notifications_screen.dart';
 import '../config/permissions.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -21,6 +25,168 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
+  StreamSubscription<RealtimeEvent>? _realtimeSub;
+  int _unreadBroadcastsCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkUnreadBroadcasts();
+    _subscribeRealtime();
+  }
+
+  @override
+  void dispose() {
+    _realtimeSub?.cancel();
+    super.dispose();
+  }
+
+  void _subscribeRealtime() {
+    _realtimeSub?.cancel();
+    final auth = Provider.of<AuthService>(context, listen: false);
+    _realtimeSub = auth.realtime.events.listen((event) {
+      if (event.type == 'admin_broadcast') {
+        HapticFeedback.heavyImpact();
+        SystemSound.play(SystemSoundType.alert);
+        _checkUnreadBroadcasts();
+
+        final data = event.raw['data'] as Map<String, dynamic>? ?? {};
+        _showNotificationBanner(
+          'Zelon Admin',
+          'You got a new message from Admin',
+        );
+        _showBroadcastPopup(data);
+      } else if (event.type == 'message' && event.fromMe != true) {
+        HapticFeedback.lightImpact();
+        final raw = event.raw['data'] as Map<String, dynamic>? ?? {};
+        final sender = raw['pushName']?.toString() ?? 'WhatsApp Contact';
+        final text = raw['message']?['conversation']?.toString() ??
+            raw['message']?['extendedTextMessage']?['text']?.toString() ??
+            'New message received';
+        _showNotificationBanner(sender, text);
+      }
+    });
+  }
+
+  Future<void> _checkUnreadBroadcasts() async {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    try {
+      final list = await auth.api.getUserBroadcasts();
+      final unread = list.where((b) => b['seen'] != true || (b['requireAck'] == true && b['acknowledged'] != true)).length;
+      if (mounted) setState(() => _unreadBroadcastsCount = unread);
+    } catch (_) {}
+  }
+
+  void _showNotificationBanner(String title, String body) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(12),
+        backgroundColor: WhatsAppTheme.surfaceDark,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        content: Row(
+          children: [
+            const CircleAvatar(
+              radius: 14,
+              backgroundColor: WhatsAppTheme.primaryGreen,
+              child: Icon(Icons.notifications_active_rounded, color: Colors.white, size: 16),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white)),
+                  Text(body, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.white70)),
+                ],
+              ),
+            ),
+          ],
+        ),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
+  void _showBroadcastPopup(Map<String, dynamic> b) {
+    if (!mounted) return;
+    final id = b['id']?.toString() ?? '';
+    final title = b['title']?.toString() ?? 'Admin Announcement';
+    final body = b['body']?.toString() ?? '';
+    final requireAck = b['requireAck'] == true;
+    final isUrgent = b['urgency'] == 'urgent';
+
+    showDialog(
+      context: context,
+      barrierDismissible: !requireAck,
+      builder: (dlgCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: isUrgent ? Colors.red.shade100 : WhatsAppTheme.primaryGreen.withOpacity(0.15),
+              child: Icon(
+                isUrgent ? Icons.warning_amber_rounded : Icons.campaign_rounded,
+                color: isUrgent ? Colors.red : WhatsAppTheme.primaryGreen,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (isUrgent)
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(6)),
+                child: const Text('URGENT NOTICE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10)),
+              ),
+            Text(
+              body,
+              style: const TextStyle(fontSize: 14.5, height: 1.4),
+            ),
+          ],
+        ),
+        actions: [
+          if (!requireAck)
+            TextButton(
+              onPressed: () => Navigator.pop(dlgCtx),
+              child: const Text('Dismiss'),
+            ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: WhatsAppTheme.primaryGreen),
+            onPressed: () async {
+              Navigator.pop(dlgCtx);
+              if (requireAck && id.isNotEmpty) {
+                final auth = Provider.of<AuthService>(context, listen: false);
+                await auth.api.acknowledgeBroadcast(id);
+                _checkUnreadBroadcasts();
+              }
+              if (mounted) {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+                );
+              }
+            },
+            child: Text(requireAck ? 'Acknowledge' : 'View Notices', style: const TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildTabWithPermission({
     required Widget child,
@@ -232,6 +398,42 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         actions: [
+          // Notification Bell with Badge
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.notifications_outlined, color: Colors.white, size: 24),
+                tooltip: 'Admin Notices',
+                onPressed: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+                  );
+                  _checkUnreadBroadcasts();
+                },
+              ),
+              if (_unreadBroadcastsCount > 0)
+                Positioned(
+                  right: 8,
+                  top: 8,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                    ),
+                    constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                    child: Center(
+                      child: Text(
+                        '$_unreadBroadcastsCount',
+                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+
           // Link Device Quick Button
           IconButton(
             icon: const Icon(Icons.qr_code_scanner_rounded, color: Colors.white, size: 22),
@@ -246,8 +448,13 @@ class _HomeScreenState extends State<HomeScreen> {
           // 3-Dots Popup Menu
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert, color: Colors.white),
-            onSelected: (value) {
-              if (value == 'connect') {
+            onSelected: (value) async {
+              if (value == 'notices') {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+                );
+                _checkUnreadBroadcasts();
+              } else if (value == 'connect') {
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const ConnectScreen()),
                 );
@@ -260,6 +467,27 @@ class _HomeScreenState extends State<HomeScreen> {
               }
             },
             itemBuilder: (ctx) => [
+              PopupMenuItem(
+                value: 'notices',
+                child: Row(
+                  children: [
+                    const Icon(Icons.campaign_rounded, size: 20, color: WhatsAppTheme.primaryGreen),
+                    const SizedBox(width: 12),
+                    const Text('Admin Notices'),
+                    if (_unreadBroadcastsCount > 0) ...[
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(10)),
+                        child: Text(
+                          '$_unreadBroadcastsCount',
+                          style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
               PopupMenuItem(
                 value: 'connect',
                 child: Row(

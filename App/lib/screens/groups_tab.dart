@@ -78,10 +78,32 @@ class _GroupsTabState extends State<GroupsTab> {
     final cachedNonDirect = cached.where((c) => !c.isDirect && !c.isStatus).toList();
     if (cachedNonDirect.isNotEmpty && mounted) {
       setState(() => _items = cachedNonDirect);
+      _preloadRecentGroups(inst.id, cachedNonDirect);
     }
 
     // 2. Fresh network sync
     _syncInBackground();
+  }
+
+  bool _isPreloading = false;
+  Future<void> _preloadRecentGroups(String instanceId, List<ChatModel> groupList) async {
+    if (_isPreloading || groupList.isEmpty) return;
+    _isPreloading = true;
+    try {
+      final auth = Provider.of<AuthService>(context, listen: false);
+      final topGroups = groupList.take(10).toList();
+      for (final g in topGroups) {
+        if (!mounted) break;
+        try {
+          final msgs = await auth.api.getMessages(instanceId, g.chatId, limit: 30);
+          if (msgs.isNotEmpty) {
+            await CacheService.saveMessages(instanceId, g.chatId, msgs);
+          }
+        } catch (_) {}
+      }
+    } finally {
+      _isPreloading = false;
+    }
   }
 
   Future<void> _syncInBackground() async {
@@ -98,6 +120,7 @@ class _GroupsTabState extends State<GroupsTab> {
           _isLoading = false;
         });
         await CacheService.saveChats(inst.id, fresh);
+        _preloadRecentGroups(inst.id, freshNonDirect);
       }
     } catch (_) {
       if (mounted) setState(() => _isLoading = false);

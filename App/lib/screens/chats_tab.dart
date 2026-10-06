@@ -78,10 +78,32 @@ class _ChatsTabState extends State<ChatsTab> {
     final cachedDirect = cached.where((c) => c.isDirect).toList();
     if (cachedDirect.isNotEmpty && mounted) {
       setState(() => _chats = cachedDirect);
+      _preloadRecentChats(inst.id, cachedDirect);
     }
 
     // 2. Fresh network sync
     _syncInBackground();
+  }
+
+  bool _isPreloading = false;
+  Future<void> _preloadRecentChats(String instanceId, List<ChatModel> chatList) async {
+    if (_isPreloading || chatList.isEmpty) return;
+    _isPreloading = true;
+    try {
+      final auth = Provider.of<AuthService>(context, listen: false);
+      final topChats = chatList.take(15).toList();
+      for (final c in topChats) {
+        if (!mounted) break;
+        try {
+          final msgs = await auth.api.getMessages(instanceId, c.chatId, limit: 35);
+          if (msgs.isNotEmpty) {
+            await CacheService.saveMessages(instanceId, c.chatId, msgs);
+          }
+        } catch (_) {}
+      }
+    } finally {
+      _isPreloading = false;
+    }
   }
 
   Future<void> _syncInBackground() async {
@@ -98,6 +120,7 @@ class _ChatsTabState extends State<ChatsTab> {
           _isLoading = false;
         });
         await CacheService.saveChats(inst.id, fresh);
+        _preloadRecentChats(inst.id, freshDirect);
       }
     } catch (_) {
       if (mounted) setState(() => _isLoading = false);

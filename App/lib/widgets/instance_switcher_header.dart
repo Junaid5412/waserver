@@ -85,6 +85,7 @@ class InstanceSwitcherHeader extends StatelessWidget {
                         final inst = instances[i];
                         final isSelected = inst.id == current?.id;
                         final isOnline = inst.isConnected;
+                        final isDefault = inst.id == auth.defaultInstanceId;
 
                         return ListTile(
                           contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
@@ -115,13 +116,46 @@ class InstanceSwitcherHeader extends StatelessWidget {
                               ),
                             ],
                           ),
-                          title: Text(
-                            inst.name.isNotEmpty ? inst.name : 'Instance ${inst.id.substring(0, 6)}',
-                            style: TextStyle(
-                              fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                              fontSize: 15.5,
-                              color: isSelected ? WhatsAppTheme.primaryGreen : null,
-                            ),
+                          title: Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  inst.name.isNotEmpty ? inst.name : 'Instance ${inst.id.substring(0, 6)}',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                                    fontSize: 15.5,
+                                    color: isSelected ? WhatsAppTheme.primaryGreen : null,
+                                  ),
+                                ),
+                              ),
+                              if (isDefault) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.amber.shade100,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.amber.shade600, width: 0.8),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.star_rounded, size: 13, color: Colors.amber.shade800),
+                                      const SizedBox(width: 2),
+                                      Text(
+                                        'Default',
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.amber.shade900,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ],
                           ),
                           subtitle: Text(
                             inst.phone != null && inst.phone!.isNotEmpty
@@ -133,9 +167,101 @@ class InstanceSwitcherHeader extends StatelessWidget {
                               fontWeight: isOnline ? FontWeight.w600 : FontWeight.normal,
                             ),
                           ),
-                          trailing: isSelected
-                              ? const Icon(Icons.check_circle, color: WhatsAppTheme.primaryGreen)
-                              : null,
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (isSelected)
+                                const Padding(
+                                  padding: EdgeInsets.only(right: 4),
+                                  child: Icon(Icons.check_circle, color: WhatsAppTheme.primaryGreen, size: 22),
+                                ),
+                              PopupMenuButton<String>(
+                                icon: const Icon(Icons.more_vert, size: 20, color: Colors.grey),
+                                tooltip: 'Account Options',
+                                onSelected: (val) async {
+                                  if (val == 'default') {
+                                    await auth.setDefaultInstance(inst.id);
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('${inst.name} set as Default Account'),
+                                          backgroundColor: WhatsAppTheme.primaryGreen,
+                                        ),
+                                      );
+                                    }
+                                  } else if (val == 'delete') {
+                                    final confirm = await showDialog<bool>(
+                                      context: context,
+                                      builder: (dlgCtx) => AlertDialog(
+                                        title: const Text('Delete Account?'),
+                                        content: Text(
+                                          'Are you sure you want to permanently delete "${inst.name}"?\nThis will disconnect the session.',
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () => Navigator.pop(dlgCtx, false),
+                                            child: const Text('Cancel'),
+                                          ),
+                                          ElevatedButton(
+                                            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                                            onPressed: () => Navigator.pop(dlgCtx, true),
+                                            child: const Text('Delete', style: TextStyle(color: Colors.white)),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                    if (confirm == true) {
+                                      try {
+                                        await auth.deleteInstance(inst.id);
+                                        if (context.mounted) {
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            const SnackBar(
+                                              content: Text('Account deleted successfully'),
+                                              backgroundColor: Colors.red,
+                                            ),
+                                          );
+                                        }
+                                      } catch (err) {
+                                        if (context.mounted) {
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(content: Text('Delete failed: $err')),
+                                          );
+                                        }
+                                      }
+                                    }
+                                  }
+                                },
+                                itemBuilder: (menuCtx) => [
+                                  PopupMenuItem(
+                                    value: 'default',
+                                    enabled: !isDefault,
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          isDefault ? Icons.star_rounded : Icons.star_border_rounded,
+                                          color: isDefault ? Colors.grey : Colors.amber.shade700,
+                                          size: 18,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(isDefault ? 'Default Account' : 'Set as Default'),
+                                      ],
+                                    ),
+                                  ),
+                                  const PopupMenuDivider(),
+                                  const PopupMenuItem(
+                                    value: 'delete',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.delete_forever_rounded, color: Colors.red, size: 18),
+                                        SizedBox(width: 8),
+                                        Text('Delete Account', style: TextStyle(color: Colors.red)),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                           onTap: () {
                             auth.selectInstance(inst);
                             Navigator.pop(ctx);

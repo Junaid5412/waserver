@@ -29,6 +29,10 @@ class AuthService extends ChangeNotifier {
   static const String _prefTokenKey = 'zelon_auth_token';
   static const String _prefUserKey = 'zelon_auth_user';
   static const String _prefSelectedInstKey = 'zelon_selected_inst';
+  static const String _prefDefaultInstKey = 'zelon_default_instance_id';
+
+  String? _defaultInstanceId;
+  String? get defaultInstanceId => _defaultInstanceId;
 
   AuthService({required this.api}) {
     realtime = RealtimeService(api: api);
@@ -46,8 +50,11 @@ class AuthService extends ChangeNotifier {
         _currentUser = UserModel.fromJson(jsonDecode(userStr));
         // Load cached instances immediately for fast startup
         _instances = await CacheService.getCachedInstances();
+        _defaultInstanceId = prefs.getString(_prefDefaultInstKey);
         final selId = prefs.getString(_prefSelectedInstKey);
-        if (selId != null) {
+        if (_defaultInstanceId != null && _instances.any((x) => x.id == _defaultInstanceId)) {
+          _selectedInstance = _instances.firstWhere((x) => x.id == _defaultInstanceId);
+        } else if (selId != null) {
           _selectedInstance = _instances.where((x) => x.id == selId).firstOrNull;
         }
         if (_selectedInstance == null && _instances.isNotEmpty) {
@@ -108,9 +115,15 @@ class AuthService extends ChangeNotifier {
       _instances = await api.getInstances();
       await CacheService.saveInstances(_instances);
       final prefs = await SharedPreferences.getInstance();
+      _defaultInstanceId = prefs.getString(_prefDefaultInstKey);
       final selId = prefs.getString(_prefSelectedInstKey);
-      if (selId != null) {
-        _selectedInstance = _instances.where((x) => x.id == selId).firstOrNull;
+
+      if (_defaultInstanceId != null && _instances.any((x) => x.id == _defaultInstanceId)) {
+        if (_selectedInstance == null || !_instances.any((x) => x.id == _selectedInstance!.id)) {
+          _selectedInstance = _instances.firstWhere((x) => x.id == _defaultInstanceId);
+        }
+      } else if (selId != null && _instances.any((x) => x.id == selId)) {
+        _selectedInstance = _instances.firstWhere((x) => x.id == selId);
       }
       if (_selectedInstance == null && _instances.isNotEmpty) {
         _selectedInstance = _instances.first;
@@ -128,6 +141,35 @@ class AuthService extends ChangeNotifier {
     await prefs.setString(_prefSelectedInstKey, inst.id);
     realtime.connect(inst.id);
     notifyListeners();
+  }
+
+  Future<void> setDefaultInstance(String instanceId) async {
+    _defaultInstanceId = instanceId;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefDefaultInstKey, instanceId);
+    final inst = _instances.where((x) => x.id == instanceId).firstOrNull;
+    if (inst != null) {
+      selectInstance(inst);
+    } else {
+      notifyListeners();
+    }
+  }
+
+  Future<void> deleteInstance(String instanceId) async {
+    await api.deleteInstance(instanceId);
+    final prefs = await SharedPreferences.getInstance();
+    if (_defaultInstanceId == instanceId) {
+      _defaultInstanceId = null;
+      await prefs.remove(_prefDefaultInstKey);
+    }
+    final selId = prefs.getString(_prefSelectedInstKey);
+    if (selId == instanceId) {
+      await prefs.remove(_prefSelectedInstKey);
+    }
+    if (_selectedInstance?.id == instanceId) {
+      _selectedInstance = null;
+    }
+    await refreshInstances();
   }
 
   Future<void> logout() async {

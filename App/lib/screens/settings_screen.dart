@@ -9,6 +9,7 @@ import '../services/chat_design_service.dart';
 import 'admin_control_center_screen.dart';
 import 'lock_screen.dart';
 import 'login_screen.dart';
+import 'notifications_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   final bool showAppBar;
@@ -271,7 +272,7 @@ class SettingsScreen extends StatelessWidget {
                   style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15.5),
                 ),
                 subtitle: const Text(
-                  'All Users, Add User, Health, Server Profile',
+                  'All Users, Health, Broadcasts, AI, Profile',
                   style: TextStyle(color: Colors.white70, fontSize: 12),
                 ),
                 trailing: const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white70, size: 16),
@@ -289,17 +290,36 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: const Icon(Icons.phone_android, color: WhatsAppTheme.primaryGreen),
             title: const Text('Active Connected Account'),
-            subtitle: Text(inst != null ? '${inst.name} (${inst.status})' : 'None selected'),
+            subtitle: Text(
+              inst != null
+                  ? '${inst.name} (${inst.status})${inst.id == auth.defaultInstanceId ? " • Default Account" : ""}'
+                  : 'None selected',
+            ),
             trailing: PopupMenuButton<InstanceModel>(
               icon: const Icon(Icons.arrow_drop_down),
               onSelected: (selected) => auth.selectInstance(selected),
               itemBuilder: (_) => auth.instances.map((i) {
+                final isDef = i.id == auth.defaultInstanceId;
                 return PopupMenuItem(
                   value: i,
-                  child: Text('${i.name} (${i.status})'),
+                  child: Text('${i.name} (${i.status})${isDef ? " [Default]" : ""}'),
                 );
               }).toList(),
             ),
+          ),
+          const Divider(height: 1),
+
+          // Admin Notices & Announcements
+          ListTile(
+            leading: const Icon(Icons.campaign_rounded, color: WhatsAppTheme.primaryGreen),
+            title: const Text('Admin Notices & Announcements'),
+            subtitle: const Text('View broadcast alerts, urgent messages & acknowledgments'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+              );
+            },
           ),
           const Divider(height: 1),
 

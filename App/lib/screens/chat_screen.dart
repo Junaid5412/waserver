@@ -63,6 +63,8 @@ class _ChatScreenState extends State<ChatScreen> {
   // AI Smart Reply
   bool _isLoadingAiSuggestions = false;
   List<String> _aiSuggestions = [];
+  String? _lastAutoSuggestedMsgId;
+  Timer? _autoSuggestDebounceTimer;
 
   final List<String> _popularEmojis = [
     '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇',
@@ -191,6 +193,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    _autoSuggestDebounceTimer?.cancel();
     _foregroundPollTimer?.cancel();
     _debounceTimer?.cancel();
     _recordingTimer?.cancel();
@@ -216,11 +219,53 @@ class _ChatScreenState extends State<ChatScreen> {
         _isLoading = false;
       });
       _scrollToBottom();
+      _triggerAutoSuggestIfEligible();
     } else {
       setState(() => _isLoading = true);
     }
 
     _syncMessagesSilently(forceScroll: true);
+  }
+
+  void _triggerAutoSuggestIfEligible() {
+    if (_messages.isEmpty) return;
+    final last = _messages.last;
+    if (last.fromMe || last.text.trim().isEmpty) return;
+    if (_lastAutoSuggestedMsgId == last.waId) return;
+
+    _autoSuggestDebounceTimer?.cancel();
+    _autoSuggestDebounceTimer = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      _lastAutoSuggestedMsgId = last.waId;
+      _autoReadAndSuggestReplies();
+    });
+  }
+
+  Future<void> _autoReadAndSuggestReplies() async {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final instanceId = auth.selectedInstance?.id;
+    if (instanceId == null) return;
+    if (auth.currentUser?.permissions.canUseAi == false) return;
+
+    setState(() => _isLoadingAiSuggestions = true);
+
+    try {
+      final suggestions = await auth.api.generateSmartReply(
+        instanceId,
+        widget.chat.chatId,
+        _messages.reversed.take(25).toList().reversed.toList(),
+      );
+      if (mounted && suggestions.isNotEmpty) {
+        setState(() {
+          _aiSuggestions = suggestions;
+          _isLoadingAiSuggestions = false;
+        });
+      } else if (mounted) {
+        setState(() => _isLoadingAiSuggestions = false);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoadingAiSuggestions = false);
+    }
   }
 
   Future<void> _syncMessagesSilently({bool checkForNewOnly = false, bool forceScroll = false}) async {
@@ -251,6 +296,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _isLoading = false;
       });
       await CacheService.saveMessages(instanceId, widget.chat.chatId, fresh);
+      _triggerAutoSuggestIfEligible();
 
       if (forceScroll || !hadMessages || (isNearBottom && fresh.length > _messages.length)) {
         _scrollToBottom(smooth: hadMessages);

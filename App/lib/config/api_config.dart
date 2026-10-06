@@ -50,5 +50,14 @@ class ApiConfig {
   static String statusesUrl(String instanceId) => '$_baseUrl/api/instances/$instanceId/statuses';
   static String campaignsUrl(String instanceId) => '$_baseUrl/api/instances/$instanceId/campaigns';
   static String rulesUrl(String instanceId) => '$_baseUrl/api/instances/$instanceId/rules';
-  static String mediaUrl(String instanceId) => '$_baseUrl/api/instances/$instanceId/media';
+  static String get mediaUrl => '$_baseUrl/api/media';
+  static String deleteInstanceUrl(String instanceId) => '$_baseUrl/api/instances/$instanceId/delete';
+
+  // Admin Broadcasts & User Announcements
+  static String get adminBroadcastsUrl => '$_baseUrl/api/admin/broadcasts';
+  static String adminBroadcastAuditUrl(String id) => '$_baseUrl/api/admin/broadcasts/$id/audit';
+  static String get userBroadcastsUrl => '$_baseUrl/api/user/broadcasts';
+  static String broadcastSeenUrl(String id) => '$_baseUrl/api/user/broadcasts/$id/seen';
+  static String broadcastAckUrl(String id) => '$_baseUrl/api/user/broadcasts/$id/ack';
+  static String broadcastReplyUrl(String id) => '$_baseUrl/api/user/broadcasts/$id/reply';
 }

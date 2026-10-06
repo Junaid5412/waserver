@@ -10,6 +10,7 @@ import '../models/user.dart';
 import '../services/auth_service.dart';
 import '../services/chat_design_service.dart';
 import '../screens/pdf_viewer_screen.dart';
+import '../screens/document_viewer_screen.dart';
 import 'status_indicator.dart';
 import 'voice_player.dart';
 
@@ -134,7 +135,24 @@ class ChatBubble extends StatelessWidget {
       );
     } else if (type == 'document' || message.mimetype?.startsWith('application/') == true) {
       final docName = message.filename?.isNotEmpty == true ? message.filename! : 'Document';
-      final isPdf = docName.toLowerCase().endsWith('.pdf') || message.mimetype == 'application/pdf';
+      final lowerName = docName.toLowerCase();
+      final lowerMime = (message.mimetype ?? '').toLowerCase();
+
+      final isPdf = lowerName.endsWith('.pdf') || lowerMime == 'application/pdf';
+      final isExcel = lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls') || lowerName.endsWith('.csv') || lowerMime.contains('spreadsheet') || lowerMime.contains('excel');
+      final isWord = lowerName.endsWith('.docx') || lowerName.endsWith('.doc') || lowerMime.contains('word');
+
+      final Color badgeColor = isPdf
+          ? Colors.red.shade700
+          : (isExcel
+              ? const Color(0xFF1D6F42)
+              : (isWord ? const Color(0xFF2B579A) : Colors.indigo.shade600));
+
+      final IconData docIcon = isPdf
+          ? Icons.picture_as_pdf_rounded
+          : (isExcel
+              ? Icons.table_chart_rounded
+              : (isWord ? Icons.description_rounded : Icons.insert_drive_file_rounded));
 
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -143,7 +161,7 @@ class ChatBubble extends StatelessWidget {
             onTap: () {
               Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (_) => PdfViewerScreen(
+                  builder: (_) => DocumentViewerScreen(
                     title: docName,
                     documentUrl: mediaUrl,
                     headers: headers,
@@ -165,11 +183,11 @@ class ChatBubble extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: isPdf ? Colors.red.shade700 : Colors.indigo.shade600,
+                      color: badgeColor,
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Icon(
-                      isPdf ? Icons.picture_as_pdf : Icons.insert_drive_file,
+                      docIcon,
                       color: Colors.white,
                       size: 24,
                     ),

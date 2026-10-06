@@ -57,22 +57,30 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
   final Map<String, bool?> _keyTestResults = {};
   final Map<String, bool> _keyTestingState = {};
 
+  // Broadcasts Tab
+  List<Map<String, dynamic>> _broadcasts = [];
+  bool _isLoadingBroadcasts = false;
+
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
     _loadUsers();
     _loadHealth();
     _loadAccount();
     _loadGeminiKeys();
+    _loadBroadcasts();
 
     _tabController.addListener(() {
+      if (mounted) setState(() {});
       if (_tabController.index == 1 && _health == null) {
         _loadHealth();
-      } else if (_tabController.index == 2 && _accountProfile == null) {
-        _loadAccount();
+      } else if (_tabController.index == 2) {
+        _loadBroadcasts();
       } else if (_tabController.index == 3 && _geminiKeys.isEmpty) {
         _loadGeminiKeys();
+      } else if (_tabController.index == 4 && _accountProfile == null) {
+        _loadAccount();
       }
     });
   }
@@ -760,11 +768,13 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
           indicatorWeight: 3,
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white70,
+          isScrollable: true,
           tabs: const [
             Tab(icon: Icon(Icons.people_alt_rounded), text: 'Users'),
             Tab(icon: Icon(Icons.monitor_heart_rounded), text: 'Health'),
-            Tab(icon: Icon(Icons.manage_accounts_rounded), text: 'Profile'),
+            Tab(icon: Icon(Icons.campaign_rounded), text: 'Broadcasts'),
             Tab(icon: Icon(Icons.auto_awesome), text: 'Gemini AI'),
+            Tab(icon: Icon(Icons.manage_accounts_rounded), text: 'Profile'),
           ],
         ),
         actions: [
@@ -774,8 +784,9 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
             onPressed: () {
               if (_tabController.index == 0) _loadUsers();
               if (_tabController.index == 1) _loadHealth();
-              if (_tabController.index == 2) _loadAccount();
+              if (_tabController.index == 2) _loadBroadcasts();
               if (_tabController.index == 3) _loadGeminiKeys();
+              if (_tabController.index == 4) _loadAccount();
             },
           ),
         ],
@@ -789,14 +800,24 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
               label: const Text('Add User'),
               onPressed: _showAddUserDialog,
             )
-          : null,
+          : (_tabController.index == 2
+              ? FloatingActionButton.extended(
+                  heroTag: 'admin_send_broadcast',
+                  backgroundColor: WhatsAppTheme.primaryGreen,
+                  foregroundColor: Colors.white,
+                  icon: const Icon(Icons.campaign_rounded),
+                  label: const Text('New Broadcast'),
+                  onPressed: _showCreateBroadcastDialog,
+                )
+              : null),
       body: TabBarView(
         controller: _tabController,
         children: [
           _buildUsersTab(isDark),
           _buildHealthTab(isDark),
-          _buildAccountTab(isDark),
+          _buildBroadcastsTab(isDark),
           _buildGeminiTab(isDark),
+          _buildAccountTab(isDark),
         ],
       ),
     );
@@ -1026,7 +1047,7 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
     );
   }
 
-  // --- Health Tab Widget ---
+  // --- Responsive Health Tab Widget ---
   Widget _buildHealthTab(bool isDark) {
     if (_isLoadingHealth && _health == null) {
       return const Center(child: CircularProgressIndicator(color: WhatsAppTheme.primaryGreen));
@@ -1055,116 +1076,266 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
     final uptimeSec = h['uptimeSeconds'] ?? 0;
     final mem = h['memory'] as Map<String, dynamic>? ?? {};
     final rssMb = ((mem['rss'] ?? 0) / (1024 * 1024)).toStringAsFixed(1);
-    final heapUsedMb = ((mem['heapUsed'] ?? 0) / (1024 * 1024)).toStringAsFixed(1);
+    final heapUsed = (mem['heapUsed'] ?? 0).toDouble();
+    final heapTotal = (mem['heapTotal'] ?? 1).toDouble();
+    final heapUsedMb = (heapUsed / (1024 * 1024)).toStringAsFixed(1);
+    final heapTotalMb = (heapTotal / (1024 * 1024)).toStringAsFixed(1);
+    final heapPercent = (heapUsed / (heapTotal > 0 ? heapTotal : 1)).clamp(0.0, 1.0);
+
     final instances = h['instances'] as Map<String, dynamic>? ?? {};
     final totalInst = instances['total'] ?? 0;
     final sockets = instances['sockets'] ?? 0;
+    final byStatus = instances['byStatus'] as Map<String, dynamic>? ?? {};
+
     final counts = h['counts'] as Map<String, dynamic>? ?? {};
     final totalMessages = counts['messages'] ?? 0;
     final totalUsers = counts['users'] ?? 0;
+    final totalMedia = counts['media'] ?? 0;
+    final totalHooks = counts['hooks'] ?? 0;
 
     return RefreshIndicator(
       onRefresh: _loadHealth,
-      child: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // Status Banner
-          Container(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth > 500;
+          final crossAxisCount = isWide ? 3 : 2;
+
+          return ListView(
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  WhatsAppTheme.primaryGreen,
-                  const Color(0xFF075E54),
+            children: [
+              // Server Status Banner
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [WhatsAppTheme.primaryGreen, Color(0xFF075E54)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: WhatsAppTheme.primaryGreen.withOpacity(0.3),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.check_circle_rounded, color: Colors.white, size: 32),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Zelon Core Server Operational',
+                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                              ),
+                              Text(
+                                'Multi-Device Baileys Engine Active',
+                                style: TextStyle(color: Colors.white70, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            '${dbMs}ms DB',
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Divider(color: Colors.white24, height: 24),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Uptime: ${_formatUptime(uptimeSec)}',
+                          style: const TextStyle(color: Colors.white, fontSize: 12.5),
+                        ),
+                        Text(
+                          'Active Sockets: $sockets / $totalInst',
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12.5),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Responsive Metric Tiles
+              GridView.count(
+                crossAxisCount: crossAxisCount,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 10,
+                childAspectRatio: isWide ? 1.6 : 1.35,
+                children: [
+                  _metricTile('Active Sockets', '$sockets / $totalInst', Icons.hub_rounded, Colors.teal),
+                  _metricTile('Server Uptime', _formatUptime(uptimeSec), Icons.timer_outlined, Colors.indigo),
+                  _metricTile('Total Messages', '$totalMessages', Icons.chat_rounded, Colors.green),
+                  _metricTile('Registered Users', '$totalUsers', Icons.people_outline, Colors.blue),
+                  _metricTile('Media Storage', '$totalMedia items', Icons.photo_library_outlined, Colors.deepOrange),
+                  _metricTile('Webhooks Active', '$totalHooks', Icons.webhook_rounded, Colors.purple),
                 ],
               ),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.check_circle_rounded, color: Colors.white, size: 36),
-                const SizedBox(width: 14),
-                Expanded(
+              const SizedBox(height: 16),
+
+              // Memory & Engine Card
+              Card(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Zelon Core Server Healthy',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                      Row(
+                        children: [
+                          Icon(Icons.memory_rounded, color: Colors.purple.shade600, size: 22),
+                          const SizedBox(width: 8),
+                          const Text('Memory & Node.js Engine', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                          const Spacer(),
+                          Text('$rssMb MB RSS', style: TextStyle(color: Colors.grey.shade600, fontSize: 12, fontWeight: FontWeight.bold)),
+                        ],
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'DB Ping: ${dbMs}ms • Engine: Baileys Multi-Device',
-                        style: const TextStyle(color: Colors.white70, fontSize: 12.5),
+                      const SizedBox(height: 14),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Heap Utilization', style: TextStyle(fontSize: 13, color: Colors.grey)),
+                          Text(
+                            '$heapUsedMb MB / $heapTotalMb MB (${(heapPercent * 100).toStringAsFixed(0)}%)',
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: LinearProgressIndicator(
+                          value: heapPercent,
+                          minHeight: 8,
+                          backgroundColor: Colors.grey.shade200,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            heapPercent > 0.85 ? Colors.red : (heapPercent > 0.65 ? Colors.amber : Colors.purple),
+                          ),
+                        ),
                       ),
                     ],
                   ),
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
+              ),
+              const SizedBox(height: 12),
 
-          // Quick Stats Grid
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            childAspectRatio: 1.5,
-            children: [
-              _metricTile('Active Sockets', '$sockets / $totalInst', Icons.hub_rounded, Colors.teal),
-              _metricTile('Server Uptime', _formatUptime(uptimeSec), Icons.timer_outlined, Colors.indigo),
-              _metricTile('RAM RSS', '$rssMb MB', Icons.memory_rounded, Colors.purple),
-              _metricTile('Heap Used', '$heapUsedMb MB', Icons.storage_rounded, Colors.deepOrange),
-              _metricTile('Total Messages', '$totalMessages', Icons.chat_rounded, Colors.green),
-              _metricTile('Total Users', '$totalUsers', Icons.people_outline, Colors.blue),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          // Server details list
-          Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Column(
-              children: [
-                ListTile(
-                  leading: const Icon(Icons.code_rounded),
-                  title: const Text('Node Version'),
-                  trailing: Text(h['nodeVersion'] ?? 'N/A', style: const TextStyle(fontWeight: FontWeight.bold)),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.computer_rounded),
-                  title: const Text('Platform'),
-                  trailing: Text(h['platform'] ?? 'N/A', style: const TextStyle(fontWeight: FontWeight.bold)),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.send_rounded),
-                  title: const Text('Trigger KeepAlive Ping'),
-                  subtitle: const Text('Pings active sockets to keep connection alive'),
-                  trailing: ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: WhatsAppTheme.primaryGreen),
-                    onPressed: () async {
-                      final auth = Provider.of<AuthService>(context, listen: false);
-                      try {
-                        await auth.api.triggerKeepAlive();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Keepalive ping completed successfully!')),
-                        );
-                      } catch (e) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-                      }
-                    },
-                    child: const Text('Run Ping', style: TextStyle(color: Colors.white, fontSize: 12)),
+              // WhatsApp Instances Breakdown
+              Card(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.phone_android_rounded, color: WhatsAppTheme.primaryGreen, size: 22),
+                          const SizedBox(width: 8),
+                          const Text('WhatsApp Instances Status', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                          const Spacer(),
+                          Text('$totalInst Total', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          _statusPill('Connected: ${byStatus["connected"] ?? 0}', Colors.green),
+                          _statusPill('Connecting: ${byStatus["connecting"] ?? 0}', Colors.amber.shade700),
+                          _statusPill('QR Code: ${byStatus["qr"] ?? 0}', Colors.blue),
+                          _statusPill('Disconnected: ${byStatus["disconnected"] ?? 0}', Colors.red),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ),
-          ),
-        ],
+              ),
+              const SizedBox(height: 12),
+
+              // Server Details & KeepAlive
+              Card(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                child: Column(
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.code_rounded),
+                      title: const Text('Node Version'),
+                      trailing: Text(h['nodeVersion'] ?? 'N/A', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      leading: const Icon(Icons.computer_rounded),
+                      title: const Text('Platform'),
+                      trailing: Text(h['platform'] ?? 'N/A', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      leading: const Icon(Icons.send_rounded),
+                      title: const Text('Trigger KeepAlive Ping'),
+                      subtitle: const Text('Pings active sockets to keep connection alive'),
+                      trailing: ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: WhatsAppTheme.primaryGreen),
+                        onPressed: () async {
+                          final auth = Provider.of<AuthService>(context, listen: false);
+                          try {
+                            await auth.api.triggerKeepAlive();
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Keepalive ping completed successfully!')),
+                              );
+                            }
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                            }
+                          }
+                        },
+                        child: const Text('Run Ping', style: TextStyle(color: Colors.white, fontSize: 12)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _statusPill(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.bold),
       ),
     );
   }
@@ -1174,7 +1345,7 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: color.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: color.withOpacity(0.2)),
       ),
       child: Column(
@@ -1183,16 +1354,470 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
         children: [
           Row(
             children: [
-              Icon(icon, size: 18, color: color),
+              Icon(icon, size: 20, color: color),
               const Spacer(),
-              Text(
-                value,
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: color),
+              Flexible(
+                child: Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: color),
+                ),
               ),
             ],
           ),
           const SizedBox(height: 8),
-          Text(title, style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+          Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- Broadcasts Tab & Tracking Dashboard ---
+  Future<void> _loadBroadcasts() async {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    setState(() => _isLoadingBroadcasts = true);
+    try {
+      final list = await auth.api.getAdminBroadcasts();
+      if (mounted) {
+        setState(() {
+          _broadcasts = list;
+          _isLoadingBroadcasts = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoadingBroadcasts = false);
+    }
+  }
+
+  void _showCreateBroadcastDialog() {
+    final titleCtrl = TextEditingController();
+    final bodyCtrl = TextEditingController();
+    bool requireAck = true;
+    bool allowReply = true;
+    String urgency = 'normal';
+
+    showDialog(
+      context: context,
+      builder: (dlgCtx) => StatefulBuilder(
+        builder: (ctx, setDlgState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.campaign_rounded, color: WhatsAppTheme.primaryGreen),
+              SizedBox(width: 10),
+              Text('Send Custom Message'),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Broadcast an alert or message to all users. A mobile notification and in-app popup will appear.',
+                  style: TextStyle(fontSize: 12.5, color: Colors.grey),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: titleCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Message Title',
+                    hintText: 'e.g. Server Maintenance Notice',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: bodyCtrl,
+                  maxLines: 4,
+                  decoration: const InputDecoration(
+                    labelText: 'Message Body',
+                    hintText: 'Type your message to all users...',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Require Acknowledgment', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                  subtitle: const Text('Users must tap "Acknowledge" button to confirm', style: TextStyle(fontSize: 12)),
+                  value: requireAck,
+                  activeColor: WhatsAppTheme.primaryGreen,
+                  onChanged: (val) => setDlgState(() => requireAck = val),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Allow User Replies', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                  subtitle: const Text('Users can write a text reply to this message', style: TextStyle(fontSize: 12)),
+                  value: allowReply,
+                  activeColor: WhatsAppTheme.primaryGreen,
+                  onChanged: (val) => setDlgState(() => allowReply = val),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Text('Urgency:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(width: 12),
+                    ChoiceChip(
+                      label: const Text('Normal'),
+                      selected: urgency == 'normal',
+                      onSelected: (val) => setDlgState(() => urgency = 'normal'),
+                    ),
+                    const SizedBox(width: 8),
+                    ChoiceChip(
+                      label: const Text('Urgent'),
+                      selectedColor: Colors.red.shade100,
+                      labelStyle: TextStyle(color: urgency == 'urgent' ? Colors.red : null),
+                      selected: urgency == 'urgent',
+                      onSelected: (val) => setDlgState(() => urgency = 'urgent'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dlgCtx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.send_rounded, size: 16),
+              label: const Text('Send Broadcast'),
+              style: ElevatedButton.styleFrom(backgroundColor: WhatsAppTheme.primaryGreen),
+              onPressed: () async {
+                final title = titleCtrl.text.trim();
+                final body = bodyCtrl.text.trim();
+                if (title.isEmpty || body.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please enter both title and message')),
+                  );
+                  return;
+                }
+
+                Navigator.pop(dlgCtx);
+                final auth = Provider.of<AuthService>(context, listen: false);
+                try {
+                  await auth.api.createAdminBroadcast(
+                    title: title,
+                    body: body,
+                    requireAck: requireAck,
+                    allowReply: allowReply,
+                    urgency: urgency,
+                  );
+                  _loadBroadcasts();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Broadcast sent successfully to all users!'),
+                        backgroundColor: WhatsAppTheme.primaryGreen,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                  }
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showBroadcastAuditDialog(Map<String, dynamic> bcast) async {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final broadcastId = bcast['id']?.toString() ?? '';
+
+    showDialog(
+      context: context,
+      builder: (dlgCtx) => FutureBuilder<Map<String, dynamic>>(
+        future: auth.api.getBroadcastAudit(broadcastId),
+        builder: (ctx, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const AlertDialog(
+              content: SizedBox(
+                height: 100,
+                child: Center(child: CircularProgressIndicator(color: WhatsAppTheme.primaryGreen)),
+              ),
+            );
+          }
+
+          if (snapshot.hasError) {
+            return AlertDialog(
+              title: const Text('Audit Error'),
+              content: Text('Failed to load tracking data: ${snapshot.error}'),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(dlgCtx), child: const Text('Close')),
+              ],
+            );
+          }
+
+          final data = snapshot.data!;
+          final list = List<Map<String, dynamic>>.from(data['audit'] ?? []);
+          final totalUsers = list.length;
+          final seenCount = list.where((u) => u['seen'] == true).length;
+          final ackCount = list.where((u) => u['acknowledged'] == true).length;
+          final replyCount = list.where((u) => u['reply'] != null && u['reply'].toString().isNotEmpty).length;
+
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: [
+                const Icon(Icons.analytics_rounded, color: WhatsAppTheme.primaryGreen),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    bcast['title'] ?? 'Broadcast Audit',
+                    style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Summary Badges
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      _statusPill('👁️ Seen: $seenCount / $totalUsers', Colors.blue),
+                      _statusPill('✅ Acknowledged: $ackCount / $totalUsers', Colors.green),
+                      _statusPill('⏳ Pending: ${totalUsers - ackCount}', Colors.orange),
+                      if (replyCount > 0) _statusPill('💬 Replies: $replyCount', Colors.purple),
+                    ],
+                  ),
+                  const Divider(height: 20),
+                  const Text('Recipient Tracking List:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(height: 8),
+
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: list.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (_, i) {
+                        final u = list[i];
+                        final name = u['name'] ?? 'User';
+                        final email = u['email'] ?? '';
+                        final seen = u['seen'] == true;
+                        final seenAt = u['seenAt']?.toString();
+                        final ack = u['acknowledged'] == true;
+                        final ackAt = u['acknowledgedAt']?.toString();
+                        final reply = u['reply']?.toString();
+
+                        return ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: CircleAvatar(
+                            radius: 16,
+                            backgroundColor: ack ? Colors.green.shade100 : (seen ? Colors.blue.shade100 : Colors.grey.shade200),
+                            child: Icon(
+                              ack ? Icons.check_circle_rounded : (seen ? Icons.visibility_rounded : Icons.schedule_rounded),
+                              size: 16,
+                              color: ack ? Colors.green : (seen ? Colors.blue : Colors.grey),
+                            ),
+                          ),
+                          title: Text('$name ($email)', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                seen ? 'Seen: ${_formatAuditTime(seenAt)}' : 'Not seen yet',
+                                style: TextStyle(fontSize: 11, color: seen ? Colors.blue : Colors.grey),
+                              ),
+                              Text(
+                                ack ? 'Acknowledged: ${_formatAuditTime(ackAt)}' : 'Pending Acknowledgment',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: ack ? Colors.green : Colors.orange.shade800,
+                                ),
+                              ),
+                              if (reply != null && reply.isNotEmpty)
+                                Container(
+                                  margin: const EdgeInsets.only(top: 4),
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.purple.shade50,
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(color: Colors.purple.shade200),
+                                  ),
+                                  child: Text('Reply: "$reply"', style: TextStyle(fontSize: 11.5, color: Colors.purple.shade900)),
+                                ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dlgCtx),
+                child: const Text('Close'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  String _formatAuditTime(String? iso) {
+    if (iso == null || iso.isEmpty) return 'N/A';
+    try {
+      final dt = DateTime.parse(iso).toLocal();
+      return '${dt.day}/${dt.month} ${dt.hour}:${dt.minute.toString().padLeft(2, "0")}';
+    } catch (_) {
+      return iso;
+    }
+  }
+
+  Widget _buildBroadcastsTab(bool isDark) {
+    if (_isLoadingBroadcasts && _broadcasts.isEmpty) {
+      return const Center(child: CircularProgressIndicator(color: WhatsAppTheme.primaryGreen));
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadBroadcasts,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          // Banner
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Colors.indigo.shade700, Colors.indigo.shade900],
+              ),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.campaign_rounded, color: Colors.white, size: 34),
+                const SizedBox(width: 14),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Broadcast Alerts & Notices',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'Send announcements to all users with acknowledgment tracking & mobile notifications.',
+                        style: TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Sent Broadcasts (${_broadcasts.length})',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+              ),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.add, size: 16),
+                label: const Text('New Broadcast'),
+                style: ElevatedButton.styleFrom(backgroundColor: WhatsAppTheme.primaryGreen),
+                onPressed: _showCreateBroadcastDialog,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          if (_broadcasts.isEmpty)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(32.0),
+                child: Text('No broadcasts sent yet. Tap "New Broadcast" to send an alert.', style: TextStyle(color: Colors.grey)),
+              ),
+            )
+          else
+            ..._broadcasts.map((b) {
+              final title = b['title']?.toString() ?? 'Notice';
+              final body = b['body']?.toString() ?? '';
+              final seen = b['seenCount'] ?? 0;
+              final ack = b['ackCount'] ?? 0;
+              final total = b['totalUsers'] ?? 0;
+              final pending = b['pendingCount'] ?? 0;
+              final isUrgent = b['urgency'] == 'urgent';
+
+              return Card(
+                margin: const EdgeInsets.only(bottom: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: isUrgent ? const BorderSide(color: Colors.red, width: 1.5) : BorderSide.none,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          if (isUrgent)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              margin: const EdgeInsets.only(right: 8),
+                              decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(4)),
+                              child: const Text('URGENT', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                            ),
+                          Expanded(
+                            child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(body, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          _statusPill('👁️ Seen: $seen / $total', Colors.blue),
+                          _statusPill('✅ Acknowledged: $ack / $total', Colors.green),
+                          if (pending > 0) _statusPill('⏳ Pending: $pending', Colors.orange),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          icon: const Icon(Icons.people_alt_outlined, size: 16),
+                          label: const Text('View Tracking & Audit'),
+                          onPressed: () => _showBroadcastAuditDialog(b),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
         ],
       ),
     );
