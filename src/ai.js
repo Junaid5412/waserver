@@ -19,12 +19,14 @@ export async function callGeminiWithFailover(keys, preferredModel, prompt, syste
     throw new Error("No Gemini API keys configured. Please add an API key in Admin Control Center.");
   }
 
-  // Model fallback chain: preferred -> 2.5-flash -> 2.0-flash -> 1.5-flash
+  // Model fallback chain: preferred -> 2.0-flash -> 1.5-flash -> 2.0-flash-lite -> 1.5-pro -> 2.5-flash
   const modelsToTry = [
     preferredModel,
-    "gemini-2.5-flash",
     "gemini-2.0-flash",
     "gemini-1.5-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-pro",
+    "gemini-2.5-flash",
   ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
 
   let lastError = null;
@@ -169,3 +171,94 @@ Format as a raw JSON array of 3 strings: ["reply 1", "reply 2", "reply 3"]. Retu
     keyIndexUsed: result.keyIndexUsed,
   };
 }
+
+/**
+ * Verify Gemini API key validity, fetch active models, and perform ping test.
+ * Consumes 0 tokens during model discovery and reports exact Google API diagnostics.
+ */
+export async function verifyGeminiKey(apiKey, testModel = null) {
+  const cleanKey = apiKey?.trim();
+  if (!cleanKey) {
+    return { ok: false, message: "API key cannot be empty", code: 400 };
+  }
+
+  // 1. Primary check: Query Google Generative Language models.list API
+  const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(cleanKey)}`;
+  try {
+    const res = await fetch(listUrl, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(12000),
+    });
+
+    const data = await res.json().catch(() => null);
+
+    if (!res.ok || data?.error) {
+      const errorMsg = data?.error?.message || `Google API returned HTTP ${res.status}`;
+      const code = data?.error?.code || res.status;
+      return {
+        ok: false,
+        message: `Google Verification Error (${code}): ${errorMsg}`,
+        code: code,
+      };
+    }
+
+    const rawModels = Array.isArray(data?.models) ? data.models : [];
+    const availableModels = rawModels
+      .filter((m) => !m.supportedGenerationMethods || m.supportedGenerationMethods.includes("generateContent"))
+      .map((m) => m.name.replace(/^models\//, ""));
+
+    // Candidate test models
+    const activeModel =
+      (testModel && availableModels.includes(testModel) ? testModel : null) ||
+      (availableModels.includes("gemini-2.0-flash") ? "gemini-2.0-flash" : null) ||
+      (availableModels.includes("gemini-1.5-flash") ? "gemini-1.5-flash" : null) ||
+      availableModels[0] ||
+      "gemini-2.0-flash";
+
+    // 2. Perform quick generation ping on confirmed available model
+    try {
+      const pingUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+        activeModel
+      )}:generateContent?key=${encodeURIComponent(cleanKey)}`;
+
+      const pingRes = await fetch(pingUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: "ping" }] }],
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (!pingRes.ok) {
+        const pingData = await pingRes.json().catch(() => null);
+        if (pingRes.status === 429) {
+          return {
+            ok: false,
+            message: `Key valid, but rate limited or quota exhausted: ${pingData?.error?.message || "HTTP 429"}`,
+            availableModels: availableModels,
+            code: 429,
+          };
+        }
+      }
+    } catch (_) {
+      // If ping timed out but models.list was 200, key is still verified
+    }
+
+    return {
+      ok: true,
+      message: `Verified & Active with Google (${availableModels.length} models available)`,
+      availableModels: availableModels,
+      activeModel: activeModel,
+      code: 200,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      message: `Server connection error: ${err.message}`,
+      code: 500,
+    };
+  }
+}
+

@@ -33,7 +33,7 @@ import { createInbox } from "./inbox.js";
 import { createAutomation } from "./automation.js";
 import { createFeatures } from "./features.js";
 import { messageSchema, validateMessage, buildContent } from "./content.js";
-import { generateSmartReplies, SUPPORTED_GEMINI_MODELS } from "./ai.js";
+import { generateSmartReplies, SUPPORTED_GEMINI_MODELS, verifyGeminiKey } from "./ai.js";
 const production = process.env.NODE_ENV === "production";
 if (!process.env.APP_ORIGIN) throw Error("APP_ORIGIN is required");
 const origin = new URL(process.env.APP_ORIGIN).origin;
@@ -516,6 +516,21 @@ app.post(
     await store.set("settings", "gemini", config);
     await audit(req, req.user.id, "gemini_key_removed", "Removed Gemini API Key");
     res.json({ ok: true, keys: config.keys, model: config.model || "gemini-2.5-flash" });
+  }),
+);
+
+app.post(
+  "/api/admin/gemini/test",
+  adminOnly,
+  wrap(async (req, res) => {
+    const { key, model } = z
+      .object({
+        key: z.string().trim().min(1),
+        model: z.string().trim().optional(),
+      })
+      .parse(req.body);
+    const result = await verifyGeminiKey(key, model);
+    res.json(result);
   }),
 );
 

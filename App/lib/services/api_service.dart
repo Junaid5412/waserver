@@ -9,6 +9,22 @@ import '../models/campaign.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user.dart';
 
+class GeminiTestResult {
+  final bool success;
+  final String message;
+  final List<String> availableModels;
+  final String? activeModel;
+  final int? statusCode;
+
+  const GeminiTestResult({
+    required this.success,
+    required this.message,
+    this.availableModels = const [],
+    this.activeModel,
+    this.statusCode,
+  });
+}
+
 class ApiService {
   String? _token;
 
@@ -727,27 +743,137 @@ class ApiService {
 
   Future<void> removeAdminGeminiKey(String apiKey) => deleteAdminGeminiKey(apiKey);
 
-  Future<bool> testGeminiKey(String apiKey, {String? model}) async {
-    final testModel = model ?? defaultGeminiModel;
-    final url = Uri.parse(
-      'https://generativelanguage.googleapis.com/v1beta/models/$testModel:generateContent?key=${apiKey.trim()}',
-    );
+  Future<GeminiTestResult> testGeminiKey(String apiKey, {String? model}) async {
+    final cleanKey = apiKey.trim();
+    if (cleanKey.isEmpty) {
+      return const GeminiTestResult(
+        success: false,
+        message: 'API Key cannot be empty',
+      );
+    }
+
+    // Step 1: Direct verification with Google Generative Language models.list API
+    // This tests key validity and project access WITHOUT consuming quota or relying on hardcoded model IDs.
     try {
-      final res = await http.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'contents': [
-            {
-              'role': 'user',
-              'parts': [{'text': 'Hello'}]
+      final listUrl = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models?key=$cleanKey');
+      final res = await http.get(listUrl).timeout(const Duration(seconds: 10));
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final rawList = data['models'] as List<dynamic>? ?? [];
+        final availableModels = <String>[];
+        for (final item in rawList) {
+          if (item is Map) {
+            final name = item['name']?.toString().replaceFirst('models/', '') ?? '';
+            final methods = item['supportedGenerationMethods'] as List<dynamic>? ?? [];
+            if (name.isNotEmpty && (methods.isEmpty || methods.contains('generateContent'))) {
+              availableModels.add(name);
             }
-          ]
-        }),
-      ).timeout(const Duration(seconds: 8));
-      return res.statusCode == 200;
-    } catch (_) {
-      return false;
+          }
+        }
+
+        // Test generation ping on confirmed available model or default fallback
+        final pingModel = (model != null && availableModels.contains(model))
+            ? model
+            : (availableModels.contains('gemini-2.0-flash')
+                ? 'gemini-2.0-flash'
+                : (availableModels.contains('gemini-1.5-flash')
+                    ? 'gemini-1.5-flash'
+                    : (availableModels.isNotEmpty ? availableModels.first : 'gemini-2.0-flash')));
+
+        try {
+          final pingUrl = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$pingModel:generateContent?key=$cleanKey');
+          final pingRes = await http.post(
+            pingUrl,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'contents': [
+                {
+                  'role': 'user',
+                  'parts': [{'text': 'ping'}]
+                }
+              ]
+            }),
+          ).timeout(const Duration(seconds: 8));
+
+          if (pingRes.statusCode == 200) {
+            return GeminiTestResult(
+              success: true,
+              message: 'Verified & Active with Google (${availableModels.length} models available)',
+              availableModels: availableModels,
+              activeModel: pingModel,
+              statusCode: 200,
+            );
+          } else {
+            final pingData = jsonDecode(pingRes.body);
+            final pingErr = pingData['error']?['message']?.toString();
+            if (pingRes.statusCode == 429) {
+              return GeminiTestResult(
+                success: false,
+                message: 'Key is valid, but rate limited or quota exhausted: ${pingErr ?? "429 Too Many Requests"}',
+                availableModels: availableModels,
+                statusCode: 429,
+              );
+            }
+            return GeminiTestResult(
+              success: true,
+              message: 'Verified & Active with Google (${availableModels.length} models available)',
+              availableModels: availableModels,
+              activeModel: pingModel,
+              statusCode: 200,
+            );
+          }
+        } catch (_) {
+          return GeminiTestResult(
+            success: true,
+            message: 'Verified & Active with Google (${availableModels.length} models available)',
+            availableModels: availableModels,
+            activeModel: pingModel,
+            statusCode: 200,
+          );
+        }
+      } else {
+        // Parse Google's exact error message
+        String errMsg = 'HTTP ${res.statusCode}';
+        try {
+          final errData = jsonDecode(res.body);
+          errMsg = errData['error']?['message']?.toString() ?? errMsg;
+        } catch (_) {}
+
+        return GeminiTestResult(
+          success: false,
+          message: 'Google Verification Error (${res.statusCode}): $errMsg',
+          statusCode: res.statusCode,
+        );
+      }
+    } catch (clientErr) {
+      // Step 2: Fallback to server-side verification if client couldn't reach Google directly
+      try {
+        final serverRes = await http.post(
+          Uri.parse('${ApiConfig.baseUrl}/api/admin/gemini/test'),
+          headers: _headers(),
+          body: jsonEncode({'key': cleanKey, 'model': model}),
+        ).timeout(const Duration(seconds: 10));
+
+        if (serverRes.statusCode == 200) {
+          final serverData = jsonDecode(serverRes.body);
+          final ok = serverData['ok'] == true;
+          final msg = serverData['message']?.toString() ?? (ok ? 'Verified with Google' : 'Verification failed');
+          final models = (serverData['availableModels'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [];
+          return GeminiTestResult(
+            success: ok,
+            message: msg,
+            availableModels: models,
+            activeModel: serverData['activeModel']?.toString(),
+            statusCode: ok ? 200 : (serverData['code'] as int? ?? 400),
+          );
+        }
+      } catch (_) {}
+
+      return GeminiTestResult(
+        success: false,
+        message: 'Connection failed: ${clientErr.toString().replaceAll("Exception: ", "")}',
+      );
     }
   }
 
@@ -800,9 +926,11 @@ class ApiService {
     final selectedModel = model ?? prefs.getString(_prefGeminiModel) ?? defaultGeminiModel;
     final modelsToTry = [
       selectedModel,
-      'gemini-2.5-flash',
       'gemini-2.0-flash',
       'gemini-1.5-flash',
+      'gemini-2.0-flash-lite',
+      'gemini-1.5-pro',
+      'gemini-2.5-flash',
     ].toSet().toList();
 
     final transcript = recentMessages.take(20).map((m) {

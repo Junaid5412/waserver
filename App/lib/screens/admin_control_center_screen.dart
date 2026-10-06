@@ -56,6 +56,7 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
   final _geminiKeyCtrl = TextEditingController();
   final Map<String, bool?> _keyTestResults = {};
   final Map<String, bool> _keyTestingState = {};
+  final Map<String, GeminiTestResult> _keyTestDetails = {};
 
   // Broadcasts Tab
   List<Map<String, dynamic>> _broadcasts = [];
@@ -118,17 +119,31 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
   Future<void> _testKey(String key) async {
     setState(() => _keyTestingState[key] = true);
     final auth = Provider.of<AuthService>(context, listen: false);
-    final isOk = await auth.api.testGeminiKey(key, model: _selectedGeminiModel);
+    final result = await auth.api.testGeminiKey(key, model: _selectedGeminiModel);
     if (mounted) {
       setState(() {
         _keyTestingState[key] = false;
-        _keyTestResults[key] = isOk;
+        _keyTestResults[key] = result.success;
+        _keyTestDetails[key] = result;
+        // Dynamically add any models returned by Google for this key to the model dropdown
+        if (result.availableModels.isNotEmpty) {
+          for (final m in result.availableModels) {
+            if (!_supportedGeminiModels.contains(m)) {
+              _supportedGeminiModels.add(m);
+            }
+          }
+        }
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(isOk ? 'API Key is active and verified with Google!' : 'API Key check failed. Check key validity/quota.'),
-          backgroundColor: isOk ? Colors.green.shade700 : Colors.red.shade700,
-          duration: const Duration(seconds: 2),
+          content: Text(result.message),
+          backgroundColor: result.success ? Colors.green.shade700 : Colors.red.shade700,
+          duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+            label: 'OK',
+            textColor: Colors.white,
+            onPressed: () {},
+          ),
         ),
       );
     }
@@ -2144,6 +2159,7 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
                         : '••••••••';
                     final isWorking = _keyTestResults[key];
                     final isTesting = _keyTestingState[key] == true;
+                    final testDetail = _keyTestDetails[key];
 
                     return ListTile(
                       leading: Icon(
@@ -2155,11 +2171,22 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
                             : (isWorking == false ? Colors.red : Colors.blueGrey),
                       ),
                       title: Text(maskedKey, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w600)),
-                      subtitle: isWorking == true
-                          ? const Text('Verified & Active with Google', style: TextStyle(color: Colors.green, fontSize: 11, fontWeight: FontWeight.bold))
-                          : (isWorking == false
-                              ? const Text('Verification failed (check key/quota)', style: TextStyle(color: Colors.red, fontSize: 11))
-                              : const Text('Tap Test to verify with Google', style: TextStyle(fontSize: 11, color: Colors.grey))),
+                      subtitle: isTesting
+                          ? const Text('Testing with Google API...', style: TextStyle(color: Colors.blue, fontSize: 11))
+                          : (testDetail != null
+                              ? Text(
+                                  testDetail.message,
+                                  style: TextStyle(
+                                    color: testDetail.success ? Colors.green : Colors.red,
+                                    fontSize: 11,
+                                    fontWeight: testDetail.success ? FontWeight.bold : FontWeight.normal,
+                                  ),
+                                )
+                              : (isWorking == true
+                                  ? const Text('Verified & Active with Google', style: TextStyle(color: Colors.green, fontSize: 11, fontWeight: FontWeight.bold))
+                                  : (isWorking == false
+                                      ? const Text('Verification failed (check key/quota)', style: TextStyle(color: Colors.red, fontSize: 11))
+                                      : const Text('Tap Test to verify with Google', style: TextStyle(fontSize: 11, color: Colors.grey))))),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
