@@ -88,10 +88,16 @@ export async function callGeminiWithFailover(keys, preferredModel, prompt, syste
           break; // break inner model loop and try next key
         }
 
-        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        const parts = data?.candidates?.[0]?.content?.parts || [];
+        const textParts = parts
+          .filter((p) => p && p.text && (p.thought !== true || parts.length === 1))
+          .map((p) => p.text.trim())
+          .filter(Boolean);
+        const text = textParts.join("\n").trim() || parts[0]?.text?.trim();
+
         if (text) {
           return {
-            text: text.trim(),
+            text: text,
             model: targetModel,
             keyIndexUsed: k,
             totalKeys: keys.length,

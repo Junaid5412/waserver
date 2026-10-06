@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_pdfview/flutter_pdfview.dart';
 import 'package:http/http.dart' as http;
@@ -133,10 +134,107 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
   }
 
   void _parseSpreadsheet(List<int> bytes) {
+    // 1. Try OpenXML (.xlsx) parsing first
+    if (bytes.length > 30 && bytes[0] == 0x50 && bytes[1] == 0x4B && bytes[2] == 0x03 && bytes[3] == 0x04) {
+      try {
+        final entries = _extractZipEntries(bytes);
+
+        // Extract shared strings
+        final sst = <String>[];
+        final sstBytes = entries['xl/sharedstrings.xml'];
+        if (sstBytes != null) {
+          final sstXml = utf8.decode(sstBytes, allowMalformed: true);
+          final siRegex = RegExp(r'<si>(.*?)</si>', dotAll: true);
+          for (final m in siRegex.allMatches(sstXml)) {
+            final tMatches = RegExp(r'<t[^>]*>(.*?)</t>', dotAll: true).allMatches(m.group(1) ?? '');
+            final combined = tMatches.map((tm) => _unescapeXml(tm.group(1) ?? '')).join('');
+            sst.add(combined);
+          }
+        }
+
+        // Find first worksheet xml (e.g. xl/worksheets/sheet1.xml)
+        String? sheetKey;
+        for (final k in entries.keys) {
+          if (k.startsWith('xl/worksheets/sheet') && k.endsWith('.xml')) {
+            sheetKey = k;
+            break;
+          }
+        }
+
+        if (sheetKey != null && entries[sheetKey] != null) {
+          final sheetXml = utf8.decode(entries[sheetKey]!, allowMalformed: true);
+          final rowRegex = RegExp(r'<row[^>]*>(.*?)</row>', dotAll: true);
+          final rows = <List<String>>[];
+
+          for (final rMatch in rowRegex.allMatches(sheetXml)) {
+            final rowContent = rMatch.group(1) ?? '';
+            final cRegex = RegExp(r'<c\s+r="([A-Z]+)\d+"([^>]*)>(.*?)</c>', dotAll: true);
+            final row = <String>[];
+
+            for (final cMatch in cRegex.allMatches(rowContent)) {
+              final colStr = cMatch.group(1) ?? 'A';
+              final colIdx = _colToIdx(colStr);
+              final attrs = cMatch.group(2) ?? '';
+              final body = cMatch.group(3) ?? '';
+
+              String val = '';
+              if (attrs.contains('t="s"')) {
+                final vMatch = RegExp(r'<v>(\d+)</v>').firstMatch(body);
+                if (vMatch != null) {
+                  final sstIdx = int.tryParse(vMatch.group(1) ?? '') ?? -1;
+                  if (sstIdx >= 0 && sstIdx < sst.length) {
+                    val = sst[sstIdx];
+                  }
+                }
+              } else if (attrs.contains('t="inlineStr"')) {
+                final tMatch = RegExp(r'<t[^>]*>(.*?)</t>', dotAll: true).firstMatch(body);
+                if (tMatch != null) val = _unescapeXml(tMatch.group(1) ?? '');
+              } else if (attrs.contains('t="b"')) {
+                final vMatch = RegExp(r'<v>(\d+)</v>').firstMatch(body);
+                val = (vMatch?.group(1) == '1') ? 'TRUE' : 'FALSE';
+              } else {
+                final vMatch = RegExp(r'<v>(.*?)</v>').firstMatch(body);
+                if (vMatch != null) val = _unescapeXml(vMatch.group(1) ?? '');
+              }
+
+              while (row.length < colIdx) {
+                row.add('');
+              }
+              if (colIdx < row.length) {
+                row[colIdx] = val;
+              } else {
+                row.add(val);
+              }
+            }
+
+            if (row.any((cell) => cell.trim().isNotEmpty)) {
+              rows.add(row);
+            }
+          }
+
+          if (rows.isNotEmpty) {
+            int maxCols = 0;
+            for (final r in rows) {
+              if (r.length > maxCols) maxCols = r.length;
+            }
+            maxCols = maxCols.clamp(1, 50);
+            for (final r in rows) {
+              while (r.length < maxCols) {
+                r.add('');
+              }
+            }
+            _sheetData = rows;
+            return;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 2. Try CSV / TSV text parsing
     try {
       final text = utf8.decode(bytes, allowMalformed: true);
       final lines = text.split(RegExp(r'\r?\n'));
-      List<List<String>> rows = [];
+      final rows = <List<String>>[];
 
       for (var line in lines) {
         if (line.trim().isEmpty) continue;
@@ -152,20 +250,137 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
       }
 
       if (rows.isNotEmpty) {
+        int maxCols = 0;
+        for (final r in rows) {
+          if (r.length > maxCols) maxCols = r.length;
+        }
+        maxCols = maxCols.clamp(1, 50);
+        for (final r in rows) {
+          while (r.length < maxCols) {
+            r.add('');
+          }
+        }
         _sheetData = rows;
         return;
       }
     } catch (_) {}
 
-    // Fallback: extract visible text from binary xlsx
+    // 3. Fallback: extract visible text from binary
     _extractedText = _extractTextFromBinary(bytes);
     if (_extractedText.isEmpty) {
       _sheetData = [
-        ['Spreadsheet File', widget.filename ?? 'Data.xlsx'],
+        ['Spreadsheet File', widget.filename ?? 'Document.xlsx'],
         ['Size', _formatSize(bytes.length)],
-        ['Note', 'Binary Excel format. Tap "Open in External App" to edit fully.']
+        ['Status', 'Tap "Open in External App" to view in Microsoft Excel or Google Sheets'],
       ];
     }
+  }
+
+  Map<String, List<int>> _extractZipEntries(List<int> bytes) {
+    final entries = <String, List<int>>{};
+    if (bytes.length < 22) return entries;
+
+    final bd = ByteData.sublistView(Uint8List.fromList(bytes));
+
+    // 1. Search for End of Central Directory (0x06054b50) from the end
+    int eocd = -1;
+    for (int i = bytes.length - 22; i >= 0; i--) {
+      if (bytes[i] == 0x50 && bytes[i + 1] == 0x4B && bytes[i + 2] == 0x05 && bytes[i + 3] == 0x06) {
+        eocd = i;
+        break;
+      }
+    }
+
+    if (eocd != -1) {
+      final totalEntries = bd.getUint16(eocd + 10, Endian.little);
+      final cdOffset = bd.getUint32(eocd + 16, Endian.little);
+      int cdPos = cdOffset;
+
+      for (int i = 0; i < totalEntries && cdPos < eocd; i++) {
+        if (cdPos + 46 > bytes.length) break;
+        if (bytes[cdPos] != 0x50 || bytes[cdPos + 1] != 0x4B || bytes[cdPos + 2] != 0x01 || bytes[cdPos + 3] != 0x02) {
+          break;
+        }
+
+        final method = bd.getUint16(cdPos + 10, Endian.little);
+        final compSize = bd.getUint32(cdPos + 20, Endian.little);
+        final nameLen = bd.getUint16(cdPos + 28, Endian.little);
+        final extraLen = bd.getUint16(cdPos + 30, Endian.little);
+        final commentLen = bd.getUint16(cdPos + 32, Endian.little);
+        final localOffset = bd.getUint32(cdPos + 42, Endian.little);
+
+        if (cdPos + 46 + nameLen <= bytes.length) {
+          final name = utf8.decode(bytes.sublist(cdPos + 46, cdPos + 46 + nameLen), allowMalformed: true).toLowerCase();
+
+          if (localOffset + 30 <= bytes.length) {
+            final locNameLen = bd.getUint16(localOffset + 26, Endian.little);
+            final locExtraLen = bd.getUint16(localOffset + 28, Endian.little);
+            final dataStart = localOffset + 30 + locNameLen + locExtraLen;
+
+            if (dataStart + compSize <= bytes.length) {
+              final compData = bytes.sublist(dataStart, dataStart + compSize);
+              try {
+                if (method == 8) {
+                  entries[name] = ZLibDecoder(raw: true).convert(compData);
+                } else if (method == 0) {
+                  entries[name] = compData;
+                }
+              } catch (_) {}
+            }
+          }
+        }
+        cdPos += 46 + nameLen + extraLen + commentLen;
+      }
+    }
+
+    // 2. Fallback: scan local headers if central directory was empty
+    if (entries.isEmpty) {
+      int pos = 0;
+      while (pos < bytes.length - 30) {
+        if (bytes[pos] == 0x50 && bytes[pos + 1] == 0x4B && bytes[pos + 2] == 0x03 && bytes[pos + 3] == 0x04) {
+          final method = bd.getUint16(pos + 8, Endian.little);
+          final compSize = bd.getUint32(pos + 18, Endian.little);
+          final nameLen = bd.getUint16(pos + 26, Endian.little);
+          final extraLen = bd.getUint16(pos + 28, Endian.little);
+
+          if (pos + 30 + nameLen <= bytes.length) {
+            final name = utf8.decode(bytes.sublist(pos + 30, pos + 30 + nameLen), allowMalformed: true).toLowerCase();
+            final dataStart = pos + 30 + nameLen + extraLen;
+            if (compSize > 0 && dataStart + compSize <= bytes.length) {
+              final compData = bytes.sublist(dataStart, dataStart + compSize);
+              try {
+                if (method == 8) {
+                  entries[name] = ZLibDecoder(raw: true).convert(compData);
+                } else if (method == 0) {
+                  entries[name] = compData;
+                }
+              } catch (_) {}
+              pos = dataStart + compSize;
+              continue;
+            }
+          }
+        }
+        pos++;
+      }
+    }
+    return entries;
+  }
+
+  int _colToIdx(String colStr) {
+    int idx = 0;
+    for (int i = 0; i < colStr.length; i++) {
+      idx = idx * 26 + (colStr.codeUnitAt(i) - 64);
+    }
+    return (idx - 1).clamp(0, 50);
+  }
+
+  String _unescapeXml(String xml) {
+    return xml
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&apos;', "'");
   }
 
   List<String> _parseCsvLine(String line) {
@@ -188,6 +403,34 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
   }
 
   void _parseWordDocument(List<int> bytes) {
+    // 1. Try OpenXML (.docx) extraction
+    if (bytes.length > 30 && bytes[0] == 0x50 && bytes[1] == 0x4B && bytes[2] == 0x03 && bytes[3] == 0x04) {
+      try {
+        final entries = _extractZipEntries(bytes);
+        final docBytes = entries['word/document.xml'];
+        if (docBytes != null) {
+          final docXml = utf8.decode(docBytes, allowMalformed: true);
+          final pRegex = RegExp(r'<w:p[^>]*>(.*?)</w:p>', dotAll: true);
+          final paragraphs = <String>[];
+
+          for (final pMatch in pRegex.allMatches(docXml)) {
+            final pContent = pMatch.group(1) ?? '';
+            final tMatches = RegExp(r'<w:t[^>]*>(.*?)</w:t>', dotAll: true).allMatches(pContent);
+            final pText = tMatches.map((m) => _unescapeXml(m.group(1) ?? '')).join('');
+            if (pText.trim().isNotEmpty) {
+              paragraphs.add(pText.trim());
+            }
+          }
+
+          if (paragraphs.isNotEmpty) {
+            _extractedText = paragraphs.join('\n\n');
+            return;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 2. Binary text fallback
     final text = _extractTextFromBinary(bytes);
     if (text.isNotEmpty) {
       _extractedText = text;
@@ -399,28 +642,55 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
   }
 
   Widget _buildSpreadsheetViewer(bool isDark) {
-    final filtered = _searchQuery.isEmpty
-        ? _sheetData
-        : _sheetData.where((row) => row.any((c) => c.toLowerCase().contains(_searchQuery.toLowerCase()))).toList();
+    final headerRow = _sheetData.first;
+    final dataRows = _sheetData.length > 1 ? _sheetData.skip(1).toList() : <List<String>>[];
+    final filteredDataRows = _searchQuery.isEmpty
+        ? dataRows
+        : dataRows.where((row) => row.any((c) => c.toLowerCase().contains(_searchQuery.toLowerCase()))).toList();
 
     return Column(
       children: [
-        // Search bar
+        // Search & info bar
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           color: isDark ? WhatsAppTheme.surfaceDark : Colors.white,
-          child: TextField(
-            onChanged: (q) => setState(() => _searchQuery = q),
-            decoration: InputDecoration(
-              hintText: 'Search in spreadsheet...',
-              prefixIcon: const Icon(Icons.search, size: 20),
-              isDense: true,
-              filled: true,
-              fillColor: isDark ? Colors.black26 : const Color(0xFFF0F2F5),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-            ),
+          child: Column(
+            children: [
+              TextField(
+                onChanged: (q) => setState(() => _searchQuery = q),
+                decoration: InputDecoration(
+                  hintText: 'Search in spreadsheet...',
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                  isDense: true,
+                  filled: true,
+                  fillColor: isDark ? Colors.black26 : const Color(0xFFF0F2F5),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    '${dataRows.length} data rows • ${headerRow.length} columns',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  if (_localFilePath != null)
+                    TextButton.icon(
+                      onPressed: _openExternal,
+                      icon: const Icon(Icons.open_in_new, size: 14),
+                      label: const Text('Open in Excel / Sheets', style: TextStyle(fontSize: 12)),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
+                ],
+              ),
+            ],
           ),
         ),
+        const Divider(height: 1),
         // Spreadsheet table
         Expanded(
           child: SingleChildScrollView(
@@ -432,18 +702,18 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
                   isDark ? Colors.teal.shade900.withOpacity(0.5) : Colors.teal.shade50,
                 ),
                 columns: List.generate(
-                  _sheetData.first.length,
+                  headerRow.length,
                   (index) => DataColumn(
                     label: Text(
-                      _sheetData.first[index].isNotEmpty ? _sheetData.first[index] : 'Col ${index + 1}',
+                      headerRow[index].isNotEmpty ? headerRow[index] : 'Col ${index + 1}',
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ),
                 ),
-                rows: filtered.skip(1).map((row) {
+                rows: filteredDataRows.map((row) {
                   return DataRow(
                     cells: List.generate(
-                      _sheetData.first.length,
+                      headerRow.length,
                       (colIdx) => DataCell(
                         Text(colIdx < row.length ? row[colIdx] : ''),
                       ),

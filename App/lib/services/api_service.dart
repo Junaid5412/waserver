@@ -884,6 +884,20 @@ class ApiService {
     String? prompt,
     String? model,
   }) async {
+    final prefs = await SharedPreferences.getInstance();
+    var keys = prefs.getStringList(_prefGeminiKeys) ?? [];
+
+    // Auto-sync keys from server if local list is empty
+    if (keys.isEmpty) {
+      try {
+        final serverData = await getAdminGeminiData();
+        keys = List<String>.from(serverData['keys'] ?? []);
+        if (keys.isNotEmpty) {
+          await prefs.setStringList(_prefGeminiKeys, keys);
+        }
+      } catch (_) {}
+    }
+
     // 1. Try server endpoint first
     try {
       final res = await http.post(
@@ -898,8 +912,9 @@ class ApiService {
           }).toList(),
           'prompt': prompt,
           'model': model,
+          'keys': keys,
         }),
-      ).timeout(const Duration(seconds: 8));
+      ).timeout(const Duration(seconds: 10));
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
@@ -918,13 +933,23 @@ class ApiService {
     String? model,
   }) async {
     final prefs = await SharedPreferences.getInstance();
-    final keys = prefs.getStringList(_prefGeminiKeys) ?? [];
+    var keys = prefs.getStringList(_prefGeminiKeys) ?? [];
+    if (keys.isEmpty) {
+      try {
+        final serverData = await getAdminGeminiData();
+        keys = List<String>.from(serverData['keys'] ?? []);
+        if (keys.isNotEmpty) {
+          await prefs.setStringList(_prefGeminiKeys, keys);
+        }
+      } catch (_) {}
+    }
+
     if (keys.isEmpty) {
       throw Exception('No Gemini API keys configured. Please add an API key in Admin Control Center -> Gemini AI.');
     }
 
     final selectedModel = model ?? prefs.getString(_prefGeminiModel) ?? defaultGeminiModel;
-    final modelsToTry = [
+    final fallbackModels = [
       selectedModel,
       'gemini-2.0-flash',
       'gemini-1.5-flash',
@@ -941,17 +966,21 @@ class ApiService {
 
     const systemPrompt = 'You are a smart WhatsApp reply assistant. Based on recent messages, suggest 3 short, natural, polite replies for Me. Match the conversation language. Return STRICTLY as a raw JSON array of 3 strings: ["reply1", "reply2", "reply3"].';
     final userQuery = prompt != null && prompt.trim().isNotEmpty
-        ? 'Transcript:\n$transcript\n\nUser intent: "$prompt". Provide 3 reply variations as JSON array.'
-        : 'Transcript:\n$transcript\n\nProvide 3 suggested replies for Me as a JSON array.';
+        ? (transcript.isNotEmpty
+            ? 'Transcript:\n$transcript\n\nUser intent: "$prompt". Provide 3 reply variations as JSON array.'
+            : 'User intent: "$prompt". Provide 3 reply variations for WhatsApp chat as JSON array.')
+        : (transcript.isNotEmpty
+            ? 'Transcript:\n$transcript\n\nProvide 3 suggested replies for Me as a JSON array.'
+            : 'Provide 3 friendly, polite general starter replies for Me as a JSON array.');
 
-    dynamic lastError;
+    String lastError = 'Unable to generate reply with available Gemini keys';
 
     for (int k = 0; k < keys.length; k++) {
       final key = keys[k].trim();
       if (key.isEmpty) continue;
 
-      for (int m = 0; m < modelsToTry.length; m++) {
-        final currentModel = modelsToTry[m];
+      for (int m = 0; m < fallbackModels.length; m++) {
+        final currentModel = fallbackModels[m];
         try {
           final url = Uri.parse(
             'https://generativelanguage.googleapis.com/v1beta/models/$currentModel:generateContent?key=$key',
@@ -970,32 +999,64 @@ class ApiService {
               ],
               'generationConfig': {
                 'temperature': 0.7,
-                'maxOutputTokens': 400,
+                'maxOutputTokens': 500,
               }
             }),
-          ).timeout(const Duration(seconds: 12));
+          ).timeout(const Duration(seconds: 15));
 
           if (res.statusCode == 200) {
             final data = jsonDecode(res.body);
-            final text = data['candidates']?[0]?['content']?['parts']?[0]?['text']?.toString() ?? '';
-            if (text.isNotEmpty) {
-              final parsed = _parseReplySuggestions(text);
-              if (parsed.isNotEmpty) return parsed;
+            final candidates = data['candidates'] as List<dynamic>? ?? [];
+            if (candidates.isNotEmpty) {
+              final content = candidates[0]['content'];
+              final parts = content?['parts'] as List<dynamic>? ?? [];
+              final textParts = <String>[];
+              for (final p in parts) {
+                if (p is Map && p['text'] != null) {
+                  final t = p['text'].toString().trim();
+                  if ((p['thought'] != true || parts.length == 1) && t.isNotEmpty) {
+                    textParts.add(t);
+                  }
+                }
+              }
+              final fullText = textParts.join('\n').trim();
+              if (fullText.isNotEmpty) {
+                final suggestions = _parseReplySuggestions(fullText);
+                if (suggestions.isNotEmpty) return suggestions;
+                final lines = fullText
+                    .split(RegExp(r'[\r\n]+'))
+                    .map((l) => l.replaceAll(RegExp(r'^[\d\.\-\*"\s]+'), '').replaceAll(RegExp(r'["\s]+$'), '').trim())
+                    .where((l) => l.isNotEmpty && !l.startsWith('{') && !l.startsWith('['))
+                    .take(3)
+                    .toList();
+                if (lines.isNotEmpty) return lines;
+                return [fullText];
+              }
             }
-          } else if (res.statusCode == 404) {
-            // Model not supported for this key, fall back to next model
-            continue;
           } else {
-            // 429 quota or auth error, rotate to next key
-            lastError = 'Key #${k + 1}: HTTP ${res.statusCode}';
-            break;
+            String errMsg = 'HTTP ${res.statusCode}';
+            try {
+              final errJson = jsonDecode(res.body);
+              errMsg = errJson['error']?['message']?.toString() ?? errMsg;
+            } catch (_) {}
+
+            if (res.statusCode == 404) {
+              lastError = 'Model $currentModel not supported for this key: $errMsg';
+              continue; // try next model
+            } else if (res.statusCode == 429) {
+              lastError = 'Key #${k + 1} quota exhausted: $errMsg';
+              break; // rotate to next key
+            } else {
+              lastError = 'Key #${k + 1} Google error (${res.statusCode}): $errMsg';
+              break; // rotate to next key
+            }
           }
         } catch (e) {
-          lastError = e;
+          lastError = 'Network/timeout error: ${e.toString().replaceAll("Exception: ", "")}';
         }
       }
     }
-    throw Exception('Gemini service unavailable. ($lastError)');
+    throw Exception(lastError);
   }
 
   List<String> _parseReplySuggestions(String raw) {
@@ -1011,9 +1072,21 @@ class ApiService {
         return decoded.map((e) => e.toString().trim()).where((s) => s.isNotEmpty).take(3).toList();
       }
     } catch (_) {}
+
+    // Fallback: extract array from inside string if wrapped in brackets
+    final arrayMatch = RegExp(r'\[\s*(".*?")\s*\]', dotAll: true).firstMatch(text);
+    if (arrayMatch != null) {
+      try {
+        final decoded = jsonDecode(arrayMatch.group(0)!);
+        if (decoded is List) {
+          return decoded.map((e) => e.toString().trim()).where((s) => s.isNotEmpty).take(3).toList();
+        }
+      } catch (_) {}
+    }
+
     return text
-        .split('\n')
-        .map((l) => l.replaceAll(RegExp(r'^[\d\.\-\*]\s*'), '').trim())
+        .split(RegExp(r'[\r\n]+'))
+        .map((l) => l.replaceAll(RegExp(r'^[\d\.\-\*"\s]+'), '').replaceAll(RegExp(r'["\s]+$'), '').trim())
         .where((l) => l.isNotEmpty && !l.startsWith('{') && !l.startsWith('['))
         .take(3)
         .toList();

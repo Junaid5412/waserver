@@ -246,6 +246,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final instanceId = auth.selectedInstance?.id;
     if (instanceId == null) return;
     if (auth.currentUser?.permissions.canUseAi == false) return;
+    if (_messages.isEmpty) return;
 
     setState(() => _isLoadingAiSuggestions = true);
 
@@ -476,6 +477,15 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
+    if (_messages.isEmpty && (customPrompt == null || customPrompt.trim().isEmpty)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No messages in this chat yet to analyze.')),
+        );
+      }
+      return;
+    }
+
     setState(() {
       _isLoadingAiSuggestions = true;
       _aiSuggestions = [];
@@ -497,10 +507,12 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _isLoadingAiSuggestions = false);
+        final errText = e.toString().replaceAll('Exception: ', '').replaceAll('Gemini AI: ', '');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Gemini AI: $e'),
+            content: Text('AI Smart Reply: $errText'),
             backgroundColor: Colors.red.shade700,
+            duration: const Duration(seconds: 4),
           ),
         );
       }

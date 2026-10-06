@@ -1074,7 +1074,7 @@ app.post(
   "/api/instances/:id/ai/suggest-reply",
   consoleOnly,
   wrap(async (req, res) => {
-    const { chatJid, messages, prompt, model } = z.object({
+    const { chatJid, messages, prompt, model, keys: clientKeys } = z.object({
       chatJid: z.string().trim().min(1),
       messages: z.array(
         z.object({
@@ -1085,18 +1085,26 @@ app.post(
       ),
       prompt: z.string().optional().nullable(),
       model: z.string().optional().nullable(),
+      keys: z.array(z.string()).optional(),
     }).parse(req.body);
 
     if (req.user.permissions && req.user.permissions.canUseAi === false) {
       fail(403, "You do not have permission to use AI features");
     }
 
-    const config = await store.get("settings", "gemini");
-    const keys = config?.keys || [];
-    if (!keys.length) fail(400, "No Gemini API keys configured. Contact Administrator.");
+    const config = (await store.get("settings", "gemini")) || { id: "gemini", keys: [] };
+    let keys = (config?.keys && config.keys.length > 0) ? config.keys : (clientKeys || []);
+
+    // Auto-sync client keys to server settings if server had no keys
+    if (clientKeys && clientKeys.length > 0 && (!config.keys || config.keys.length === 0)) {
+      config.keys = clientKeys;
+      await store.set("settings", "gemini", config);
+    }
+
+    if (!keys.length) fail(400, "No Gemini API keys configured. Please add an API key in Admin Control Center -> Gemini AI.");
 
     const chat = await store.get("chats", chatJid);
-    const targetModel = model || config?.model || "gemini-2.5-flash";
+    const targetModel = model || config?.model || "gemini-2.0-flash";
     const result = await generateSmartReplies(keys, targetModel, {
       contactName: chat?.name || "Contact",
       messages,
