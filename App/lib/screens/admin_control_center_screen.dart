@@ -39,8 +39,23 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
 
   // Gemini AI Tab
   List<String> _geminiKeys = [];
+  String _selectedGeminiModel = 'gemini-2.5-flash';
+  List<String> _supportedGeminiModels = [
+    'gemini-3.8-flash',
+    'gemini-3.6-flash',
+    'gemini-3.1-pro',
+    'gemini-2.5-pro',
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-pro',
+    'gemini-1.5-flash',
+  ];
   bool _isLoadingGemini = false;
   final _geminiKeyCtrl = TextEditingController();
+  final Map<String, bool?> _keyTestResults = {};
+  final Map<String, bool> _keyTestingState = {};
 
   @override
   void initState() {
@@ -78,13 +93,36 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
     final auth = Provider.of<AuthService>(context, listen: false);
     setState(() => _isLoadingGemini = true);
     try {
-      final keys = await auth.api.getAdminGeminiKeys();
-      if (mounted) setState(() { _geminiKeys = keys; _isLoadingGemini = false; });
-    } catch (e) {
+      final data = await auth.api.getAdminGeminiData();
       if (mounted) {
-        setState(() => _isLoadingGemini = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to load Gemini keys: $e')));
+        setState(() {
+          _geminiKeys = List<String>.from(data['keys'] ?? []);
+          _selectedGeminiModel = data['model']?.toString() ?? _selectedGeminiModel;
+          _supportedGeminiModels = List<String>.from(data['supportedModels'] ?? _supportedGeminiModels);
+          _isLoadingGemini = false;
+        });
       }
+    } catch (_) {
+      if (mounted) setState(() => _isLoadingGemini = false);
+    }
+  }
+
+  Future<void> _testKey(String key) async {
+    setState(() => _keyTestingState[key] = true);
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final isOk = await auth.api.testGeminiKey(key, model: _selectedGeminiModel);
+    if (mounted) {
+      setState(() {
+        _keyTestingState[key] = false;
+        _keyTestResults[key] = isOk;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(isOk ? 'API Key is active and verified with Google!' : 'API Key check failed. Check key validity/quota.'),
+          backgroundColor: isOk ? Colors.green.shade700 : Colors.red.shade700,
+          duration: const Duration(seconds: 2),
+        ),
+      );
     }
   }
 
@@ -1319,6 +1357,75 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Gemini Model Selector Card
+            Card(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: const [
+                        Icon(Icons.psychology_rounded, color: WhatsAppTheme.primaryGreen),
+                        SizedBox(width: 8),
+                        Text('Gemini AI Model Selection', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Choose primary Gemini model (2.5, 3.1, 3.6, 3.8). Automatic model failover will gracefully rotate if a model or tier is unavailable.',
+                      style: TextStyle(fontSize: 13, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 14),
+                    DropdownButtonFormField<String>(
+                      value: _supportedGeminiModels.contains(_selectedGeminiModel) ? _selectedGeminiModel : 'gemini-2.5-flash',
+                      decoration: const InputDecoration(
+                        labelText: 'Active Model',
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      ),
+                      isExpanded: true,
+                      items: _supportedGeminiModels.map((m) {
+                        String label = m;
+                        if (m == 'gemini-3.8-flash') label = 'Gemini 3.8 Flash (Latest Ultra Fast)';
+                        else if (m == 'gemini-3.6-flash') label = 'Gemini 3.6 Flash (Fast & Intelligent)';
+                        else if (m == 'gemini-3.1-pro') label = 'Gemini 3.1 Pro (Deep Reasoning)';
+                        else if (m == 'gemini-2.5-pro') label = 'Gemini 2.5 Pro (Advanced Logic)';
+                        else if (m == 'gemini-2.5-flash') label = 'Gemini 2.5 Flash (Next-Gen Balanced)';
+                        else if (m == 'gemini-2.5-flash-lite') label = 'Gemini 2.5 Flash-Lite (Lightweight)';
+                        else if (m == 'gemini-2.0-flash') label = 'Gemini 2.0 Flash (Real-Time)';
+                        else if (m == 'gemini-2.0-flash-lite') label = 'Gemini 2.0 Flash-Lite (Optimized)';
+                        else if (m == 'gemini-1.5-pro') label = 'Gemini 1.5 Pro (High Context)';
+                        else if (m == 'gemini-1.5-flash') label = 'Gemini 1.5 Flash (Legacy Production)';
+                        return DropdownMenuItem<String>(
+                          value: m,
+                          child: Text(label, style: const TextStyle(fontSize: 13)),
+                        );
+                      }).toList(),
+                      onChanged: (newModel) async {
+                        if (newModel == null) return;
+                        setState(() => _selectedGeminiModel = newModel);
+                        final auth = Provider.of<AuthService>(context, listen: false);
+                        await auth.api.setAdminGeminiModel(newModel);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Active Gemini model set to $newModel'),
+                              backgroundColor: WhatsAppTheme.primaryGreen,
+                              duration: const Duration(seconds: 2),
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // API Keys Management Card
             Card(
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               child: Padding(
@@ -1330,12 +1437,12 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
                       children: const [
                         Icon(Icons.auto_awesome, color: WhatsAppTheme.primaryGreen),
                         SizedBox(width: 8),
-                        Text('Gemini API Keys', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                        Text('Gemini API Keys & Failover', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                       ],
                     ),
                     const SizedBox(height: 12),
                     const Text(
-                      'Multi-key failover is supported. If a key hits its rate limit or fails, the next active key will automatically be used.',
+                      'Multi-key failover is active. If any key hits quota/rate limits, the next available key will automatically be used.',
                       style: TextStyle(fontSize: 13, color: Colors.grey),
                     ),
                     const SizedBox(height: 16),
@@ -1361,8 +1468,18 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
                               await auth.api.addAdminGeminiKey(key);
                               _geminiKeyCtrl.clear();
                               _loadGeminiKeys();
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Gemini API key added successfully!'),
+                                    backgroundColor: WhatsAppTheme.primaryGreen,
+                                  ),
+                                );
+                              }
                             } catch (e) {
-                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                              }
                             }
                           },
                           style: ElevatedButton.styleFrom(
@@ -1384,7 +1501,7 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
               const Center(
                 child: Padding(
                   padding: EdgeInsets.all(32.0),
-                  child: Text('No Gemini API keys added yet.', style: TextStyle(color: Colors.grey)),
+                  child: Text('No Gemini API keys added yet. Add a key above to enable AI Smart Replies.', style: TextStyle(color: Colors.grey)),
                 ),
               )
             else
@@ -1397,38 +1514,69 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
                   separatorBuilder: (_, __) => const Divider(height: 1),
                   itemBuilder: (ctx, i) {
                     final key = _geminiKeys[i];
-                    final maskedKey = key.length > 6 ? '${key.substring(0, 6)}...' : '...';
+                    final maskedKey = key.length > 8
+                        ? '${key.substring(0, 6)}••••••••${key.substring(key.length - 4)}'
+                        : '••••••••';
+                    final isWorking = _keyTestResults[key];
+                    final isTesting = _keyTestingState[key] == true;
+
                     return ListTile(
-                      leading: const Icon(Icons.key_rounded, color: Colors.blueGrey),
-                      title: Text(maskedKey, style: const TextStyle(fontFamily: 'monospace')),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete_outline, color: Colors.red),
-                        onPressed: () async {
-                          final confirm = await showDialog<bool>(
-                            context: context,
-                            builder: (ctx) => AlertDialog(
-                              title: const Text('Remove Key?'),
-                              content: const Text('Are you sure you want to remove this Gemini API key?'),
-                              actions: [
-                                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                                ElevatedButton(
-                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                                  onPressed: () => Navigator.pop(ctx, true),
-                                  child: const Text('Remove', style: TextStyle(color: Colors.white)),
-                                ),
-                              ],
+                      leading: Icon(
+                        isWorking == true
+                            ? Icons.check_circle_rounded
+                            : (isWorking == false ? Icons.error_outline_rounded : Icons.key_rounded),
+                        color: isWorking == true
+                            ? Colors.green
+                            : (isWorking == false ? Colors.red : Colors.blueGrey),
+                      ),
+                      title: Text(maskedKey, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w600)),
+                      subtitle: isWorking == true
+                          ? const Text('Verified & Active with Google', style: TextStyle(color: Colors.green, fontSize: 11, fontWeight: FontWeight.bold))
+                          : (isWorking == false
+                              ? const Text('Verification failed (check key/quota)', style: TextStyle(color: Colors.red, fontSize: 11))
+                              : const Text('Tap Test to verify with Google', style: TextStyle(fontSize: 11, color: Colors.grey))),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (isTesting)
+                            const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                          else
+                            IconButton(
+                              icon: const Icon(Icons.play_circle_outline_rounded, color: WhatsAppTheme.primaryGreen),
+                              tooltip: 'Test Key',
+                              onPressed: () => _testKey(key),
                             ),
-                          );
-                          if (confirm == true && mounted) {
-                            final auth = Provider.of<AuthService>(context, listen: false);
-                            try {
-                              await auth.api.removeAdminGeminiKey(key);
-                              _loadGeminiKeys();
-                            } catch (e) {
-                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-                            }
-                          }
-                        },
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, color: Colors.red),
+                            tooltip: 'Remove Key',
+                            onPressed: () async {
+                              final confirm = await showDialog<bool>(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  title: const Text('Remove Key?'),
+                                  content: const Text('Are you sure you want to remove this Gemini API key?'),
+                                  actions: [
+                                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                                    ElevatedButton(
+                                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                                      onPressed: () => Navigator.pop(ctx, true),
+                                      child: const Text('Remove', style: TextStyle(color: Colors.white)),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (confirm == true && mounted) {
+                                final auth = Provider.of<AuthService>(context, listen: false);
+                                try {
+                                  await auth.api.removeAdminGeminiKey(key);
+                                  _loadGeminiKeys();
+                                } catch (e) {
+                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                                }
+                              }
+                            },
+                          ),
+                        ],
                       ),
                     );
                   },

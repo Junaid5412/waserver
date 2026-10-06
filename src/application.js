@@ -33,7 +33,7 @@ import { createInbox } from "./inbox.js";
 import { createAutomation } from "./automation.js";
 import { createFeatures } from "./features.js";
 import { messageSchema, validateMessage, buildContent } from "./content.js";
-import { generateSmartReplies } from "./ai.js";
+import { generateSmartReplies, SUPPORTED_GEMINI_MODELS } from "./ai.js";
 const production = process.env.NODE_ENV === "production";
 if (!process.env.APP_ORIGIN) throw Error("APP_ORIGIN is required");
 const origin = new URL(process.env.APP_ORIGIN).origin;
@@ -474,7 +474,11 @@ app.get(
   adminOnly,
   wrap(async (req, res) => {
     const config = await store.get("settings", "gemini");
-    res.json({ keys: config?.keys || [] });
+    res.json({
+      keys: config?.keys || [],
+      model: config?.model || "gemini-2.5-flash",
+      supportedModels: SUPPORTED_GEMINI_MODELS,
+    });
   }),
 );
 
@@ -482,14 +486,23 @@ app.post(
   "/api/admin/gemini",
   adminOnly,
   wrap(async (req, res) => {
-    const { key } = z.object({ key: z.string().trim().min(1) }).parse(req.body);
+    const { key, model } = z
+      .object({
+        key: z.string().trim().min(1).optional(),
+        model: z.string().trim().min(1).optional(),
+      })
+      .parse(req.body);
     const config = (await store.get("settings", "gemini")) || { id: "gemini", keys: [] };
-    if (!config.keys.includes(key)) {
+    if (key && !config.keys.includes(key)) {
       config.keys.push(key);
-      await store.set("settings", "gemini", config);
       await audit(req, req.user.id, "gemini_key_added", "Added Gemini API Key");
     }
-    res.json({ ok: true, keys: config.keys });
+    if (model) {
+      config.model = model;
+      await audit(req, req.user.id, "gemini_model_updated", "Updated default Gemini Model to " + model);
+    }
+    await store.set("settings", "gemini", config);
+    res.json({ ok: true, keys: config.keys, model: config.model || "gemini-2.5-flash" });
   }),
 );
 
@@ -502,7 +515,7 @@ app.post(
     config.keys = config.keys.filter((k) => k !== key);
     await store.set("settings", "gemini", config);
     await audit(req, req.user.id, "gemini_key_removed", "Removed Gemini API Key");
-    res.json({ ok: true, keys: config.keys });
+    res.json({ ok: true, keys: config.keys, model: config.model || "gemini-2.5-flash" });
   }),
 );
 
@@ -841,7 +854,7 @@ app.post(
   "/api/instances/:id/ai/suggest-reply",
   consoleOnly,
   wrap(async (req, res) => {
-    const { chatJid, messages, prompt } = z.object({
+    const { chatJid, messages, prompt, model } = z.object({
       chatJid: z.string().trim().min(1),
       messages: z.array(
         z.object({
@@ -851,6 +864,7 @@ app.post(
         })
       ),
       prompt: z.string().optional().nullable(),
+      model: z.string().optional().nullable(),
     }).parse(req.body);
 
     if (req.user.permissions && req.user.permissions.canUseAi === false) {
@@ -862,7 +876,8 @@ app.post(
     if (!keys.length) fail(400, "No Gemini API keys configured. Contact Administrator.");
 
     const chat = await store.get("chats", chatJid);
-    const result = await generateSmartReplies(keys, "gemini-1.5-flash", {
+    const targetModel = model || config?.model || "gemini-2.5-flash";
+    const result = await generateSmartReplies(keys, targetModel, {
       contactName: chat?.name || "Contact",
       messages,
       userPrompt: prompt,

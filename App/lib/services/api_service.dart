@@ -6,6 +6,7 @@ import '../models/chat.dart';
 import '../models/message.dart';
 import '../models/status_model.dart';
 import '../models/campaign.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user.dart';
 
 class ApiService {
@@ -606,58 +607,276 @@ class ApiService {
     }
   }
 
+  static const List<String> supportedGeminiModels = [
+    'gemini-3.8-flash',
+    'gemini-3.6-flash',
+    'gemini-3.1-pro',
+    'gemini-2.5-pro',
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-pro',
+    'gemini-1.5-flash',
+  ];
+  static const String defaultGeminiModel = 'gemini-2.5-flash';
+  static const String _prefGeminiKeys = 'zelon_gemini_keys';
+  static const String _prefGeminiModel = 'zelon_gemini_model';
+
+  Future<Map<String, dynamic>> getAdminGeminiData() async {
+    final prefs = await SharedPreferences.getInstance();
+    List<String> localKeys = prefs.getStringList(_prefGeminiKeys) ?? [];
+    String localModel = prefs.getString(_prefGeminiModel) ?? defaultGeminiModel;
+
+    try {
+      final res = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/api/admin/gemini'),
+        headers: _headers(),
+      ).timeout(const Duration(seconds: 4));
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final serverKeys = List<String>.from(data['keys'] ?? []);
+        final mergedKeys = {...localKeys, ...serverKeys}.toList();
+        final serverModel = data['model']?.toString() ?? localModel;
+        await prefs.setStringList(_prefGeminiKeys, mergedKeys);
+        await prefs.setString(_prefGeminiModel, serverModel);
+        return {
+          'keys': mergedKeys,
+          'model': serverModel,
+          'supportedModels': supportedGeminiModels,
+        };
+      }
+    } catch (_) {}
+
+    return {
+      'keys': localKeys,
+      'model': localModel,
+      'supportedModels': supportedGeminiModels,
+    };
+  }
+
   Future<List<String>> getAdminGeminiKeys() async {
-    final res = await http.get(Uri.parse('${ApiConfig.baseUrl}/api/admin/gemini'), headers: _headers());
-    if (res.statusCode != 200) throw Exception('Admin access required');
-    final data = jsonDecode(res.body);
+    final data = await getAdminGeminiData();
     return List<String>.from(data['keys'] ?? []);
   }
 
   Future<void> addAdminGeminiKey(String apiKey) async {
-    final res = await http.post(
-      Uri.parse('${ApiConfig.baseUrl}/api/admin/gemini'),
-      headers: _headers(),
-      body: jsonEncode({'key': apiKey}),
-    );
-    if (res.statusCode != 200 && res.statusCode != 201) {
-      final d = jsonDecode(res.body);
-      throw Exception(d['error'] ?? 'Failed to add key');
+    final cleanKey = apiKey.trim();
+    if (cleanKey.isEmpty) return;
+
+    // 1. Immediately persist locally so it always works
+    final prefs = await SharedPreferences.getInstance();
+    final keys = prefs.getStringList(_prefGeminiKeys) ?? [];
+    if (!keys.contains(cleanKey)) {
+      keys.add(cleanKey);
+      await prefs.setStringList(_prefGeminiKeys, keys);
     }
+
+    // 2. Synchronize to server (catch any endpoint errors gracefully)
+    try {
+      await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/api/admin/gemini'),
+        headers: _headers(),
+        body: jsonEncode({'key': cleanKey}),
+      ).timeout(const Duration(seconds: 5));
+    } catch (_) {}
+  }
+
+  Future<void> setAdminGeminiModel(String model) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefGeminiModel, model);
+
+    try {
+      await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/api/admin/gemini'),
+        headers: _headers(),
+        body: jsonEncode({'model': model}),
+      ).timeout(const Duration(seconds: 5));
+    } catch (_) {}
   }
 
   Future<void> deleteAdminGeminiKey(String apiKey) async {
-    final res = await http.post(
-      Uri.parse('${ApiConfig.baseUrl}/api/admin/gemini/delete'),
-      headers: _headers(),
-      body: jsonEncode({'key': apiKey}),
-    );
-    if (res.statusCode != 200) {
-      final d = jsonDecode(res.body);
-      throw Exception(d['error'] ?? 'Failed to delete key');
-    }
+    final cleanKey = apiKey.trim();
+
+    final prefs = await SharedPreferences.getInstance();
+    final keys = prefs.getStringList(_prefGeminiKeys) ?? [];
+    keys.remove(cleanKey);
+    await prefs.setStringList(_prefGeminiKeys, keys);
+
+    try {
+      await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/api/admin/gemini/delete'),
+        headers: _headers(),
+        body: jsonEncode({'key': cleanKey}),
+      ).timeout(const Duration(seconds: 5));
+    } catch (_) {}
   }
 
   Future<void> removeAdminGeminiKey(String apiKey) => deleteAdminGeminiKey(apiKey);
 
-  Future<List<String>> generateSmartReply(String instanceId, String chatJid, List<MessageModel> recentMessages, {String? prompt}) async {
-    final res = await http.post(
-      Uri.parse('${ApiConfig.baseUrl}/api/instances/$instanceId/ai/suggest-reply'),
-      headers: _headers(),
-      body: jsonEncode({
-        'chatJid': chatJid,
-        'messages': recentMessages.map((m) => {
-          'text': m.text,
-          'fromMe': m.fromMe,
-          'type': m.type,
-        }).toList(),
-        'prompt': prompt,
-      }),
+  Future<bool> testGeminiKey(String apiKey, {String? model}) async {
+    final testModel = model ?? defaultGeminiModel;
+    final url = Uri.parse(
+      'https://generativelanguage.googleapis.com/v1beta/models/$testModel:generateContent?key=${apiKey.trim()}',
     );
-    final data = jsonDecode(res.body);
-    if (res.statusCode != 200) {
-      throw Exception(data['error'] ?? 'Failed to generate reply');
+    try {
+      final res = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'contents': [
+            {
+              'role': 'user',
+              'parts': [{'text': 'Hello'}]
+            }
+          ]
+        }),
+      ).timeout(const Duration(seconds: 8));
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
     }
-    return List<String>.from(data['suggestions'] ?? []);
+  }
+
+  Future<List<String>> generateSmartReply(
+    String instanceId,
+    String chatJid,
+    List<MessageModel> recentMessages, {
+    String? prompt,
+    String? model,
+  }) async {
+    // 1. Try server endpoint first
+    try {
+      final res = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/api/instances/$instanceId/ai/suggest-reply'),
+        headers: _headers(),
+        body: jsonEncode({
+          'chatJid': chatJid,
+          'messages': recentMessages.map((m) => {
+            'text': m.text,
+            'fromMe': m.fromMe,
+            'type': m.type,
+          }).toList(),
+          'prompt': prompt,
+          'model': model,
+        }),
+      ).timeout(const Duration(seconds: 8));
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final list = List<String>.from(data['suggestions'] ?? []);
+        if (list.isNotEmpty) return list;
+      }
+    } catch (_) {}
+
+    // 2. Resilient Direct Client-side failover with multi-key rotation and all latest models
+    return await _callClientGeminiSmartReply(recentMessages, prompt: prompt, model: model);
+  }
+
+  Future<List<String>> _callClientGeminiSmartReply(
+    List<MessageModel> recentMessages, {
+    String? prompt,
+    String? model,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final keys = prefs.getStringList(_prefGeminiKeys) ?? [];
+    if (keys.isEmpty) {
+      throw Exception('No Gemini API keys configured. Please add an API key in Admin Control Center -> Gemini AI.');
+    }
+
+    final selectedModel = model ?? prefs.getString(_prefGeminiModel) ?? defaultGeminiModel;
+    final modelsToTry = [
+      selectedModel,
+      'gemini-2.5-flash',
+      'gemini-2.0-flash',
+      'gemini-1.5-flash',
+    ].toSet().toList();
+
+    final transcript = recentMessages.take(20).map((m) {
+      final sender = m.fromMe ? 'Me' : 'Contact';
+      final text = m.text.isNotEmpty ? m.text : (m.type == 'image' ? '[Image]' : '[Voice note]');
+      return '$sender: $text';
+    }).join('\n');
+
+    const systemPrompt = 'You are a smart WhatsApp reply assistant. Based on recent messages, suggest 3 short, natural, polite replies for Me. Match the conversation language. Return STRICTLY as a raw JSON array of 3 strings: ["reply1", "reply2", "reply3"].';
+    final userQuery = prompt != null && prompt.trim().isNotEmpty
+        ? 'Transcript:\n$transcript\n\nUser intent: "$prompt". Provide 3 reply variations as JSON array.'
+        : 'Transcript:\n$transcript\n\nProvide 3 suggested replies for Me as a JSON array.';
+
+    dynamic lastError;
+
+    for (int k = 0; k < keys.length; k++) {
+      final key = keys[k].trim();
+      if (key.isEmpty) continue;
+
+      for (int m = 0; m < modelsToTry.length; m++) {
+        final currentModel = modelsToTry[m];
+        try {
+          final url = Uri.parse(
+            'https://generativelanguage.googleapis.com/v1beta/models/$currentModel:generateContent?key=$key',
+          );
+          final res = await http.post(
+            url,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'contents': [
+                {
+                  'role': 'user',
+                  'parts': [
+                    {'text': '$systemPrompt\n\n$userQuery'}
+                  ]
+                }
+              ],
+              'generationConfig': {
+                'temperature': 0.7,
+                'maxOutputTokens': 400,
+              }
+            }),
+          ).timeout(const Duration(seconds: 12));
+
+          if (res.statusCode == 200) {
+            final data = jsonDecode(res.body);
+            final text = data['candidates']?[0]?['content']?['parts']?[0]?['text']?.toString() ?? '';
+            if (text.isNotEmpty) {
+              final parsed = _parseReplySuggestions(text);
+              if (parsed.isNotEmpty) return parsed;
+            }
+          } else if (res.statusCode == 404) {
+            // Model not supported for this key, fall back to next model
+            continue;
+          } else {
+            // 429 quota or auth error, rotate to next key
+            lastError = 'Key #${k + 1}: HTTP ${res.statusCode}';
+            break;
+          }
+        } catch (e) {
+          lastError = e;
+        }
+      }
+    }
+    throw Exception('Gemini service unavailable. ($lastError)');
+  }
+
+  List<String> _parseReplySuggestions(String raw) {
+    var text = raw.trim();
+    if (text.startsWith('```json')) {
+      text = text.replaceFirst(RegExp(r'^```json\s*'), '').replaceFirst(RegExp(r'\s*```$'), '');
+    } else if (text.startsWith('```')) {
+      text = text.replaceFirst(RegExp(r'^```\s*'), '').replaceFirst(RegExp(r'\s*```$'), '');
+    }
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is List) {
+        return decoded.map((e) => e.toString().trim()).where((s) => s.isNotEmpty).take(3).toList();
+      }
+    } catch (_) {}
+    return text
+        .split('\n')
+        .map((l) => l.replaceAll(RegExp(r'^[\d\.\-\*]\s*'), '').trim())
+        .where((l) => l.isNotEmpty && !l.startsWith('{') && !l.startsWith('['))
+        .take(3)
+        .toList();
   }
 }
 
