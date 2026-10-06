@@ -229,14 +229,19 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _triggerAutoSuggestIfEligible() {
     if (_messages.isEmpty) return;
-    final last = _messages.last;
-    if (last.fromMe || last.text.trim().isEmpty) return;
-    if (_lastAutoSuggestedMsgId == last.waId) return;
+
+    // Auto-check previous/recent messages from the contact
+    final recent = _messages.reversed.take(20).toList();
+    final hasContactMessages = recent.any((m) => !m.fromMe);
+    if (!hasContactMessages) return;
+
+    final triggerId = _messages.last.waId;
+    if (_lastAutoSuggestedMsgId == triggerId) return;
 
     _autoSuggestDebounceTimer?.cancel();
-    _autoSuggestDebounceTimer = Timer(const Duration(milliseconds: 350), () {
+    _autoSuggestDebounceTimer = Timer(const Duration(milliseconds: 300), () {
       if (!mounted) return;
-      _lastAutoSuggestedMsgId = last.waId;
+      _lastAutoSuggestedMsgId = triggerId;
       _autoReadAndSuggestReplies();
     });
   }
@@ -251,10 +256,12 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() => _isLoadingAiSuggestions = true);
 
     try {
+      final activeModel = await auth.api.getActiveGeminiModel();
       final suggestions = await auth.api.generateSmartReply(
         instanceId,
         widget.chat.chatId,
         _messages.reversed.take(25).toList().reversed.toList(),
+        model: activeModel,
       );
       if (mounted && suggestions.isNotEmpty) {
         setState(() {
@@ -492,11 +499,13 @@ class _ChatScreenState extends State<ChatScreen> {
     });
 
     try {
+      final activeModel = await auth.api.getActiveGeminiModel();
       final suggestions = await auth.api.generateSmartReply(
         instanceId,
         widget.chat.chatId,
         _messages.reversed.take(25).toList().reversed.toList(),
         prompt: customPrompt,
+        model: activeModel,
       );
       if (mounted) {
         setState(() {

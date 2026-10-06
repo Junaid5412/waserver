@@ -2,13 +2,6 @@ export const SUPPORTED_GEMINI_MODELS = [
   "gemini-3.8-flash",
   "gemini-3.6-flash",
   "gemini-3.1-pro",
-  "gemini-2.5-pro",
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
-  "gemini-2.0-flash",
-  "gemini-2.0-flash-lite",
-  "gemini-1.5-pro",
-  "gemini-1.5-flash",
 ];
 
 /**
@@ -19,15 +12,17 @@ export async function callGeminiWithFailover(keys, preferredModel, prompt, syste
     throw new Error("No Gemini API keys configured. Please add an API key in Admin Control Center.");
   }
 
-  // Model fallback chain: preferred -> 2.0-flash -> 1.5-flash -> 2.0-flash-lite -> 1.5-pro -> 2.5-flash
+  // Model fallback chain: strictly use 3.1+ working models. Deprecated 1.x and 2.x models are excluded.
   const modelsToTry = [
     preferredModel,
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-1.5-pro",
-    "gemini-2.5-flash",
-  ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
+    "gemini-3.1-pro",
+    "gemini-3.8-flash",
+    "gemini-3.6-flash",
+  ].filter((m, idx, arr) => m && !m.startsWith("gemini-1.") && !m.startsWith("gemini-2.") && arr.indexOf(m) === idx);
+
+  if (!modelsToTry.length) {
+    modelsToTry.push("gemini-3.1-pro", "gemini-3.8-flash", "gemini-3.6-flash");
+  }
 
   let lastError = null;
 
@@ -122,25 +117,35 @@ export async function generateSmartReplies(keys, model, chatContext) {
   const { contactName, messages, userPrompt } = chatContext;
 
   // Build conversational transcript from recent messages
+  // Build conversational transcript from recent messages
   const transcriptLines = (messages || []).map((m) => {
     const sender = m.fromMe ? "Me" : (contactName || "Contact");
-    const content = m.text || (m.type === "image" ? "[Image]" : m.type === "audio" ? "[Voice note]" : `[${m.type}]`);
+    let content = (m.text || "").trim();
+    if (!content) {
+      if (m.type === "audio") content = "[Voice note / Audio]";
+      else if (m.type === "image") content = "[Photo]";
+      else if (m.type === "video") content = "[Video clip]";
+      else if (m.type === "document") content = `[Document: ${m.filename || "file"}]`;
+      else if (m.type === "location") content = "[Shared Location]";
+      else content = `[${m.type || "Media message"}]`;
+    }
     return `${sender}: ${content}`;
   });
 
-  const transcript = transcriptLines.slice(-20).join("\n");
+  const transcript = transcriptLines.slice(-25).join("\n");
 
-  const systemInstruction = `You are an intelligent WhatsApp AI assistant. You read previous messages in a conversation and generate smart, natural, highly contextual suggested replies for the user to respond with. 
-Your suggestions should match the tone and language of the conversation (English, Urdu/Hindi, Roman Urdu, Arabic, etc.).
-Keep suggestions concise, polite, and ready-to-send without quotation marks.`;
+  const systemInstruction = `You are an intelligent WhatsApp AI assistant. You read previous messages and conversation history to understand the contact's behavior, tone, questions, and requests.
+Generate 3 short, natural, polite, and human-like reply suggestions for 'Me' to respond with.
+Your suggestions must match the exact tone and language of the conversation (English, Urdu/Hindi, Roman Urdu, Arabic, etc.).
+Keep suggestions concise, natural, and ready-to-send without quotation marks.`;
 
-  let prompt = `Here is the recent conversation transcript:\n${transcript}\n\n`;
+  let prompt = `Here is the recent conversation history:\n${transcript}\n\n`;
 
   if (userPrompt && userPrompt.trim().length > 0) {
     prompt += `The user specifically wants to reply with this intent/instruction: "${userPrompt.trim()}".\n`;
     prompt += `Provide 3 variations of suitable replies matching this intent based on the conversation history. Format as JSON array of 3 strings: ["reply 1", "reply 2", "reply 3"]. Return ONLY raw valid JSON array.`;
   } else {
-    prompt += `Based on the latest messages above, analyze what the other person is asking or saying, and generate 3 smart reply suggestions for 'Me'.
+    prompt += `Based on the conversation history above, analyze what the other person is asking or saying (including voice notes or earlier context). Generate 3 smart reply suggestions for 'Me'.
 Format as a raw JSON array of 3 strings: ["reply 1", "reply 2", "reply 3"]. Return ONLY valid JSON array with no extra markdown code fences.`;
   }
 
@@ -214,13 +219,15 @@ export async function verifyGeminiKey(apiKey, testModel = null) {
       .filter((m) => !m.supportedGenerationMethods || m.supportedGenerationMethods.includes("generateContent"))
       .map((m) => m.name.replace(/^models\//, ""));
 
-    // Candidate test models
+    // Candidate test models (prioritize 3.1+ working models)
     const activeModel =
-      (testModel && availableModels.includes(testModel) ? testModel : null) ||
-      (availableModels.includes("gemini-2.0-flash") ? "gemini-2.0-flash" : null) ||
-      (availableModels.includes("gemini-1.5-flash") ? "gemini-1.5-flash" : null) ||
+      (testModel && availableModels.includes(testModel) && !testModel.startsWith("gemini-1.") && !testModel.startsWith("gemini-2.") ? testModel : null) ||
+      (availableModels.includes("gemini-3.1-pro") ? "gemini-3.1-pro" : null) ||
+      (availableModels.includes("gemini-3.8-flash") ? "gemini-3.8-flash" : null) ||
+      (availableModels.includes("gemini-3.6-flash") ? "gemini-3.6-flash" : null) ||
+      availableModels.find((m) => !m.startsWith("gemini-1.") && !m.startsWith("gemini-2.")) ||
       availableModels[0] ||
-      "gemini-2.0-flash";
+      "gemini-3.1-pro";
 
     // 2. Perform quick generation ping on confirmed available model
     try {

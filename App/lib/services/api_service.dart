@@ -639,22 +639,31 @@ class ApiService {
     'gemini-3.8-flash',
     'gemini-3.6-flash',
     'gemini-3.1-pro',
-    'gemini-2.5-pro',
-    'gemini-2.5-flash',
-    'gemini-2.5-flash-lite',
-    'gemini-2.0-flash',
-    'gemini-2.0-flash-lite',
-    'gemini-1.5-pro',
-    'gemini-1.5-flash',
   ];
-  static const String defaultGeminiModel = 'gemini-2.5-flash';
+  static const String defaultGeminiModel = 'gemini-3.1-pro';
   static const String _prefGeminiKeys = 'zelon_gemini_keys';
   static const String _prefGeminiModel = 'zelon_gemini_model';
+  static String? _cachedActiveModel;
+
+  Future<String> getActiveGeminiModel() async {
+    if (_cachedActiveModel != null && !_cachedActiveModel!.startsWith('gemini-1.') && !_cachedActiveModel!.startsWith('gemini-2.')) {
+      return _cachedActiveModel!;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_prefGeminiModel);
+    if (saved != null && saved.isNotEmpty && !saved.startsWith('gemini-1.') && !saved.startsWith('gemini-2.')) {
+      _cachedActiveModel = saved;
+      return saved;
+    }
+    _cachedActiveModel = defaultGeminiModel;
+    await prefs.setString(_prefGeminiModel, defaultGeminiModel);
+    return defaultGeminiModel;
+  }
 
   Future<Map<String, dynamic>> getAdminGeminiData() async {
     final prefs = await SharedPreferences.getInstance();
     List<String> localKeys = prefs.getStringList(_prefGeminiKeys) ?? [];
-    String localModel = prefs.getString(_prefGeminiModel) ?? defaultGeminiModel;
+    String localModel = await getActiveGeminiModel();
 
     try {
       final res = await http.get(
@@ -666,12 +675,17 @@ class ApiService {
         final data = jsonDecode(res.body);
         final serverKeys = List<String>.from(data['keys'] ?? []);
         final mergedKeys = {...localKeys, ...serverKeys}.toList();
-        final serverModel = data['model']?.toString() ?? localModel;
+        final rawServerModel = data['model']?.toString();
+        final effectiveModel = (rawServerModel != null && !rawServerModel.startsWith('gemini-1.') && !rawServerModel.startsWith('gemini-2.'))
+            ? rawServerModel
+            : localModel;
+
         await prefs.setStringList(_prefGeminiKeys, mergedKeys);
-        await prefs.setString(_prefGeminiModel, serverModel);
+        await prefs.setString(_prefGeminiModel, effectiveModel);
+        _cachedActiveModel = effectiveModel;
         return {
           'keys': mergedKeys,
-          'model': serverModel,
+          'model': effectiveModel,
           'supportedModels': supportedGeminiModels,
         };
       }
@@ -712,6 +726,7 @@ class ApiService {
   }
 
   Future<void> setAdminGeminiModel(String model) async {
+    _cachedActiveModel = model;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefGeminiModel, model);
 
@@ -773,13 +788,15 @@ class ApiService {
         }
 
         // Test generation ping on confirmed available model or default fallback
-        final pingModel = (model != null && availableModels.contains(model))
+        final pingModel = (model != null && availableModels.contains(model) && !model.startsWith('gemini-1.') && !model.startsWith('gemini-2.'))
             ? model
-            : (availableModels.contains('gemini-2.0-flash')
-                ? 'gemini-2.0-flash'
-                : (availableModels.contains('gemini-1.5-flash')
-                    ? 'gemini-1.5-flash'
-                    : (availableModels.isNotEmpty ? availableModels.first : 'gemini-2.0-flash')));
+            : (availableModels.contains('gemini-3.1-pro')
+                ? 'gemini-3.1-pro'
+                : (availableModels.contains('gemini-3.8-flash')
+                    ? 'gemini-3.8-flash'
+                    : (availableModels.contains('gemini-3.6-flash')
+                        ? 'gemini-3.6-flash'
+                        : (availableModels.firstWhere((m) => !m.startsWith('gemini-1.') && !m.startsWith('gemini-2.'), orElse: () => availableModels.first)))));
 
         try {
           final pingUrl = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$pingModel:generateContent?key=$cleanKey');
@@ -899,6 +916,7 @@ class ApiService {
     }
 
     // 1. Try server endpoint first
+    final activeModel = model ?? await getActiveGeminiModel();
     try {
       final res = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/api/instances/$instanceId/ai/suggest-reply'),
@@ -909,9 +927,11 @@ class ApiService {
             'text': m.text,
             'fromMe': m.fromMe,
             'type': m.type,
+            'filename': m.filename,
+            'mimetype': m.mimetype,
           }).toList(),
           'prompt': prompt,
-          'model': model,
+          'model': activeModel,
           'keys': keys,
         }),
       ).timeout(const Duration(seconds: 10));
@@ -923,8 +943,8 @@ class ApiService {
       }
     } catch (_) {}
 
-    // 2. Resilient Direct Client-side failover with multi-key rotation and all latest models
-    return await _callClientGeminiSmartReply(recentMessages, prompt: prompt, model: model);
+    // 2. Resilient Direct Client-side failover with multi-key rotation and strictly 3.1+ working models
+    return await _callClientGeminiSmartReply(recentMessages, prompt: prompt, model: activeModel);
   }
 
   Future<List<String>> _callClientGeminiSmartReply(
@@ -948,30 +968,48 @@ class ApiService {
       throw Exception('No Gemini API keys configured. Please add an API key in Admin Control Center -> Gemini AI.');
     }
 
-    final selectedModel = model ?? prefs.getString(_prefGeminiModel) ?? defaultGeminiModel;
+    final selectedModel = model ?? await getActiveGeminiModel();
     final fallbackModels = [
       selectedModel,
-      'gemini-2.0-flash',
-      'gemini-1.5-flash',
-      'gemini-2.0-flash-lite',
-      'gemini-1.5-pro',
-      'gemini-2.5-flash',
-    ].toSet().toList();
+      'gemini-3.1-pro',
+      'gemini-3.8-flash',
+      'gemini-3.6-flash',
+    ].where((m) => !m.startsWith('gemini-1.') && !m.startsWith('gemini-2.')).toSet().toList();
 
-    final transcript = recentMessages.take(20).map((m) {
-      final sender = m.fromMe ? 'Me' : 'Contact';
-      final text = m.text.isNotEmpty ? m.text : (m.type == 'image' ? '[Image]' : '[Voice note]');
-      return '$sender: $text';
+    final transcript = recentMessages.take(25).map((m) {
+      final sender = m.fromMe ? 'Me' : (m.name.isNotEmpty ? m.name : 'Contact');
+      String body = m.text.trim();
+      if (body.isEmpty) {
+        if (m.type == 'audio' || m.mimetype?.startsWith('audio/') == true) {
+          body = '[Voice Note / Audio Message]';
+        } else if (m.type == 'image' || m.mimetype?.startsWith('image/') == true) {
+          body = '[Photo attachment]';
+        } else if (m.type == 'video' || m.mimetype?.startsWith('video/') == true) {
+          body = '[Video clip]';
+        } else if (m.type == 'document' || m.mimetype?.startsWith('application/') == true) {
+          body = '[Document: ${m.filename ?? "File"}]';
+        } else if (m.type == 'location') {
+          body = '[Shared Location]';
+        } else {
+          body = '[Media message]';
+        }
+      }
+      return '$sender: $body';
     }).join('\n');
 
-    const systemPrompt = 'You are a smart WhatsApp reply assistant. Based on recent messages, suggest 3 short, natural, polite replies for Me. Match the conversation language. Return STRICTLY as a raw JSON array of 3 strings: ["reply1", "reply2", "reply3"].';
+    const systemPrompt = '''You are an intelligent WhatsApp AI assistant.
+Analyze the conversation behavior, tone, questions, and previous messages from the other person.
+Suggest 3 short, natural, polite, and human-like replies for Me.
+Match the conversation's exact language (English, Urdu/Hindi, Roman Urdu, Arabic, etc.).
+STRICTLY return ONLY a raw JSON array of 3 strings: ["reply1", "reply2", "reply3"].''';
+
     final userQuery = prompt != null && prompt.trim().isNotEmpty
         ? (transcript.isNotEmpty
-            ? 'Transcript:\n$transcript\n\nUser intent: "$prompt". Provide 3 reply variations as JSON array.'
-            : 'User intent: "$prompt". Provide 3 reply variations for WhatsApp chat as JSON array.')
+            ? 'Conversation History:\n$transcript\n\nUser specific intent: "$prompt". Suggest 3 natural reply variations based on the conversation as a raw JSON array.'
+            : 'User specific intent: "$prompt". Suggest 3 natural reply variations for WhatsApp as a raw JSON array.')
         : (transcript.isNotEmpty
-            ? 'Transcript:\n$transcript\n\nProvide 3 suggested replies for Me as a JSON array.'
-            : 'Provide 3 friendly, polite general starter replies for Me as a JSON array.');
+            ? 'Conversation History:\n$transcript\n\nAuto-read the contact\'s latest behavior and statements above. Suggest 3 best natural replies for Me as a raw JSON array.'
+            : 'Suggest 3 friendly, polite starter greetings for WhatsApp chat as a raw JSON array.');
 
     String lastError = 'Unable to generate reply with available Gemini keys';
 

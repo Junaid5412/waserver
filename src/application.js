@@ -474,9 +474,13 @@ app.get(
   adminOnly,
   wrap(async (req, res) => {
     const config = await store.get("settings", "gemini");
+    const activeModel =
+      config?.model && !config.model.startsWith("gemini-1.") && !config.model.startsWith("gemini-2.")
+        ? config.model
+        : "gemini-3.1-pro";
     res.json({
       keys: config?.keys || [],
-      model: config?.model || "gemini-2.5-flash",
+      model: activeModel,
       supportedModels: SUPPORTED_GEMINI_MODELS,
     });
   }),
@@ -502,7 +506,11 @@ app.post(
       await audit(req, req.user.id, "gemini_model_updated", "Updated default Gemini Model to " + model);
     }
     await store.set("settings", "gemini", config);
-    res.json({ ok: true, keys: config.keys, model: config.model || "gemini-2.5-flash" });
+    const activeModel =
+      config.model && !config.model.startsWith("gemini-1.") && !config.model.startsWith("gemini-2.")
+        ? config.model
+        : "gemini-3.1-pro";
+    res.json({ ok: true, keys: config.keys, model: activeModel });
   }),
 );
 
@@ -515,7 +523,11 @@ app.post(
     config.keys = config.keys.filter((k) => k !== key);
     await store.set("settings", "gemini", config);
     await audit(req, req.user.id, "gemini_key_removed", "Removed Gemini API Key");
-    res.json({ ok: true, keys: config.keys, model: config.model || "gemini-2.5-flash" });
+    const activeModel =
+      config.model && !config.model.startsWith("gemini-1.") && !config.model.startsWith("gemini-2.")
+        ? config.model
+        : "gemini-3.1-pro";
+    res.json({ ok: true, keys: config.keys, model: activeModel });
   }),
 );
 
@@ -1104,7 +1116,10 @@ app.post(
     if (!keys.length) fail(400, "No Gemini API keys configured. Please add an API key in Admin Control Center -> Gemini AI.");
 
     const chat = await store.get("chats", chatJid);
-    const targetModel = model || config?.model || "gemini-2.0-flash";
+    let targetModel = model || config?.model;
+    if (!targetModel || targetModel.startsWith("gemini-1.") || targetModel.startsWith("gemini-2.")) {
+      targetModel = "gemini-3.1-pro";
+    }
     const result = await generateSmartReplies(keys, targetModel, {
       contactName: chat?.name || "Contact",
       messages,

@@ -40,18 +40,11 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
 
   // Gemini AI Tab
   List<String> _geminiKeys = [];
-  String _selectedGeminiModel = 'gemini-2.5-flash';
+  String _selectedGeminiModel = 'gemini-3.1-pro';
   List<String> _supportedGeminiModels = [
     'gemini-3.8-flash',
     'gemini-3.6-flash',
     'gemini-3.1-pro',
-    'gemini-2.5-pro',
-    'gemini-2.5-flash',
-    'gemini-2.5-flash-lite',
-    'gemini-2.0-flash',
-    'gemini-2.0-flash-lite',
-    'gemini-1.5-pro',
-    'gemini-1.5-flash',
   ];
   bool _isLoadingGemini = false;
   final _geminiKeyCtrl = TextEditingController();
@@ -107,8 +100,25 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
       if (mounted) {
         setState(() {
           _geminiKeys = List<String>.from(data['keys'] ?? []);
-          _selectedGeminiModel = data['model']?.toString() ?? _selectedGeminiModel;
-          _supportedGeminiModels = List<String>.from(data['supportedModels'] ?? _supportedGeminiModels);
+          final incomingModel = data['model']?.toString();
+          if (incomingModel != null &&
+              incomingModel.isNotEmpty &&
+              !incomingModel.startsWith('gemini-1.') &&
+              !incomingModel.startsWith('gemini-2.')) {
+            _selectedGeminiModel = incomingModel;
+          } else {
+            _selectedGeminiModel = 'gemini-3.1-pro';
+          }
+          final supported = List<String>.from(data['supportedModels'] ?? []);
+          final filtered = supported
+              .where((m) => !m.startsWith('gemini-1.') && !m.startsWith('gemini-2.'))
+              .toList();
+          _supportedGeminiModels = filtered.isNotEmpty
+              ? filtered
+              : ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.1-pro'];
+          if (!_supportedGeminiModels.contains(_selectedGeminiModel)) {
+            _supportedGeminiModels.add(_selectedGeminiModel);
+          }
           _isLoadingGemini = false;
         });
       }
@@ -126,11 +136,13 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
         _keyTestingState[key] = false;
         _keyTestResults[key] = result.success;
         _keyTestDetails[key] = result;
-        // Dynamically add any models returned by Google for this key to the model dropdown
+        // Dynamically add any models returned by Google for this key to the model dropdown (3.1+ only)
         if (result.availableModels.isNotEmpty) {
           for (final m in result.availableModels) {
-            if (!_supportedGeminiModels.contains(m)) {
-              _supportedGeminiModels.add(m);
+            if (!m.startsWith('gemini-1.') && !m.startsWith('gemini-2.')) {
+              if (!_supportedGeminiModels.contains(m)) {
+                _supportedGeminiModels.add(m);
+              }
             }
           }
         }
@@ -2015,12 +2027,12 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
                     ),
                     const SizedBox(height: 8),
                     const Text(
-                      'Choose primary Gemini model (2.5, 3.1, 3.6, 3.8). Automatic model failover will gracefully rotate if a model or tier is unavailable.',
+                      'Choose primary Gemini model (3.1, 3.6, 3.8). Automatic failover rotates among active 3.x models if a tier or quota limit is reached.',
                       style: TextStyle(fontSize: 13, color: Colors.grey),
                     ),
                     const SizedBox(height: 14),
                     DropdownButtonFormField<String>(
-                      value: _supportedGeminiModels.contains(_selectedGeminiModel) ? _selectedGeminiModel : 'gemini-2.5-flash',
+                      value: _supportedGeminiModels.contains(_selectedGeminiModel) ? _selectedGeminiModel : 'gemini-3.1-pro',
                       decoration: const InputDecoration(
                         labelText: 'Active Model',
                         border: OutlineInputBorder(),
@@ -2031,14 +2043,7 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
                         String label = m;
                         if (m == 'gemini-3.8-flash') label = 'Gemini 3.8 Flash (Latest Ultra Fast)';
                         else if (m == 'gemini-3.6-flash') label = 'Gemini 3.6 Flash (Fast & Intelligent)';
-                        else if (m == 'gemini-3.1-pro') label = 'Gemini 3.1 Pro (Deep Reasoning)';
-                        else if (m == 'gemini-2.5-pro') label = 'Gemini 2.5 Pro (Advanced Logic)';
-                        else if (m == 'gemini-2.5-flash') label = 'Gemini 2.5 Flash (Next-Gen Balanced)';
-                        else if (m == 'gemini-2.5-flash-lite') label = 'Gemini 2.5 Flash-Lite (Lightweight)';
-                        else if (m == 'gemini-2.0-flash') label = 'Gemini 2.0 Flash (Real-Time)';
-                        else if (m == 'gemini-2.0-flash-lite') label = 'Gemini 2.0 Flash-Lite (Optimized)';
-                        else if (m == 'gemini-1.5-pro') label = 'Gemini 1.5 Pro (High Context)';
-                        else if (m == 'gemini-1.5-flash') label = 'Gemini 1.5 Flash (Legacy Production)';
+                        else if (m == 'gemini-3.1-pro') label = 'Gemini 3.1 Pro (Deep Reasoning & Analysis)';
                         return DropdownMenuItem<String>(
                           value: m,
                           child: Text(label, style: const TextStyle(fontSize: 13)),
@@ -2052,7 +2057,7 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              content: Text('Active Gemini model set to $newModel'),
+                              content: Text('Active Gemini model set to $newModel (Instantly Applied)'),
                               backgroundColor: WhatsAppTheme.primaryGreen,
                               duration: const Duration(seconds: 2),
                             ),
