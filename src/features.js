@@ -515,15 +515,44 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
     wrap(async (req, res) => {
       const m = await message(req),
         s = (() => { try { return wa.active(req.instance.id); } catch { return null; } })();
-      const stream = await downloadMediaMessage(
-        m,
-        "stream",
-        {},
-        {
-          logger: pino({ level: "silent" }),
-          reuploadRequest: s ? s.updateMediaMessage.bind(s) : async () => { fail(409, "Reconnect WhatsApp to recover expired media"); },
-        },
-      );
+      let stream;
+      try {
+        stream = await downloadMediaMessage(
+          m,
+          "stream",
+          {},
+          {
+            logger: pino({ level: "silent" }),
+            reuploadRequest: s ? s.updateMediaMessage.bind(s) : async () => { fail(409, "Reconnect WhatsApp to recover expired media"); },
+          },
+        );
+      } catch (dlErr) {
+        // Fallback: check if stored payload has base64 data (e.g. locally sent media)
+        const rows = await store.query("messages", {
+          instanceId: req.instance.id,
+          lookupKey: req.params.message,
+          limit: 1,
+        });
+        if (rows[0]?.payload) {
+          try {
+            const d = JSON.parse(enc.open(rows[0].payload));
+            if (d.data) {
+              const buf = Buffer.from(d.data, "base64");
+              const mime = d.mimetype || "audio/mp4";
+              res.set({
+                "Content-Type": mime,
+                "Content-Length": buf.length,
+                "Content-Disposition": `inline; filename="${safeName(d.filename || "audio-" + req.params.message + ".m4a")}"`,
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "private, max-age=86400",
+              });
+              res.end(buf);
+              return;
+            }
+          } catch (_) {}
+        }
+        throw dlErr;
+      }
       const info = describeMessage(m.message),
         extension =
           { image: ".jpg", video: ".mp4", audio: ".ogg", sticker: ".webp" }[

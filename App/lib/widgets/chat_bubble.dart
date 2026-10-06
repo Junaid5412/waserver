@@ -235,10 +235,27 @@ class ChatBubble extends StatelessWidget {
           ],
         ],
       );
-    } else if (type == 'audio' || message.mimetype?.startsWith('audio/') == true) {
-      return VoicePlayerWidget(
-        audioUrl: mediaUrl,
-        durationSeconds: 15,
+    } else if (type == 'audio' || message.mimetype?.startsWith('audio/') == true || type == 'ptt') {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          VoicePlayerWidget(
+            audioUrl: mediaUrl,
+            headers: headers,
+            messageId: message.waId,
+            mimetype: message.mimetype,
+            durationSeconds: message.durationSeconds ?? 0,
+            fromMe: message.fromMe,
+          ),
+          if (message.text.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              message.text,
+              style: TextStyle(fontSize: 14, color: textColor),
+            ),
+          ],
+        ],
       );
     } else if (type == 'video' || message.mimetype?.startsWith('video/') == true) {
       return Column(

@@ -43,6 +43,7 @@ class MessageModel {
   final double? longitude;
   final String? locationName;
   final String? locationAddress;
+  final int? durationSeconds;
 
   String get senderName => name;
   String get senderJid => participant;
@@ -83,6 +84,7 @@ class MessageModel {
     this.longitude,
     this.locationName,
     this.locationAddress,
+    this.durationSeconds,
   });
 
   factory MessageModel.fromJson(Map<String, dynamic> json) {
@@ -151,6 +153,9 @@ class MessageModel {
       longitude: lng,
       locationName: locName,
       locationAddress: locAddr,
+      durationSeconds: json['durationSeconds'] != null
+          ? int.tryParse(json['durationSeconds'].toString())
+          : null,
     );
   }
 
@@ -181,6 +186,7 @@ class MessageModel {
       'longitude': longitude,
       'locationName': locationName,
       'locationAddress': locationAddress,
+      'durationSeconds': durationSeconds,
     };
   }
 }
