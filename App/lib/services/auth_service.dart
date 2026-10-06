@@ -17,6 +17,7 @@ class AuthService extends ChangeNotifier {
   InstanceModel? _selectedInstance;
   bool _isLoading = false;
   String? _errorMessage;
+  String? currentOpenChatId;
 
   UserModel? get currentUser => _currentUser;
   String? get token => _token;

@@ -538,11 +538,12 @@ export function createFeatures({ store, enc, wa, inbox, media, wrap, page }) {
             const d = JSON.parse(enc.open(rows[0].payload));
             if (d.data) {
               const buf = Buffer.from(d.data, "base64");
-              const mime = d.mimetype || "audio/mp4";
+              const mime = d.mimetype || (d.ptt ? "audio/ogg; codecs=opus" : "audio/ogg");
+              const ext = mime.includes("mp4") || mime.includes("m4a") ? ".m4a" : ".ogg";
               res.set({
                 "Content-Type": mime,
                 "Content-Length": buf.length,
-                "Content-Disposition": `inline; filename="${safeName(d.filename || "audio-" + req.params.message + ".m4a")}"`,
+                "Content-Disposition": `inline; filename="${safeName(d.filename || "audio-" + req.params.message + ext)}"`,
                 "X-Content-Type-Options": "nosniff",
                 "Cache-Control": "private, max-age=86400",
               });

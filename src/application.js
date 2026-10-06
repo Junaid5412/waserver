@@ -34,13 +34,15 @@ import { createAutomation } from "./automation.js";
 import { createFeatures } from "./features.js";
 import { messageSchema, validateMessage, buildContent } from "./content.js";
 import { generateSmartReplies, SUPPORTED_GEMINI_MODELS, verifyGeminiKey } from "./ai.js";
+import { createEmailService } from "./email.js";
 const production = process.env.NODE_ENV === "production";
 if (!process.env.APP_ORIGIN) throw Error("APP_ORIGIN is required");
 const origin = new URL(process.env.APP_ORIGIN).origin;
 if (production && !origin.startsWith("https://"))
   throw Error("Production APP_ORIGIN must use HTTPS");
 const enc = cipher(process.env.ENCRYPTION_KEY),
-  store = await openStore();
+  store = await openStore(),
+  emailService = createEmailService(store, enc);
 if (!(await store.query("users", { limit: 1 })).length) {
   if (
     !process.env.ADMIN_EMAIL ||
@@ -1129,6 +1131,260 @@ app.post(
     res.json(result);
   }),
 );
+
+// --- Business Email Suite API Endpoints ---
+
+// 1. Test IMAP & SMTP Connection
+app.post(
+  "/api/email/accounts/test",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const data = z
+      .object({
+        email: z.string().email(),
+        name: z.string().optional(),
+        imap: z.object({
+          host: z.string().min(1),
+          port: z.number().int().optional(),
+          secure: z.boolean().optional(),
+          auth: z.object({ user: z.string().optional(), pass: z.string() }),
+        }),
+        smtp: z.object({
+          host: z.string().min(1),
+          port: z.number().int().optional(),
+          secure: z.boolean().optional(),
+          auth: z.object({ user: z.string().optional(), pass: z.string() }),
+        }),
+      })
+      .parse(req.body);
+    const result = await emailService.testConnection(data);
+    res.json(result);
+  }),
+);
+
+// 2. Get user's configured email accounts
+app.get(
+  "/api/email/accounts",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const accounts = await emailService.getAccounts(req.user.id);
+    res.json(accounts);
+  }),
+);
+
+// 3. Save / Add email account
+app.post(
+  "/api/email/accounts",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const data = z
+      .object({
+        id: z.string().optional(),
+        email: z.string().email(),
+        name: z.string().optional(),
+        isDefault: z.boolean().optional(),
+        imap: z.object({
+          host: z.string().min(1),
+          port: z.number().int().optional(),
+          secure: z.boolean().optional(),
+          auth: z.object({ user: z.string().optional(), pass: z.string() }),
+        }),
+        smtp: z.object({
+          host: z.string().min(1),
+          port: z.number().int().optional(),
+          secure: z.boolean().optional(),
+          auth: z.object({ user: z.string().optional(), pass: z.string() }),
+        }),
+      })
+      .parse(req.body);
+    const account = await emailService.saveAccount(req.user.id, data);
+    res.json({ ok: true, account });
+  }),
+);
+
+// 4. Delete email account
+app.delete(
+  "/api/email/accounts/:id",
+  consoleOnly,
+  wrap(async (req, res) => {
+    await emailService.deleteAccount(req.user.id, req.params.id);
+    res.json({ ok: true });
+  }),
+);
+
+// 5. Get Mailbox Folders
+app.get(
+  "/api/email/folders",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const accountId = req.query.accountId?.toString();
+    const result = await emailService.getFolders(req.user.id, accountId);
+    res.json(result);
+  }),
+);
+
+// 6. Fetch paginated messages in folder
+app.get(
+  "/api/email/messages",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const accountId = req.query.accountId?.toString();
+    const folder = req.query.folder?.toString() || "INBOX";
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 30;
+    const search = req.query.search?.toString() || "";
+    const filter = req.query.filter?.toString() || "all";
+    const result = await emailService.fetchMessages(req.user.id, accountId, {
+      folder,
+      page,
+      limit,
+      search,
+      filter,
+    });
+    res.json(result);
+  }),
+);
+
+// 7. Fetch full email details
+app.get(
+  "/api/email/messages/:uid",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const accountId = req.query.accountId?.toString();
+    const folder = req.query.folder?.toString() || "INBOX";
+    const uid = req.params.uid;
+    const result = await emailService.fetchMessageDetail(req.user.id, accountId, folder, uid);
+    res.json(result);
+  }),
+);
+
+// 8. Download attachment
+app.get(
+  "/api/email/messages/:uid/attachment/:index",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const accountId = req.query.accountId?.toString();
+    const folder = req.query.folder?.toString() || "INBOX";
+    const { uid, index } = req.params;
+    const att = await emailService.getAttachment(req.user.id, accountId, folder, uid, index);
+    res.set({
+      "Content-Type": att.contentType,
+      "Content-Disposition": `attachment; filename="${att.filename}"`,
+    });
+    res.send(att.content);
+  }),
+);
+
+// 9. Send email via SMTP
+app.post(
+  "/api/email/send",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const accountId = req.query.accountId?.toString();
+    const emailData = z
+      .object({
+        to: z.union([z.string(), z.array(z.string())]),
+        cc: z.union([z.string(), z.array(z.string())]).optional(),
+        bcc: z.union([z.string(), z.array(z.string())]).optional(),
+        subject: z.string().optional(),
+        text: z.string().optional(),
+        html: z.string().optional(),
+        inReplyTo: z.string().optional(),
+        references: z.union([z.string(), z.array(z.string())]).optional(),
+        attachments: z
+          .array(
+            z.object({
+              filename: z.string(),
+              base64Data: z.string(),
+              mimetype: z.string().optional(),
+            }),
+          )
+          .optional(),
+      })
+      .parse(req.body);
+    const result = await emailService.sendEmail(req.user.id, accountId, emailData);
+    res.json(result);
+  }),
+);
+
+// 10. Star or Mark Read
+app.post(
+  "/api/email/messages/:uid/flag",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const accountId = req.query.accountId?.toString();
+    const folder = req.query.folder?.toString() || "INBOX";
+    const { read, star } = z
+      .object({
+        read: z.boolean().optional(),
+        star: z.boolean().optional(),
+      })
+      .parse(req.body);
+    const result = await emailService.flagMessage(req.user.id, accountId, folder, req.params.uid, {
+      read,
+      star,
+    });
+    res.json(result);
+  }),
+);
+
+// 11. Delete email
+app.delete(
+  "/api/email/messages/:uid",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const accountId = req.query.accountId?.toString();
+    const folder = req.query.folder?.toString() || "INBOX";
+    const permanent = req.query.permanent === "true";
+    const result = await emailService.deleteMessage(
+      req.user.id,
+      accountId,
+      folder,
+      req.params.uid,
+      permanent,
+    );
+    res.json(result);
+  }),
+);
+
+// 12. AI For Email Response (Gemini 3.1+)
+app.post(
+  "/api/email/ai/reply",
+  consoleOnly,
+  wrap(async (req, res) => {
+    const { subject, senderName, senderEmail, emailBody, userIntent, model } = z
+      .object({
+        subject: z.string().optional(),
+        senderName: z.string().optional(),
+        senderEmail: z.string().optional(),
+        emailBody: z.string().optional(),
+        userIntent: z.string().optional(),
+        model: z.string().optional(),
+      })
+      .parse(req.body);
+
+    const config = (await store.get("settings", "gemini")) || { id: "gemini", keys: [] };
+    if (!config?.keys?.length) {
+      fail(400, "No Gemini API keys configured. Please add an API key in Admin Control Center -> Gemini AI.");
+    }
+    const targetModel =
+      model && !model.startsWith("gemini-1.") && !model.startsWith("gemini-2.")
+        ? model
+        : config.model && !config.model.startsWith("gemini-1.") && !config.model.startsWith("gemini-2.")
+        ? config.model
+        : "gemini-3.1-pro";
+
+    const result = await emailService.generateAiEmailReply(config.keys, targetModel, {
+      subject,
+      senderName,
+      senderEmail,
+      emailBody,
+      userIntent,
+    });
+    res.json(result);
+  }),
+);
+
 
 app.put(
   "/api/instances/:id/webhook",

@@ -59,12 +59,7 @@ class _ChatScreenState extends State<ChatScreen> {
   DateTime? _recordingStartTime;
   Timer? _recordingTimer;
   String _recordingDuration = '0:00';
-
-  // AI Smart Reply
-  bool _isLoadingAiSuggestions = false;
-  List<String> _aiSuggestions = [];
-  String? _lastAutoSuggestedMsgId;
-  Timer? _autoSuggestDebounceTimer;
+  bool _recordingIsOpus = true;
 
   final List<String> _popularEmojis = [
     '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇',
@@ -82,6 +77,8 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    final auth = Provider.of<AuthService>(context, listen: false);
+    auth.currentOpenChatId = RealtimeEvent.normalizeJid(widget.chat.chatId);
     _loadMessages();
     _subscribePresenceAndRealtime();
     _startForegroundPolling();
@@ -193,7 +190,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
-    _autoSuggestDebounceTimer?.cancel();
+    final auth = Provider.of<AuthService>(context, listen: false);
+    if (auth.currentOpenChatId == RealtimeEvent.normalizeJid(widget.chat.chatId)) {
+      auth.currentOpenChatId = null;
+    }
     _foregroundPollTimer?.cancel();
     _debounceTimer?.cancel();
     _recordingTimer?.cancel();
@@ -219,61 +219,11 @@ class _ChatScreenState extends State<ChatScreen> {
         _isLoading = false;
       });
       _scrollToBottom();
-      _triggerAutoSuggestIfEligible();
     } else {
       setState(() => _isLoading = true);
     }
 
     _syncMessagesSilently(forceScroll: true);
-  }
-
-  void _triggerAutoSuggestIfEligible() {
-    if (_messages.isEmpty) return;
-
-    // Auto-check previous/recent messages from the contact
-    final recent = _messages.reversed.take(20).toList();
-    final hasContactMessages = recent.any((m) => !m.fromMe);
-    if (!hasContactMessages) return;
-
-    final triggerId = _messages.last.waId;
-    if (_lastAutoSuggestedMsgId == triggerId) return;
-
-    _autoSuggestDebounceTimer?.cancel();
-    _autoSuggestDebounceTimer = Timer(const Duration(milliseconds: 300), () {
-      if (!mounted) return;
-      _lastAutoSuggestedMsgId = triggerId;
-      _autoReadAndSuggestReplies();
-    });
-  }
-
-  Future<void> _autoReadAndSuggestReplies() async {
-    final auth = Provider.of<AuthService>(context, listen: false);
-    final instanceId = auth.selectedInstance?.id;
-    if (instanceId == null) return;
-    if (auth.currentUser?.permissions.canUseAi == false) return;
-    if (_messages.isEmpty) return;
-
-    setState(() => _isLoadingAiSuggestions = true);
-
-    try {
-      final activeModel = await auth.api.getActiveGeminiModel();
-      final suggestions = await auth.api.generateSmartReply(
-        instanceId,
-        widget.chat.chatId,
-        _messages.reversed.take(25).toList().reversed.toList(),
-        model: activeModel,
-      );
-      if (mounted && suggestions.isNotEmpty) {
-        setState(() {
-          _aiSuggestions = suggestions;
-          _isLoadingAiSuggestions = false;
-        });
-      } else if (mounted) {
-        setState(() => _isLoadingAiSuggestions = false);
-      }
-    } catch (_) {
-      if (mounted) setState(() => _isLoadingAiSuggestions = false);
-    }
   }
 
   Future<void> _syncMessagesSilently({bool checkForNewOnly = false, bool forceScroll = false}) async {
@@ -304,7 +254,6 @@ class _ChatScreenState extends State<ChatScreen> {
         _isLoading = false;
       });
       await CacheService.saveMessages(instanceId, widget.chat.chatId, fresh);
-      _triggerAutoSuggestIfEligible();
 
       if (forceScroll || !hadMessages || (isNearBottom && fresh.length > _messages.length)) {
         _scrollToBottom(smooth: hadMessages);
@@ -330,204 +279,6 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  void _showAiAssistantDialog() {
-    final customPromptCtrl = TextEditingController();
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        final isDark = Theme.of(ctx).brightness == Brightness.dark;
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(ctx).viewInsets.bottom,
-          ),
-          child: Container(
-            decoration: BoxDecoration(
-              color: isDark ? WhatsAppTheme.surfaceDark : Colors.white,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-            ),
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.withOpacity(0.3),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1A73E8).withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(Icons.auto_awesome, color: Color(0xFF1A73E8), size: 24),
-                    ),
-                    const SizedBox(width: 12),
-                    const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Gemini Smart Assistant', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                        Text('Intelligently analyze past chat & draft replies', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                      ],
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                const Text(
-                  'Quick Actions',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ActionChip(
-                      avatar: const Icon(Icons.flash_on, size: 16, color: Color(0xFF1A73E8)),
-                      label: const Text('Auto Smart Replies'),
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        _generateAiReplies();
-                      },
-                    ),
-                    ActionChip(
-                      avatar: const Icon(Icons.check_circle_outline, size: 16, color: Colors.green),
-                      label: const Text('Polite Agree'),
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        _generateAiReplies(customPrompt: 'Politely agree and confirm');
-                      },
-                    ),
-                    ActionChip(
-                      avatar: const Icon(Icons.cancel_outlined, size: 16, color: Colors.orange),
-                      label: const Text('Polite Decline'),
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        _generateAiReplies(customPrompt: 'Politely decline with reason');
-                      },
-                    ),
-                    ActionChip(
-                      avatar: const Icon(Icons.schedule, size: 16, color: Colors.blue),
-                      label: const Text('Get Back Later'),
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        _generateAiReplies(customPrompt: 'Say I am currently busy and will get back shortly');
-                      },
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Custom Instruction to Gemini',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: customPromptCtrl,
-                        decoration: InputDecoration(
-                          hintText: 'e.g. Ask for discount, confirm appointment...',
-                          hintStyle: const TextStyle(fontSize: 13),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: WhatsAppTheme.primaryGreen,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      ),
-                      onPressed: () {
-                        final p = customPromptCtrl.text.trim();
-                        Navigator.pop(ctx);
-                        _generateAiReplies(customPrompt: p.isNotEmpty ? p : null);
-                      },
-                      child: const Text('Generate', style: TextStyle(color: Colors.white)),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Future<void> _generateAiReplies({String? customPrompt}) async {
-    final auth = Provider.of<AuthService>(context, listen: false);
-    final instanceId = auth.selectedInstance?.id;
-    if (instanceId == null) return;
-
-    if (auth.currentUser?.permissions.canUseAi == false) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('AI features are disabled for your account by Admin.')),
-        );
-      }
-      return;
-    }
-
-    if (_messages.isEmpty && (customPrompt == null || customPrompt.trim().isEmpty)) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No messages in this chat yet to analyze.')),
-        );
-      }
-      return;
-    }
-
-    setState(() {
-      _isLoadingAiSuggestions = true;
-      _aiSuggestions = [];
-    });
-
-    try {
-      final activeModel = await auth.api.getActiveGeminiModel();
-      final suggestions = await auth.api.generateSmartReply(
-        instanceId,
-        widget.chat.chatId,
-        _messages.reversed.take(25).toList().reversed.toList(),
-        prompt: customPrompt,
-        model: activeModel,
-      );
-      if (mounted) {
-        setState(() {
-          _aiSuggestions = suggestions;
-          _isLoadingAiSuggestions = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoadingAiSuggestions = false);
-        final errText = e.toString().replaceAll('Exception: ', '').replaceAll('Gemini AI: ', '');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('AI Smart Reply: $errText'),
-            backgroundColor: Colors.red.shade700,
-            duration: const Duration(seconds: 4),
-          ),
-        );
-      }
-    }
-  }
-
   Future<void> _startRecording() async {
     try {
       _recorder = AudioRecorder();
@@ -540,15 +291,30 @@ class _ChatScreenState extends State<ChatScreen> {
         return;
       }
       final dir = await getTemporaryDirectory();
-      final path = '${dir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
-      await _recorder!.start(
-        const RecordConfig(
-          encoder: AudioEncoder.aacLc,
-          bitRate: 128000,
-          sampleRate: 44100,
-        ),
-        path: path,
-      );
+      bool hasOpus = false;
+      try {
+        hasOpus = await _recorder!.isEncoderSupported(AudioEncoder.opus);
+      } catch (_) {}
+
+      _recordingIsOpus = hasOpus;
+      final ext = hasOpus ? 'ogg' : 'm4a';
+      final path = '${dir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.$ext';
+
+      final recordConfig = hasOpus
+          ? const RecordConfig(
+              encoder: AudioEncoder.opus,
+              bitRate: 64000,
+              sampleRate: 48000,
+              numChannels: 1,
+            )
+          : const RecordConfig(
+              encoder: AudioEncoder.aacLc,
+              bitRate: 64000,
+              sampleRate: 44100,
+              numChannels: 1,
+            );
+
+      await _recorder!.start(recordConfig, path: path);
       setState(() {
         _isRecording = true;
         _recordingStartTime = DateTime.now();
@@ -616,14 +382,17 @@ class _ChatScreenState extends State<ChatScreen> {
       final instanceId = auth.selectedInstance?.id;
       if (instanceId == null) return;
 
+      final mime = _recordingIsOpus ? 'audio/ogg; codecs=opus' : 'audio/mp4';
+      final fileName = _recordingIsOpus ? 'voice_note.ogg' : 'voice_note.m4a';
+
       await auth.api.sendMediaMessage(
         instanceId,
         to: widget.chat.chatId,
         type: 'audio',
         base64Data: b64,
-        mimetype: 'audio/mp4',
-        filename: 'voice_note.m4a',
-        ptt: true,
+        mimetype: mime,
+        filename: fileName,
+        ptt: _recordingIsOpus,
       );
       _debouncedSync();
       await file.delete();
@@ -2364,96 +2133,6 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
               ),
 
-            // AI Suggestions bar
-            if (_isLoadingAiSuggestions)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE8F0FE),
-                child: Row(
-                  children: [
-                    const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    const SizedBox(width: 10),
-                    Text(
-                      'Gemini AI is drafting replies...',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontStyle: FontStyle.italic,
-                        color: isDark ? Colors.white70 : const Color(0xFF1A73E8),
-                      ),
-                    ),
-                  ],
-                ),
-              )
-            else if (_aiSuggestions.isNotEmpty)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.auto_awesome, size: 14, color: isDark ? const Color(0xFF8AB4F8) : const Color(0xFF1A73E8)),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Suggested replies (Gemini AI)',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: isDark ? const Color(0xFF8AB4F8) : const Color(0xFF1A73E8),
-                          ),
-                        ),
-                        const Spacer(),
-                        InkWell(
-                          onTap: () => setState(() => _aiSuggestions.clear()),
-                          child: const Icon(Icons.close, size: 16, color: Colors.grey),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: _aiSuggestions.map((suggestion) {
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: ActionChip(
-                              backgroundColor: isDark ? const Color(0xFF334155) : Colors.white,
-                              side: BorderSide(
-                                color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
-                              ),
-                              label: Text(
-                                suggestion,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: isDark ? Colors.white : Colors.black87,
-                                ),
-                              ),
-                              onPressed: () {
-                                _textController.text = suggestion;
-                                _textController.selection = TextSelection.fromPosition(
-                                  TextPosition(offset: suggestion.length),
-                                );
-                                setState(() {
-                                  _isComposing = true;
-                                  _aiSuggestions.clear();
-                                });
-                              },
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
 
             // Message Composer
             Container(
@@ -2512,15 +2191,6 @@ class _ChatScreenState extends State<ChatScreen> {
                                   _handleOutgoingTyping(composing);
                                 },
                               ),
-                            ),
-                            IconButton(
-                              icon: Icon(
-                                Icons.auto_awesome,
-                                color: isDark ? const Color(0xFF8AB4F8) : const Color(0xFF1A73E8),
-                                size: 22,
-                              ),
-                              tooltip: 'Gemini AI Smart Reply',
-                              onPressed: _showAiAssistantDialog,
                             ),
                             IconButton(
                               icon: Icon(

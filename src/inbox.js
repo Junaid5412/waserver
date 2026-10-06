@@ -313,9 +313,10 @@ export function createInbox(store, enc, notify = () => {}) {
       });
       if (rows[0]) row = rows[0];
     }
-    if (!row?.data) return null;
+    const rawData = row.data || row.payload;
+    if (!rawData) return null;
     try {
-      const data = unpack(enc, row.data);
+      const data = typeof rawData === "string" ? unpack(enc, rawData) : rawData;
       return data?.key
         ? data
         : {

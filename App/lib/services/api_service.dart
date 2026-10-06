@@ -1200,6 +1200,251 @@ STRICTLY return ONLY a raw JSON array of 3 strings: ["reply1", "reply2", "reply3
     );
     if (res.statusCode != 200) throw Exception('Failed to send reply');
   }
+
+  // ==================== BUSINESS EMAIL SUITE ====================
+
+  /// Fetch all configured email accounts for current user
+  Future<List<Map<String, dynamic>>> getEmailAccounts() async {
+    final res = await http.get(Uri.parse(ApiConfig.emailAccountsUrl), headers: _headers());
+    if (res.statusCode != 200) {
+      final err = jsonDecode(res.body)['error'] ?? 'Failed to load email accounts';
+      throw Exception(err);
+    }
+    final list = jsonDecode(res.body) as List;
+    return list.map((e) => Map<String, dynamic>.from(e)).toList();
+  }
+
+  /// Test IMAP/SMTP connectivity
+  Future<Map<String, dynamic>> testEmailAccount(Map<String, dynamic> data) async {
+    final res = await http.post(
+      Uri.parse(ApiConfig.emailTestUrl),
+      headers: _headers(),
+      body: jsonEncode(data),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Email test failed');
+    }
+    return Map<String, dynamic>.from(jsonDecode(res.body));
+  }
+
+  /// Save or add email account
+  Future<Map<String, dynamic>> saveEmailAccount(Map<String, dynamic> data) async {
+    final res = await http.post(
+      Uri.parse(ApiConfig.emailAccountsUrl),
+      headers: _headers(),
+      body: jsonEncode(data),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to save email account');
+    }
+    return Map<String, dynamic>.from(jsonDecode(res.body));
+  }
+
+  /// Delete email account
+  Future<void> deleteEmailAccount(String id) async {
+    final res = await http.delete(
+      Uri.parse(ApiConfig.emailAccountDeleteUrl(id)),
+      headers: _headers(),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to delete email account');
+    }
+  }
+
+  /// Fetch mailbox folders with unseen/total counts
+  Future<Map<String, dynamic>> getEmailFolders({String? accountId}) async {
+    final uri = Uri.parse(ApiConfig.emailFoldersUrl).replace(
+      queryParameters: accountId != null ? {'accountId': accountId} : null,
+    );
+    final res = await http.get(uri, headers: _headers());
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to load mailbox folders');
+    }
+    return Map<String, dynamic>.from(jsonDecode(res.body));
+  }
+
+  /// Fetch paginated list of emails in a folder
+  Future<Map<String, dynamic>> getEmailMessages({
+    String? accountId,
+    String folder = 'INBOX',
+    int page = 1,
+    int limit = 30,
+    String search = '',
+    String filter = 'all',
+  }) async {
+    final qParams = <String, String>{
+      'folder': folder,
+      'page': page.toString(),
+      'limit': limit.toString(),
+    };
+    if (accountId != null && accountId.isNotEmpty) {
+      qParams['accountId'] = accountId;
+    }
+    if (search.isNotEmpty) {
+      qParams['search'] = search;
+    }
+    if (filter.isNotEmpty && filter != 'all') {
+      qParams['filter'] = filter;
+    }
+
+    final uri = Uri.parse(ApiConfig.emailMessagesUrl).replace(queryParameters: qParams);
+    final res = await http.get(uri, headers: _headers());
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to load emails');
+    }
+    return Map<String, dynamic>.from(jsonDecode(res.body));
+  }
+
+  /// Fetch detailed MIME parsed email
+  Future<Map<String, dynamic>> getEmailMessageDetail(
+    String uid, {
+    String? accountId,
+    String folder = 'INBOX',
+  }) async {
+    final qParams = <String, String>{'folder': folder};
+    if (accountId != null && accountId.isNotEmpty) {
+      qParams['accountId'] = accountId;
+    }
+    final uri = Uri.parse(ApiConfig.emailMessageDetailUrl(uid)).replace(queryParameters: qParams);
+    final res = await http.get(uri, headers: _headers());
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to load email details');
+    }
+    return Map<String, dynamic>.from(jsonDecode(res.body));
+  }
+
+  /// Send email via SMTP
+  Future<Map<String, dynamic>> sendEmail({
+    String? accountId,
+    required dynamic to,
+    dynamic cc,
+    dynamic bcc,
+    String? subject,
+    String? text,
+    String? html,
+    String? inReplyTo,
+    dynamic references,
+    List<Map<String, dynamic>>? attachments,
+  }) async {
+    final qParams = <String, String>{};
+    if (accountId != null && accountId.isNotEmpty) {
+      qParams['accountId'] = accountId;
+    }
+    final uri = Uri.parse(ApiConfig.emailSendUrl).replace(
+      queryParameters: qParams.isNotEmpty ? qParams : null,
+    );
+
+    final payload = <String, dynamic>{
+      'to': to,
+      if (cc != null) 'cc': cc,
+      if (bcc != null) 'bcc': bcc,
+      'subject': subject ?? '',
+      if (text != null) 'text': text,
+      if (html != null) 'html': html,
+      if (inReplyTo != null) 'inReplyTo': inReplyTo,
+      if (references != null) 'references': references,
+      if (attachments != null) 'attachments': attachments,
+    };
+
+    final res = await http.post(
+      uri,
+      headers: _headers(),
+      body: jsonEncode(payload),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to send email');
+    }
+    return Map<String, dynamic>.from(jsonDecode(res.body));
+  }
+
+  /// Mark message read/unread or star/unstar
+  Future<Map<String, dynamic>> flagEmailMessage(
+    String uid, {
+    String? accountId,
+    String folder = 'INBOX',
+    bool? read,
+    bool? star,
+  }) async {
+    final qParams = <String, String>{'folder': folder};
+    if (accountId != null && accountId.isNotEmpty) {
+      qParams['accountId'] = accountId;
+    }
+    final uri = Uri.parse(ApiConfig.emailFlagUrl(uid)).replace(queryParameters: qParams);
+
+    final payload = <String, dynamic>{};
+    if (read != null) payload['read'] = read;
+    if (star != null) payload['star'] = star;
+
+    final res = await http.post(
+      uri,
+      headers: _headers(),
+      body: jsonEncode(payload),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to update email flag');
+    }
+    return Map<String, dynamic>.from(jsonDecode(res.body));
+  }
+
+  /// Delete message or move to Trash
+  Future<Map<String, dynamic>> deleteEmailMessage(
+    String uid, {
+    String? accountId,
+    String folder = 'INBOX',
+    bool permanent = false,
+  }) async {
+    final qParams = <String, String>{
+      'folder': folder,
+      'permanent': permanent.toString(),
+    };
+    if (accountId != null && accountId.isNotEmpty) {
+      qParams['accountId'] = accountId;
+    }
+    final uri = Uri.parse(ApiConfig.emailDeleteUrl(uid)).replace(queryParameters: qParams);
+
+    final res = await http.delete(uri, headers: _headers());
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to delete email');
+    }
+    return Map<String, dynamic>.from(jsonDecode(res.body));
+  }
+
+  /// Generate AI reply options (Gemini 3.1+)
+  Future<Map<String, dynamic>> generateAiEmailReply({
+    String? subject,
+    String? senderName,
+    String? senderEmail,
+    String? emailBody,
+    String? userIntent,
+    String? model,
+  }) async {
+    final res = await http.post(
+      Uri.parse(ApiConfig.emailAiReplyUrl),
+      headers: _headers(),
+      body: jsonEncode({
+        if (subject != null) 'subject': subject,
+        if (senderName != null) 'senderName': senderName,
+        if (senderEmail != null) 'senderEmail': senderEmail,
+        if (emailBody != null) 'emailBody': emailBody,
+        if (userIntent != null) 'userIntent': userIntent,
+        if (model != null) 'model': model,
+      }),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to generate AI email reply');
+    }
+    return Map<String, dynamic>.from(jsonDecode(res.body));
+  }
 }
 
 

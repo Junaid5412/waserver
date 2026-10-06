@@ -6,6 +6,9 @@ import '../config/theme.dart';
 import '../services/auth_service.dart';
 import '../services/realtime_service.dart';
 import '../widgets/instance_switcher_header.dart';
+import '../widgets/header_notification.dart';
+import '../models/chat.dart';
+import 'chat_screen.dart';
 import 'chats_tab.dart';
 import 'groups_tab.dart';
 import 'status_tab.dart';
@@ -14,6 +17,7 @@ import 'connect_screen.dart';
 import 'admin_control_center_screen.dart';
 import 'settings_screen.dart';
 import 'notifications_screen.dart';
+import 'email_main_screen.dart';
 import '../config/permissions.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -51,19 +55,70 @@ class _HomeScreenState extends State<HomeScreen> {
         _checkUnreadBroadcasts();
 
         final data = event.raw['data'] as Map<String, dynamic>? ?? {};
-        _showNotificationBanner(
-          'Zelon Admin',
-          'You got a new message from Admin',
+        final title = data['title']?.toString() ?? 'Zelon Admin';
+        final body = data['body']?.toString() ?? 'You got a new announcement from Admin';
+
+        // Header notification at top of screen
+        HeaderNotification.show(
+          context,
+          title: title,
+          message: body,
+          type: HeaderNotificationType.info,
+          onTap: () => _showBroadcastPopup(data),
         );
+        // System tray notification when closed/backgrounded
+        HeaderNotification.showSystemNotification(
+          title: title,
+          body: body,
+          isBroadcast: true,
+        );
+
         _showBroadcastPopup(data);
       } else if (event.type == 'message' && event.fromMe != true) {
-        HapticFeedback.lightImpact();
+        final incomingChatId = RealtimeEvent.normalizeJid(event.chatId);
+
+        // Same-Chat Suppression: If user is currently looking at this exact chat, DO NOT show notification!
+        if (incomingChatId.isNotEmpty && auth.currentOpenChatId == incomingChatId) {
+          return;
+        }
+
         final raw = event.raw['data'] as Map<String, dynamic>? ?? {};
         final sender = raw['pushName']?.toString() ?? 'WhatsApp Contact';
         final text = raw['message']?['conversation']?.toString() ??
             raw['message']?['extendedTextMessage']?['text']?.toString() ??
-            'New message received';
-        _showNotificationBanner(sender, text);
+            (raw['message']?['audioMessage'] != null ? '🎤 Voice message' :
+             raw['message']?['imageMessage'] != null ? '📷 Photo' :
+             raw['message']?['videoMessage'] != null ? '🎥 Video' :
+             raw['message']?['documentMessage'] != null ? '📄 Document' : 'New message received');
+
+        // Top Header Notification Banner
+        HeaderNotification.showMessage(
+          context,
+          sender: sender,
+          text: text,
+          onTap: () {
+            if (incomingChatId.isNotEmpty) {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => ChatScreen(
+                    chat: ChatModel(
+                      chatId: incomingChatId,
+                      name: sender,
+                      lastMessage: text,
+                    ),
+                  ),
+                ),
+              );
+            }
+          },
+        );
+
+        // System notification in Android status bar for when app is minimized/closed
+        HeaderNotification.showSystemNotification(
+          title: sender,
+          body: text,
+          chatId: incomingChatId,
+        );
       }
     });
   }
@@ -79,35 +134,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showNotificationBanner(String title, String body) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.all(12),
-        backgroundColor: WhatsAppTheme.surfaceDark,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        content: Row(
-          children: [
-            const CircleAvatar(
-              radius: 14,
-              backgroundColor: WhatsAppTheme.primaryGreen,
-              child: Icon(Icons.notifications_active_rounded, color: Colors.white, size: 16),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white)),
-                  Text(body, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.white70)),
-                ],
-              ),
-            ),
-          ],
-        ),
-        duration: const Duration(seconds: 4),
-      ),
+    HeaderNotification.show(
+      context,
+      title: title,
+      message: body,
+      type: HeaderNotificationType.info,
     );
   }
 
@@ -434,6 +465,17 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
 
+          // Business Email Quick Button
+          IconButton(
+            icon: const Icon(Icons.mail_outline_rounded, color: Colors.white, size: 23),
+            tooltip: 'Business Email',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const EmailMainScreen()),
+              );
+            },
+          ),
+
           // Link Device Quick Button
           IconButton(
             icon: const Icon(Icons.qr_code_scanner_rounded, color: Colors.white, size: 22),
@@ -454,6 +496,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   MaterialPageRoute(builder: (_) => const NotificationsScreen()),
                 );
                 _checkUnreadBroadcasts();
+              } else if (value == 'email') {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const EmailMainScreen()),
+                );
               } else if (value == 'connect') {
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const ConnectScreen()),
@@ -485,6 +531,16 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                     ],
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'email',
+                child: Row(
+                  children: const [
+                    Icon(Icons.mail_outline, size: 20, color: WhatsAppTheme.primaryGreen),
+                    SizedBox(width: 12),
+                    Text('Business Email'),
                   ],
                 ),
               ),

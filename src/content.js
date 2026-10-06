@@ -118,16 +118,18 @@ export function buildContent(media, loadMessage) {
           : Buffer.from(d.data, "base64"),
         caption: d.text || "",
         mimetype:
-          d.mimetype ||
-          stored?.mimetype ||
-          {
-            image: "image/jpeg",
-            video: "video/mp4",
-            audio: "audio/mpeg",
-            document: "application/octet-stream",
-            sticker: "image/webp",
-          }[d.type],
-        fileName: d.filename || stored?.filename || "attachment",
+          (d.type === "audio" && d.ptt)
+            ? "audio/ogg; codecs=opus"
+            : (d.mimetype ||
+               stored?.mimetype ||
+               {
+                 image: "image/jpeg",
+                 video: "video/mp4",
+                 audio: "audio/ogg; codecs=opus",
+                 document: "application/octet-stream",
+                 sticker: "image/webp",
+               }[d.type]),
+        fileName: d.filename || stored?.filename || (d.type === "audio" && d.ptt ? "voice_note.ogg" : "attachment"),
         ...(d.type === "audio" ? { ptt: d.ptt || false } : {}),
         mentions: d.mentions,
       };

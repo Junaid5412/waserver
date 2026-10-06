@@ -60,4 +60,17 @@ class ApiConfig {
   static String broadcastSeenUrl(String id) => '$_baseUrl/api/user/broadcasts/$id/seen';
   static String broadcastAckUrl(String id) => '$_baseUrl/api/user/broadcasts/$id/ack';
   static String broadcastReplyUrl(String id) => '$_baseUrl/api/user/broadcasts/$id/reply';
+
+  // Business Email Suite Endpoints
+  static String get emailAccountsUrl => '$_baseUrl/api/email/accounts';
+  static String get emailTestUrl => '$_baseUrl/api/email/accounts/test';
+  static String emailAccountDeleteUrl(String id) => '$_baseUrl/api/email/accounts/$id';
+  static String get emailFoldersUrl => '$_baseUrl/api/email/folders';
+  static String get emailMessagesUrl => '$_baseUrl/api/email/messages';
+  static String emailMessageDetailUrl(String uid) => '$_baseUrl/api/email/messages/$uid';
+  static String emailAttachmentUrl(String uid, int index) => '$_baseUrl/api/email/messages/$uid/attachment/$index';
+  static String get emailSendUrl => '$_baseUrl/api/email/send';
+  static String emailFlagUrl(String uid) => '$_baseUrl/api/email/messages/$uid/flag';
+  static String emailDeleteUrl(String uid) => '$_baseUrl/api/email/messages/$uid';
+  static String get emailAiReplyUrl => '$_baseUrl/api/email/ai/reply';
 }
