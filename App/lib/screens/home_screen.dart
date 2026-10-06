@@ -10,6 +10,7 @@ import 'tools_screen.dart';
 import 'connect_screen.dart';
 import 'admin_control_center_screen.dart';
 import 'settings_screen.dart';
+import '../config/permissions.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -21,13 +22,42 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
 
-  final List<Widget> _pages = const [
-    ChatsTab(),
-    GroupsTab(),
-    StatusTab(),
-    ToolsScreen(),
-    SettingsScreen(),
-  ];
+  Widget _buildTabWithPermission({
+    required Widget child,
+    required bool hasAccess,
+    required String sectionName,
+  }) {
+    if (hasAccess) return child;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.lock_person_rounded, size: 48, color: Colors.red.shade400),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Access Restricted',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Your administrator has restricted access to $sectionName for this account.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 14, color: Colors.grey),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   void _showInstanceQuickPicker(BuildContext context) {
     final auth = Provider.of<AuthService>(context, listen: false);
@@ -138,6 +168,30 @@ class _HomeScreenState extends State<HomeScreen> {
     final inst = auth.selectedInstance;
     final headerTitle = (inst != null && inst.name.isNotEmpty) ? inst.name : 'Zelon';
 
+    final canChats = UserPermissions.canAccessChatsSection(user);
+    final canGroups = UserPermissions.canAccessGroupsSection(user);
+    final canStatus = UserPermissions.canAccessStatusSection(user);
+
+    final pages = [
+      _buildTabWithPermission(
+        child: const ChatsTab(),
+        hasAccess: canChats,
+        sectionName: 'Chats',
+      ),
+      _buildTabWithPermission(
+        child: const GroupsTab(),
+        hasAccess: canGroups,
+        sectionName: 'Groups',
+      ),
+      _buildTabWithPermission(
+        child: const StatusTab(),
+        hasAccess: canStatus,
+        sectionName: 'Status Updates',
+      ),
+      const ToolsScreen(),
+      const SettingsScreen(),
+    ];
+
     return Scaffold(
       appBar: AppBar(
         backgroundColor: isDark ? WhatsAppTheme.surfaceDark : WhatsAppTheme.primaryGreen,
@@ -244,7 +298,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       body: IndexedStack(
         index: _currentIndex,
-        children: _pages,
+        children: pages,
       ),
 
       bottomNavigationBar: NavigationBar(

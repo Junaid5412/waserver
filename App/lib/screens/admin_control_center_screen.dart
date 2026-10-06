@@ -37,19 +37,27 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
   final _newPassCtrl = TextEditingController();
   final _confirmPassCtrl = TextEditingController();
 
+  // Gemini AI Tab
+  List<String> _geminiKeys = [];
+  bool _isLoadingGemini = false;
+  final _geminiKeyCtrl = TextEditingController();
+
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _loadUsers();
     _loadHealth();
     _loadAccount();
+    _loadGeminiKeys();
 
     _tabController.addListener(() {
       if (_tabController.index == 1 && _health == null) {
         _loadHealth();
       } else if (_tabController.index == 2 && _accountProfile == null) {
         _loadAccount();
+      } else if (_tabController.index == 3 && _geminiKeys.isEmpty) {
+        _loadGeminiKeys();
       }
     });
   }
@@ -62,7 +70,22 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
     _currPassCtrl.dispose();
     _newPassCtrl.dispose();
     _confirmPassCtrl.dispose();
+    _geminiKeyCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadGeminiKeys() async {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    setState(() => _isLoadingGemini = true);
+    try {
+      final keys = await auth.api.getAdminGeminiKeys();
+      if (mounted) setState(() { _geminiKeys = keys; _isLoadingGemini = false; });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoadingGemini = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to load Gemini keys: $e')));
+      }
+    }
   }
 
   // --- Users Management ---
@@ -91,10 +114,17 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
     final emailCtrl = TextEditingController();
     final nameCtrl = TextEditingController();
     String role = 'user';
-    bool canDeleted = true;
-    bool canEdits = true;
-    bool canStatus = true;
-    bool canReceipts = true;
+    bool canDeleted = false;
+    bool canEdits = false;
+    bool canStatus = false;
+    bool canReceipts = false;
+    bool canChats = true;
+    bool canGroups = true;
+    bool canStatusSec = true;
+    bool canCommunities = true;
+    bool canMedia = true;
+    bool canAi = true;
+    bool canDelMsg = false;
 
     showDialog(
       context: context,
@@ -160,7 +190,58 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
                       ],
                     ),
                     const Divider(),
-                    const Text('Permissions', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    const Text('Feature Permissions', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: WhatsAppTheme.primaryGreen)),
+                    SwitchListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Access Chats', style: TextStyle(fontSize: 13)),
+                      value: canChats,
+                      onChanged: (v) => setDlgState(() => canChats = v),
+                    ),
+                    SwitchListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Access Groups', style: TextStyle(fontSize: 13)),
+                      value: canGroups,
+                      onChanged: (v) => setDlgState(() => canGroups = v),
+                    ),
+                    SwitchListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Access Status Updates', style: TextStyle(fontSize: 13)),
+                      value: canStatusSec,
+                      onChanged: (v) => setDlgState(() => canStatusSec = v),
+                    ),
+                    SwitchListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Access Communities', style: TextStyle(fontSize: 13)),
+                      value: canCommunities,
+                      onChanged: (v) => setDlgState(() => canCommunities = v),
+                    ),
+                    SwitchListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Send Media & Attachments', style: TextStyle(fontSize: 13)),
+                      value: canMedia,
+                      onChanged: (v) => setDlgState(() => canMedia = v),
+                    ),
+                    SwitchListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Use Gemini AI Assistant', style: TextStyle(fontSize: 13)),
+                      value: canAi,
+                      onChanged: (v) => setDlgState(() => canAi = v),
+                    ),
+                    SwitchListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Delete Messages', style: TextStyle(fontSize: 13)),
+                      value: canDelMsg,
+                      onChanged: (v) => setDlgState(() => canDelMsg = v),
+                    ),
+                    const Divider(),
+                    const Text('Audit & Visibility Permissions', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: WhatsAppTheme.primaryGreen)),
                     SwitchListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
@@ -208,6 +289,18 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
                         name: nameCtrl.text.trim(),
                         role: role,
                         permissions: {
+                          'canViewDeletedMessages': canDeleted,
+                          'canViewEditedHistory': canEdits,
+                          'canViewStatusSeen': canStatus,
+                          'canViewMessageSeen': canReceipts,
+                          'canAccessChats': canChats,
+                          'canAccessGroups': canGroups,
+                          'canAccessStatus': canStatusSec,
+                          'canAccessCommunities': canCommunities,
+                          'canSendMedia': canMedia,
+                          'canUseAi': canAi,
+                          'canDeleteMessages': canDelMsg,
+                          // backwards compatibility keys:
                           'view_deleted': canDeleted,
                           'view_edited': canEdits,
                           'view_status_seen': canStatus,
@@ -303,6 +396,14 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
     bool canDeleted = user.permissions.canViewDeletedMessages;
     bool canEdits = user.permissions.canViewEditedHistory;
     bool canStatus = user.permissions.canViewStatusSeen;
+    bool canReceipts = user.permissions.canViewMessageSeen;
+    bool canChats = user.permissions.canAccessChats;
+    bool canGroups = user.permissions.canAccessGroups;
+    bool canStatusSec = user.permissions.canAccessStatus;
+    bool canCommunities = user.permissions.canAccessCommunities;
+    bool canMedia = user.permissions.canSendMedia;
+    bool canAi = user.permissions.canUseAi;
+    bool canDelMsg = user.permissions.canDeleteMessages;
 
     showModalBottomSheet(
       context: context,
@@ -370,18 +471,76 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
                         ],
                       ),
                       const Divider(),
+                      const Text('Feature Permissions', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: WhatsAppTheme.primaryGreen)),
                       SwitchListTile(
-                        title: const Text('View Deleted Messages'),
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Access Chats', style: TextStyle(fontSize: 13)),
+                        value: canChats,
+                        onChanged: (v) => setModalState(() => canChats = v),
+                      ),
+                      SwitchListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Access Groups', style: TextStyle(fontSize: 13)),
+                        value: canGroups,
+                        onChanged: (v) => setModalState(() => canGroups = v),
+                      ),
+                      SwitchListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Access Status Updates', style: TextStyle(fontSize: 13)),
+                        value: canStatusSec,
+                        onChanged: (v) => setModalState(() => canStatusSec = v),
+                      ),
+                      SwitchListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Access Communities', style: TextStyle(fontSize: 13)),
+                        value: canCommunities,
+                        onChanged: (v) => setModalState(() => canCommunities = v),
+                      ),
+                      SwitchListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Send Media & Attachments', style: TextStyle(fontSize: 13)),
+                        value: canMedia,
+                        onChanged: (v) => setModalState(() => canMedia = v),
+                      ),
+                      SwitchListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Use Gemini AI Assistant', style: TextStyle(fontSize: 13)),
+                        value: canAi,
+                        onChanged: (v) => setModalState(() => canAi = v),
+                      ),
+                      SwitchListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Delete Messages', style: TextStyle(fontSize: 13)),
+                        value: canDelMsg,
+                        onChanged: (v) => setModalState(() => canDelMsg = v),
+                      ),
+                      const Divider(),
+                      const Text('Audit & Visibility Permissions', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: WhatsAppTheme.primaryGreen)),
+                      SwitchListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('View Deleted Messages', style: TextStyle(fontSize: 13)),
                         value: canDeleted,
                         onChanged: (v) => setModalState(() => canDeleted = v),
                       ),
                       SwitchListTile(
-                        title: const Text('View Edit History'),
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('View Edit History', style: TextStyle(fontSize: 13)),
                         value: canEdits,
                         onChanged: (v) => setModalState(() => canEdits = v),
                       ),
                       SwitchListTile(
-                        title: const Text('View Status Seen List'),
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('View Status Seen List', style: TextStyle(fontSize: 13)),
                         value: canStatus,
                         onChanged: (v) => setModalState(() => canStatus = v),
                       ),
@@ -402,9 +561,22 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
                                 name: nameCtrl.text.trim(),
                                 role: role,
                                 permissions: {
+                                  'canViewDeletedMessages': canDeleted,
+                                  'canViewEditedHistory': canEdits,
+                                  'canViewStatusSeen': canStatus,
+                                  'canViewMessageSeen': canReceipts,
+                                  'canAccessChats': canChats,
+                                  'canAccessGroups': canGroups,
+                                  'canAccessStatus': canStatusSec,
+                                  'canAccessCommunities': canCommunities,
+                                  'canSendMedia': canMedia,
+                                  'canUseAi': canAi,
+                                  'canDeleteMessages': canDelMsg,
+                                  // backwards compatibility keys:
                                   'view_deleted': canDeleted,
                                   'view_edited': canEdits,
                                   'view_status_seen': canStatus,
+                                  'view_receipts': canReceipts,
                                 },
                               );
                               _loadUsers();
@@ -554,6 +726,7 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
             Tab(icon: Icon(Icons.people_alt_rounded), text: 'Users'),
             Tab(icon: Icon(Icons.monitor_heart_rounded), text: 'Health'),
             Tab(icon: Icon(Icons.manage_accounts_rounded), text: 'Profile'),
+            Tab(icon: Icon(Icons.auto_awesome), text: 'Gemini AI'),
           ],
         ),
         actions: [
@@ -564,6 +737,7 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
               if (_tabController.index == 0) _loadUsers();
               if (_tabController.index == 1) _loadHealth();
               if (_tabController.index == 2) _loadAccount();
+              if (_tabController.index == 3) _loadGeminiKeys();
             },
           ),
         ],
@@ -584,6 +758,7 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
           _buildUsersTab(isDark),
           _buildHealthTab(isDark),
           _buildAccountTab(isDark),
+          _buildGeminiTab(isDark),
         ],
       ),
     );
@@ -1127,6 +1302,140 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // --- Gemini AI Tab Widget ---
+  Widget _buildGeminiTab(bool isDark) {
+    if (_isLoadingGemini && _geminiKeys.isEmpty) {
+      return const Center(child: CircularProgressIndicator(color: WhatsAppTheme.primaryGreen));
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadGeminiKeys,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Card(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: const [
+                        Icon(Icons.auto_awesome, color: WhatsAppTheme.primaryGreen),
+                        SizedBox(width: 8),
+                        Text('Gemini API Keys', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Multi-key failover is supported. If a key hits its rate limit or fails, the next active key will automatically be used.',
+                      style: TextStyle(fontSize: 13, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _geminiKeyCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'New Gemini API Key',
+                              hintText: 'AIzaSy...',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        ElevatedButton.icon(
+                          onPressed: () async {
+                            final key = _geminiKeyCtrl.text.trim();
+                            if (key.isEmpty) return;
+                            final auth = Provider.of<AuthService>(context, listen: false);
+                            try {
+                              await auth.api.addAdminGeminiKey(key);
+                              _geminiKeyCtrl.clear();
+                              _loadGeminiKeys();
+                            } catch (e) {
+                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: WhatsAppTheme.primaryGreen,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+                          ),
+                          icon: const Icon(Icons.add),
+                          label: const Text('Add Key'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (_geminiKeys.isEmpty)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(32.0),
+                  child: Text('No Gemini API keys added yet.', style: TextStyle(color: Colors.grey)),
+                ),
+              )
+            else
+              Card(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _geminiKeys.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (ctx, i) {
+                    final key = _geminiKeys[i];
+                    final maskedKey = key.length > 6 ? '${key.substring(0, 6)}...' : '...';
+                    return ListTile(
+                      leading: const Icon(Icons.key_rounded, color: Colors.blueGrey),
+                      title: Text(maskedKey, style: const TextStyle(fontFamily: 'monospace')),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete_outline, color: Colors.red),
+                        onPressed: () async {
+                          final confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: const Text('Remove Key?'),
+                              content: const Text('Are you sure you want to remove this Gemini API key?'),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                                ElevatedButton(
+                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                                  onPressed: () => Navigator.pop(ctx, true),
+                                  child: const Text('Remove', style: TextStyle(color: Colors.white)),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirm == true && mounted) {
+                            final auth = Provider.of<AuthService>(context, listen: false);
+                            try {
+                              await auth.api.removeAdminGeminiKey(key);
+                              _loadGeminiKeys();
+                            } catch (e) {
+                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                            }
+                          }
+                        },
+                      ),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

@@ -20,9 +20,11 @@ import '../widgets/message_actions_sheet.dart';
 import 'diff_viewer_screen.dart';
 import 'contact_profile_screen.dart';
 import 'pdf_viewer_screen.dart';
-import 'call_screen.dart';
 import 'location_picker_screen.dart';
+import 'package:record/record.dart';
+import 'package:path_provider/path_provider.dart';
 import '../services/chat_design_service.dart';
+import '../config/permissions.dart';
 
 class ChatScreen extends StatefulWidget {
   final ChatModel chat;
@@ -50,6 +52,17 @@ class _ChatScreenState extends State<ChatScreen> {
   StreamSubscription<RealtimeEvent>? _streamSub;
   Timer? _foregroundPollTimer;
   Timer? _debounceTimer;
+
+  // Voice recording
+  AudioRecorder? _recorder;
+  bool _isRecording = false;
+  DateTime? _recordingStartTime;
+  Timer? _recordingTimer;
+  String _recordingDuration = '0:00';
+
+  // AI Smart Reply
+  bool _isLoadingAiSuggestions = false;
+  List<String> _aiSuggestions = [];
 
   final List<String> _popularEmojis = [
     '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇',
@@ -180,6 +193,8 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _foregroundPollTimer?.cancel();
     _debounceTimer?.cancel();
+    _recordingTimer?.cancel();
+    _recorder?.dispose();
     _streamSub?.cancel();
     _presenceTimer?.cancel();
     _presenceKeepaliveTimer?.cancel();
@@ -259,6 +274,299 @@ class _ChatScreenState extends State<ChatScreen> {
         }
       }
     });
+  }
+
+  void _showAiAssistantDialog() {
+    final customPromptCtrl = TextEditingController();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom,
+          ),
+          child: Container(
+            decoration: BoxDecoration(
+              color: isDark ? WhatsAppTheme.surfaceDark : Colors.white,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.withOpacity(0.3),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1A73E8).withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.auto_awesome, color: Color(0xFF1A73E8), size: 24),
+                    ),
+                    const SizedBox(width: 12),
+                    const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Gemini Smart Assistant', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        Text('Intelligently analyze past chat & draft replies', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                const Text(
+                  'Quick Actions',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ActionChip(
+                      avatar: const Icon(Icons.flash_on, size: 16, color: Color(0xFF1A73E8)),
+                      label: const Text('Auto Smart Replies'),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _generateAiReplies();
+                      },
+                    ),
+                    ActionChip(
+                      avatar: const Icon(Icons.check_circle_outline, size: 16, color: Colors.green),
+                      label: const Text('Polite Agree'),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _generateAiReplies(customPrompt: 'Politely agree and confirm');
+                      },
+                    ),
+                    ActionChip(
+                      avatar: const Icon(Icons.cancel_outlined, size: 16, color: Colors.orange),
+                      label: const Text('Polite Decline'),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _generateAiReplies(customPrompt: 'Politely decline with reason');
+                      },
+                    ),
+                    ActionChip(
+                      avatar: const Icon(Icons.schedule, size: 16, color: Colors.blue),
+                      label: const Text('Get Back Later'),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _generateAiReplies(customPrompt: 'Say I am currently busy and will get back shortly');
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Custom Instruction to Gemini',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: customPromptCtrl,
+                        decoration: InputDecoration(
+                          hintText: 'e.g. Ask for discount, confirm appointment...',
+                          hintStyle: const TextStyle(fontSize: 13),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: WhatsAppTheme.primaryGreen,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      ),
+                      onPressed: () {
+                        final p = customPromptCtrl.text.trim();
+                        Navigator.pop(ctx);
+                        _generateAiReplies(customPrompt: p.isNotEmpty ? p : null);
+                      },
+                      child: const Text('Generate', style: TextStyle(color: Colors.white)),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _generateAiReplies({String? customPrompt}) async {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final instanceId = auth.selectedInstance?.id;
+    if (instanceId == null) return;
+
+    if (auth.currentUser?.permissions.canUseAi == false) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('AI features are disabled for your account by Admin.')),
+        );
+      }
+      return;
+    }
+
+    setState(() {
+      _isLoadingAiSuggestions = true;
+      _aiSuggestions = [];
+    });
+
+    try {
+      final suggestions = await auth.api.generateSmartReply(
+        instanceId,
+        widget.chat.chatId,
+        _messages.reversed.take(25).toList().reversed.toList(),
+        prompt: customPrompt,
+      );
+      if (mounted) {
+        setState(() {
+          _aiSuggestions = suggestions;
+          _isLoadingAiSuggestions = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoadingAiSuggestions = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Gemini AI: $e'),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _startRecording() async {
+    try {
+      _recorder = AudioRecorder();
+      if (!await _recorder!.hasPermission()) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Microphone permission denied')),
+          );
+        }
+        return;
+      }
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      await _recorder!.start(
+        const RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          bitRate: 128000,
+          sampleRate: 44100,
+        ),
+        path: path,
+      );
+      setState(() {
+        _isRecording = true;
+        _recordingStartTime = DateTime.now();
+        _recordingDuration = '0:00';
+      });
+      _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (_recordingStartTime != null && mounted) {
+          final elapsed = DateTime.now().difference(_recordingStartTime!);
+          setState(() {
+            _recordingDuration = '${elapsed.inMinutes}:${(elapsed.inSeconds % 60).toString().padLeft(2, '0')}';
+          });
+        }
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to start recording: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _cancelRecording() async {
+    _recordingTimer?.cancel();
+    try {
+      if (_recorder != null) {
+        final path = await _recorder!.stop();
+        if (path != null) {
+          final file = File(path);
+          if (await file.exists()) await file.delete();
+        }
+        _recorder!.dispose();
+      }
+    } catch (_) {}
+    if (mounted) {
+      setState(() {
+        _isRecording = false;
+        _recordingStartTime = null;
+        _recordingDuration = '0:00';
+        _recorder = null;
+      });
+    }
+  }
+
+  Future<void> _stopAndSendRecording() async {
+    _recordingTimer?.cancel();
+    try {
+      if (_recorder == null) return;
+      final path = await _recorder!.stop();
+      _recorder!.dispose();
+      _recorder = null;
+      setState(() {
+        _isRecording = false;
+        _recordingStartTime = null;
+        _recordingDuration = '0:00';
+      });
+      if (path == null) return;
+
+      final file = File(path);
+      if (!await file.exists()) return;
+      final bytes = await file.readAsBytes();
+      final b64 = base64Encode(bytes);
+
+      final auth = Provider.of<AuthService>(context, listen: false);
+      final instanceId = auth.selectedInstance?.id;
+      if (instanceId == null) return;
+
+      await auth.api.sendMediaMessage(
+        instanceId,
+        to: widget.chat.chatId,
+        type: 'audio',
+        base64Data: b64,
+        mimetype: 'audio/mp4',
+        filename: 'voice_note.m4a',
+        ptt: true,
+      );
+      _debouncedSync();
+      await file.delete();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send voice note: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   Future<void> _sendMessage() async {
@@ -432,6 +740,17 @@ class _ChatScreenState extends State<ChatScreen> {
         }
       },
       onDelete: (scope) async {
+        if (!UserPermissions.canDeleteMsg(auth.currentUser)) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Deleting messages is restricted for your account by Admin.'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+          return;
+        }
         try {
           await auth.api.deleteMessage(instanceId, message.waId, scope: scope);
           _debouncedSync();
@@ -709,6 +1028,16 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _showAttachmentSheet() {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    if (!UserPermissions.canSendMediaAttachments(auth.currentUser)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Sending media is restricted for your account by Admin.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -1992,6 +2321,97 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
               ),
 
+            // AI Suggestions bar
+            if (_isLoadingAiSuggestions)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE8F0FE),
+                child: Row(
+                  children: [
+                    const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Gemini AI is drafting replies...',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontStyle: FontStyle.italic,
+                        color: isDark ? Colors.white70 : const Color(0xFF1A73E8),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else if (_aiSuggestions.isNotEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.auto_awesome, size: 14, color: isDark ? const Color(0xFF8AB4F8) : const Color(0xFF1A73E8)),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Suggested replies (Gemini AI)',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? const Color(0xFF8AB4F8) : const Color(0xFF1A73E8),
+                          ),
+                        ),
+                        const Spacer(),
+                        InkWell(
+                          onTap: () => setState(() => _aiSuggestions.clear()),
+                          child: const Icon(Icons.close, size: 16, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: _aiSuggestions.map((suggestion) {
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ActionChip(
+                              backgroundColor: isDark ? const Color(0xFF334155) : Colors.white,
+                              side: BorderSide(
+                                color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
+                              ),
+                              label: Text(
+                                suggestion,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: isDark ? Colors.white : Colors.black87,
+                                ),
+                              ),
+                              onPressed: () {
+                                _textController.text = suggestion;
+                                _textController.selection = TextSelection.fromPosition(
+                                  TextPosition(offset: suggestion.length),
+                                );
+                                setState(() {
+                                  _isComposing = true;
+                                  _aiSuggestions.clear();
+                                });
+                              },
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
             // Message Composer
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -2052,6 +2472,15 @@ class _ChatScreenState extends State<ChatScreen> {
                             ),
                             IconButton(
                               icon: Icon(
+                                Icons.auto_awesome,
+                                color: isDark ? const Color(0xFF8AB4F8) : const Color(0xFF1A73E8),
+                                size: 22,
+                              ),
+                              tooltip: 'Gemini AI Smart Reply',
+                              onPressed: _showAiAssistantDialog,
+                            ),
+                            IconButton(
+                              icon: Icon(
                                 Icons.attach_file,
                                 color: isDark ? Colors.white60 : Colors.grey.shade600,
                               ),
@@ -2064,18 +2493,53 @@ class _ChatScreenState extends State<ChatScreen> {
                     const SizedBox(width: 6),
 
                     // Send or Mic Button
-                    GestureDetector(
-                      onTap: _sendMessage,
-                      child: CircleAvatar(
-                        radius: 24,
-                        backgroundColor: WhatsAppTheme.primaryGreen,
-                        child: Icon(
-                          _isComposing ? Icons.send : Icons.mic,
-                          color: Colors.white,
-                          size: 22,
+                    _isRecording
+                      ? Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Cancel
+                            GestureDetector(
+                              onTap: _cancelRecording,
+                              child: const CircleAvatar(
+                                radius: 20,
+                                backgroundColor: Colors.red,
+                                child: Icon(Icons.delete, color: Colors.white, size: 20),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            // Duration
+                            Text(
+                              _recordingDuration,
+                              style: TextStyle(
+                                color: Colors.red.shade400,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            // Send recording
+                            GestureDetector(
+                              onTap: _stopAndSendRecording,
+                              child: const CircleAvatar(
+                                radius: 24,
+                                backgroundColor: WhatsAppTheme.primaryGreen,
+                                child: Icon(Icons.send, color: Colors.white, size: 22),
+                              ),
+                            ),
+                          ],
+                        )
+                      : GestureDetector(
+                          onTap: _isComposing ? _sendMessage : _startRecording,
+                          child: CircleAvatar(
+                            radius: 24,
+                            backgroundColor: WhatsAppTheme.primaryGreen,
+                            child: Icon(
+                              _isComposing ? Icons.send : Icons.mic,
+                              color: Colors.white,
+                              size: 22,
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
                   ],
                 ),
               ),

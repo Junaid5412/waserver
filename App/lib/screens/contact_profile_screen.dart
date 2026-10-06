@@ -7,7 +7,7 @@ import '../config/theme.dart';
 import '../models/chat.dart';
 import '../services/auth_service.dart';
 import '../widgets/chat_avatar.dart';
-import 'call_screen.dart';
+import 'profile_picture_viewer_screen.dart';
 
 class ContactProfileScreen extends StatefulWidget {
   final ChatModel chat;
@@ -111,28 +111,42 @@ class _ContactProfileScreenState extends State<ContactProfileScreen> {
                   fontSize: 18,
                 ),
               ),
-              background: Stack(
-                fit: StackFit.expand,
-                children: [
-                  if (instanceId != null && !chat.isChannel && !chat.isCommunity)
-                    Image.network(
-                      ApiConfig.chatPictureUrl(instanceId, chat.chatId),
-                      headers: auth.api.authHeaders,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
-                        color: isDark ? WhatsAppTheme.surfaceDark : WhatsAppTheme.primaryGreen,
-                        child: Center(
-                          child: ChatAvatar(
-                            chatId: chat.chatId,
-                            title: chat.displayTitle,
-                            isGroup: isGroup,
-                            isCommunity: chat.isCommunity,
-                            isChannel: chat.isChannel,
-                            radius: 64,
+              background: GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ProfilePictureViewerScreen(
+                        instanceId: instanceId,
+                        chatId: chat.chatId,
+                        title: chat.displayTitle,
+                        isGroup: isGroup,
+                      ),
+                    ),
+                  );
+                },
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (instanceId != null && !chat.isChannel && !chat.isCommunity)
+                      Image.network(
+                        ApiConfig.chatPictureUrl(instanceId, chat.chatId),
+                        headers: auth.api.authHeaders,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          color: isDark ? WhatsAppTheme.surfaceDark : WhatsAppTheme.primaryGreen,
+                          child: Center(
+                            child: ChatAvatar(
+                              chatId: chat.chatId,
+                              title: chat.displayTitle,
+                              isGroup: isGroup,
+                              isCommunity: chat.isCommunity,
+                              isChannel: chat.isChannel,
+                              radius: 64,
+                            ),
                           ),
                         ),
-                      ),
-                    )
+                      )
                   else
                     Container(
                       color: isDark ? WhatsAppTheme.surfaceDark : WhatsAppTheme.primaryGreen,
@@ -202,41 +216,15 @@ class _ContactProfileScreenState extends State<ContactProfileScreen> {
                       ),
                       const SizedBox(height: 16),
 
-                      // Action Buttons Row (Message, Audio, Video, Search)
+                      // Action Buttons Row (Message, Search)
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
                           _actionBtn(
                             context,
                             Icons.chat_rounded,
                             'Message',
                             () => Navigator.pop(context),
-                          ),
-                          _actionBtn(
-                            context,
-                            Icons.call_rounded,
-                            'Audio',
-                            () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => CallScreen(chat: chat, isVideo: false),
-                                ),
-                              );
-                            },
-                          ),
-                          _actionBtn(
-                            context,
-                            Icons.videocam_rounded,
-                            'Video',
-                            () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => CallScreen(chat: chat, isVideo: true),
-                                ),
-                              );
-                            },
                           ),
                           _actionBtn(
                             context,

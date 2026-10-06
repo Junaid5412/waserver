@@ -455,6 +455,7 @@ class ApiService {
     String? mimetype,
     String? caption,
     String? quotedWaId,
+    bool ptt = false,
   }) async {
     final body = <String, dynamic>{
       'to': to,
@@ -465,6 +466,7 @@ class ApiService {
     if (mimetype != null && mimetype.isNotEmpty) body['mimetype'] = mimetype;
     if (caption != null && caption.isNotEmpty) body['text'] = caption;
     if (quotedWaId != null && quotedWaId.isNotEmpty) body['quotedId'] = quotedWaId;
+    if (ptt) body['ptt'] = ptt;
 
     final res = await http.post(
       Uri.parse(ApiConfig.sendMessageUrl(instanceId)),
@@ -602,6 +604,58 @@ class ApiService {
       final d = jsonDecode(res.body);
       throw Exception(d['error'] ?? 'Failed to send poll');
     }
+  }
+
+  Future<List<String>> getAdminGeminiKeys() async {
+    final res = await http.get(Uri.parse('${ApiConfig.baseUrl}/api/admin/gemini'), headers: _headers());
+    if (res.statusCode != 200) throw Exception('Admin access required');
+    final data = jsonDecode(res.body);
+    return List<String>.from(data['keys'] ?? []);
+  }
+
+  Future<void> addAdminGeminiKey(String apiKey) async {
+    final res = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/api/admin/gemini'),
+      headers: _headers(),
+      body: jsonEncode({'key': apiKey}),
+    );
+    if (res.statusCode != 200 && res.statusCode != 201) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to add key');
+    }
+  }
+
+  Future<void> deleteAdminGeminiKey(String apiKey) async {
+    final res = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/api/admin/gemini/delete'),
+      headers: _headers(),
+      body: jsonEncode({'key': apiKey}),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to delete key');
+    }
+  }
+
+  Future<List<String>> generateSmartReply(String instanceId, String chatJid, List<MessageModel> recentMessages, {String? prompt}) async {
+    final res = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/api/instances/$instanceId/ai/suggest-reply'),
+      headers: _headers(),
+      body: jsonEncode({
+        'chatJid': chatJid,
+        'messages': recentMessages.map((m) => {
+          'text': m.text,
+          'fromMe': m.fromMe,
+          'type': m.type,
+        }).toList(),
+        'prompt': prompt,
+      }),
+    );
+    final data = jsonDecode(res.body);
+    if (res.statusCode != 200) {
+      throw Exception(data['error'] ?? 'Failed to generate reply');
+    }
+    return List<String>.from(data['suggestions'] ?? []);
   }
 }
 
