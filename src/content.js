@@ -13,12 +13,17 @@ export const messageSchema = z.object({
       "document",
       "sticker",
       "location",
+      "liveLocation",
       "contact",
       "poll",
       "forward",
     ])
     .default("text"),
   text: z.string().max(20000).optional(),
+  caption: z.string().max(1000).optional(),
+  duration: z.coerce.number().optional(),
+  accuracy: z.coerce.number().optional(),
+  speed: z.coerce.number().optional(),
   data: z.string().max(750000).optional(),
   mediaId: z.string().uuid().optional(),
   mimetype: z.string().max(120).optional(),
@@ -75,7 +80,7 @@ export async function validateMessage(
       fail(400, "Upload a media file or provide valid base64 data");
   }
   if (
-    d.type === "location" &&
+    (d.type === "location" || d.type === "liveLocation") &&
     (d.latitude === undefined || d.longitude === undefined)
   )
     fail(400, "Latitude and longitude are required");
@@ -140,6 +145,18 @@ export function buildContent(media, loadMessage) {
           degreesLongitude: Number(d.longitude),
           name: d.name || "",
           address: d.address || "",
+        },
+      };
+    else if (d.type === "liveLocation")
+      content = {
+        liveLocation: {
+          degreesLatitude: Number(d.latitude),
+          degreesLongitude: Number(d.longitude),
+          accuracyInMeters: Number(d.accuracy || 10),
+          speedInMps: Number(d.speed || 0),
+          caption: d.caption || d.text || d.name || "",
+          sequenceNumber: Number(d.sequenceNumber || 1),
+          timeOffset: Number(d.timeOffset || 0),
         },
       };
     else if (d.type === "poll")

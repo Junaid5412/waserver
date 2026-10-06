@@ -311,7 +311,10 @@ class ChatBubble extends StatelessWidget {
   Widget _buildLocationBody(BuildContext context, Color textColor, bool isDark) {
     final lat = message.latitude ?? 0.0;
     final lng = message.longitude ?? 0.0;
-    final title = message.locationName?.isNotEmpty == true ? message.locationName! : 'Shared Location';
+    final isLive = message.isLiveLocation;
+    final title = message.locationName?.isNotEmpty == true
+        ? message.locationName!
+        : (isLive ? 'Live Location' : 'Shared Location');
     final addr = message.locationAddress?.isNotEmpty == true
         ? message.locationAddress!
         : '${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)}';
@@ -328,7 +331,7 @@ class ChatBubble extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Map Preview Thumbnail with Red Pin
+            // Map Preview Thumbnail
             Stack(
               alignment: Alignment.center,
               children: [
@@ -351,20 +354,55 @@ class ChatBubble extends StatelessWidget {
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.all(4),
+                  padding: const EdgeInsets.all(5),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     shape: BoxShape.circle,
                     boxShadow: [
-                      BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 4),
+                      BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 6),
                     ],
                   ),
-                  child: const Icon(
-                    Icons.location_on_rounded,
-                    color: Color(0xFFE53935),
-                    size: 26,
+                  child: Icon(
+                    isLive ? Icons.sensors_rounded : Icons.location_on_rounded,
+                    color: isLive ? WhatsAppTheme.primaryGreen : const Color(0xFFE53935),
+                    size: isLive ? 24 : 26,
                   ),
                 ),
+                if (isLive)
+                  Positioned(
+                    top: 8,
+                    left: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.75),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: const BoxDecoration(
+                              color: WhatsAppTheme.primaryGreen,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          const Text(
+                            'LIVE',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
               ],
             ),
 

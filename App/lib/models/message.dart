@@ -51,12 +51,14 @@ class MessageModel {
       type != 'text' &&
       type != 'deleted' &&
       type != 'location' &&
+      type != 'liveLocation' &&
       type != 'contact' &&
       type != 'poll' &&
       ((mimetype != null && mimetype!.isNotEmpty && mimetype != 'text/plain') ||
           ['image', 'video', 'document', 'audio', 'sticker'].contains(type));
   bool get isLocation =>
-      type == 'location' || (latitude != null && longitude != null);
+      type == 'location' || type == 'liveLocation' || (latitude != null && longitude != null);
+  bool get isLiveLocation => type == 'liveLocation';
 
   MessageModel({
     required this.id,

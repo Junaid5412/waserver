@@ -1140,6 +1140,84 @@ const emailAuth = (req, res, next) => {
   next();
 };
 
+// --- Saved Locations API Endpoints (Database-backed) ---
+// 1. Get user's saved locations
+app.get(
+  "/api/user/saved-locations",
+  emailAuth,
+  wrap(async (req, res) => {
+    const rawRecord = (await store.get("saved_locations", req.user.id)) || { id: req.user.id, locations: [] };
+    const locations = Array.isArray(rawRecord) ? rawRecord : (rawRecord.locations || []);
+    res.json({ locations });
+  }),
+);
+
+// 2. Add or update saved location
+app.post(
+  "/api/user/saved-locations",
+  emailAuth,
+  wrap(async (req, res) => {
+    const data = z
+      .object({
+        id: z.string().optional(),
+        label: z.string().min(1).max(50),
+        name: z.string().min(1).max(200),
+        address: z.string().max(1000).optional(),
+        latitude: z.coerce.number().min(-90).max(90),
+        longitude: z.coerce.number().min(-180).max(180),
+      })
+      .parse(req.body);
+
+    const rawRecord = (await store.get("saved_locations", req.user.id)) || { id: req.user.id, locations: [] };
+    let list = Array.isArray(rawRecord) ? rawRecord : (rawRecord.locations || []);
+
+    const locId = data.id || randomUUID();
+    const newLoc = {
+      id: locId,
+      label: data.label.trim(),
+      name: data.name.trim(),
+      address: data.address?.trim() || "",
+      latitude: data.latitude,
+      longitude: data.longitude,
+      createdAt: new Date().toISOString(),
+    };
+
+    list = list.filter((l) => l.id !== locId && l.label.toLowerCase() !== newLoc.label.toLowerCase());
+    list.unshift(newLoc);
+
+    await store.set("saved_locations", req.user.id, {
+      id: req.user.id,
+      userId: req.user.id,
+      locations: list,
+      updatedAt: new Date().toISOString(),
+    });
+
+    res.json({ ok: true, location: newLoc, locations: list });
+  }),
+);
+
+// 3. Delete saved location
+app.delete(
+  "/api/user/saved-locations/:id",
+  emailAuth,
+  wrap(async (req, res) => {
+    const { id } = req.params;
+    const rawRecord = (await store.get("saved_locations", req.user.id)) || { id: req.user.id, locations: [] };
+    let list = Array.isArray(rawRecord) ? rawRecord : (rawRecord.locations || []);
+
+    list = list.filter((l) => l.id !== id);
+
+    await store.set("saved_locations", req.user.id, {
+      id: req.user.id,
+      userId: req.user.id,
+      locations: list,
+      updatedAt: new Date().toISOString(),
+    });
+
+    res.json({ ok: true, locations: list });
+  }),
+);
+
 // 1. Test IMAP & SMTP Connection
 app.post(
   "/api/email/accounts/test",

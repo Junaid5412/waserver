@@ -583,6 +583,101 @@ class ApiService {
     }
   }
 
+  /// Send live location message with duration
+  Future<void> sendLiveLocationMessage(String instanceId, {
+    required String to,
+    required double latitude,
+    required double longitude,
+    int? durationSeconds,
+    String? caption,
+    String? quotedWaId,
+  }) async {
+    final body = <String, dynamic>{
+      'to': to,
+      'type': 'liveLocation',
+      'latitude': latitude,
+      'longitude': longitude,
+      'accuracy': 10,
+    };
+    if (caption != null && caption.trim().isNotEmpty) {
+      body['caption'] = caption.trim();
+      body['name'] = caption.trim();
+    }
+    if (durationSeconds != null) {
+      body['duration'] = durationSeconds;
+    }
+    if (quotedWaId != null && quotedWaId.isNotEmpty) {
+      body['quotedId'] = quotedWaId;
+    }
+
+    final res = await http.post(
+      Uri.parse(ApiConfig.sendMessageUrl(instanceId)),
+      headers: _headers(),
+      body: jsonEncode(body),
+    );
+    if (res.statusCode != 200 && res.statusCode != 202) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to send live location');
+    }
+  }
+
+  /// Fetch user's saved locations from database
+  Future<List<Map<String, dynamic>>> getSavedLocations() async {
+    try {
+      final res = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/api/user/saved-locations'),
+        headers: _headers(),
+      );
+      if (res.statusCode == 200) {
+        final d = jsonDecode(res.body);
+        if (d['locations'] is List) {
+          return (d['locations'] as List).map((e) => Map<String, dynamic>.from(e)).toList();
+        }
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  /// Save location to database
+  Future<Map<String, dynamic>> saveUserLocation({
+    String? id,
+    required String label,
+    required String name,
+    String? address,
+    required double latitude,
+    required double longitude,
+  }) async {
+    final res = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/api/user/saved-locations'),
+      headers: _headers(),
+      body: jsonEncode({
+        if (id != null) 'id': id,
+        'label': label,
+        'name': name,
+        if (address != null) 'address': address,
+        'latitude': latitude,
+        'longitude': longitude,
+      }),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to save location');
+    }
+    return Map<String, dynamic>.from(jsonDecode(res.body));
+  }
+
+  /// Delete saved location from database
+  Future<void> deleteSavedLocation(String id) async {
+    final res = await http.delete(
+      Uri.parse('${ApiConfig.baseUrl}/api/user/saved-locations/$id'),
+      headers: _headers(),
+    );
+    if (res.statusCode != 200) {
+      final d = jsonDecode(res.body);
+      throw Exception(d['error'] ?? 'Failed to delete saved location');
+    }
+  }
+
   Future<void> sendContactMessage(String instanceId, {
     required String to,
     required String name,

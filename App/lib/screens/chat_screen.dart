@@ -1388,24 +1388,46 @@ class _ChatScreenState extends State<ChatScreen> {
 
     if (result != null && mounted) {
       try {
-        await auth.api.sendLocationMessage(
-          instanceId,
-          to: widget.chat.chatId,
-          latitude: result.latitude,
-          longitude: result.longitude,
-          name: result.name,
-          address: result.address,
-          quotedWaId: _replyingTo?.waId,
-        );
-        if (mounted) {
-          setState(() => _replyingTo = null);
-          _debouncedSync();
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('📍 Location pin sent successfully!'),
-              backgroundColor: WhatsAppTheme.primaryGreen,
-            ),
+        if (result.isLive) {
+          await auth.api.sendLiveLocationMessage(
+            instanceId,
+            to: widget.chat.chatId,
+            latitude: result.latitude,
+            longitude: result.longitude,
+            durationSeconds: (result.liveDurationMinutes ?? 60) * 60,
+            caption: result.name.isNotEmpty ? result.name : null,
+            quotedWaId: _replyingTo?.waId,
           );
+          if (mounted) {
+            setState(() => _replyingTo = null);
+            _debouncedSync();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('📡 Live location shared successfully!'),
+                backgroundColor: WhatsAppTheme.primaryGreen,
+              ),
+            );
+          }
+        } else {
+          await auth.api.sendLocationMessage(
+            instanceId,
+            to: widget.chat.chatId,
+            latitude: result.latitude,
+            longitude: result.longitude,
+            name: result.name,
+            address: result.address,
+            quotedWaId: _replyingTo?.waId,
+          );
+          if (mounted) {
+            setState(() => _replyingTo = null);
+            _debouncedSync();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('📍 Location pin sent successfully!'),
+                backgroundColor: WhatsAppTheme.primaryGreen,
+              ),
+            );
+          }
         }
       } catch (e) {
         if (mounted) {
