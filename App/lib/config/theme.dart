@@ -19,6 +19,7 @@ class WhatsAppTheme {
   static const Color chatBgDark = Color(0xFF0B141A);
   static const Color bgLight = Color(0xFFFFFFFF);
   static const Color bgDark = Color(0xFF111B21);
+  static const Color darkBackground = Color(0xFF111B21);
   static const Color surfaceDark = Color(0xFF202C33);
 
   // Ticks & Badges

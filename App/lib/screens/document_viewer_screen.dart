@@ -277,7 +277,7 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
     final fileExt = (widget.filename ?? widget.title).split('.').last.toUpperCase();
 
     return Scaffold(
-      backgroundColor: isDark ? WhatsAppTheme.darkBackground : const Color(0xFFF0F2F5),
+      backgroundColor: isDark ? WhatsAppTheme.bgDark : const Color(0xFFF0F2F5),
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -363,7 +363,7 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
             swipeHorizontal: false,
             autoSpacing: true,
             pageFling: true,
-            backgroundColor: isDark ? WhatsAppTheme.darkBackground : const Color(0xFFF0F2F5),
+            backgroundColor: isDark ? WhatsAppTheme.bgDark : const Color(0xFFF0F2F5),
             onRender: (pages) => setState(() => _totalPages = pages ?? 0),
             onPageChanged: (page, total) => setState(() {
               _currentPage = (page ?? 0) + 1;

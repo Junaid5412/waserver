@@ -139,7 +139,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: isDark ? WhatsAppTheme.darkBackground : const Color(0xFFF0F2F5),
+      backgroundColor: isDark ? WhatsAppTheme.bgDark : const Color(0xFFF0F2F5),
       appBar: AppBar(
         title: const Text('Admin Notices & Alerts'),
         actions: [
