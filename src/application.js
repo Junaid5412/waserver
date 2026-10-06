@@ -1133,11 +1133,17 @@ app.post(
 );
 
 // --- Business Email Suite API Endpoints ---
+const emailAuth = (req, res, next) => {
+  if (!req.user || req.user.disabled) {
+    return res.status(401).json({ error: "Sign in to continue" });
+  }
+  next();
+};
 
 // 1. Test IMAP & SMTP Connection
 app.post(
   "/api/email/accounts/test",
-  consoleOnly,
+  emailAuth,
   wrap(async (req, res) => {
     const data = z
       .object({
@@ -1147,13 +1153,13 @@ app.post(
           host: z.string().min(1),
           port: z.number().int().optional(),
           secure: z.boolean().optional(),
-          auth: z.object({ user: z.string().optional(), pass: z.string() }),
+          auth: z.object({ user: z.string().optional(), pass: z.string().optional() }),
         }),
         smtp: z.object({
           host: z.string().min(1),
           port: z.number().int().optional(),
           secure: z.boolean().optional(),
-          auth: z.object({ user: z.string().optional(), pass: z.string() }),
+          auth: z.object({ user: z.string().optional(), pass: z.string().optional() }),
         }),
       })
       .parse(req.body);
@@ -1165,7 +1171,7 @@ app.post(
 // 2. Get user's configured email accounts
 app.get(
   "/api/email/accounts",
-  consoleOnly,
+  emailAuth,
   wrap(async (req, res) => {
     const accounts = await emailService.getAccounts(req.user.id);
     res.json(accounts);
@@ -1175,7 +1181,7 @@ app.get(
 // 3. Save / Add email account
 app.post(
   "/api/email/accounts",
-  consoleOnly,
+  emailAuth,
   wrap(async (req, res) => {
     const data = z
       .object({
@@ -1183,17 +1189,19 @@ app.post(
         email: z.string().email(),
         name: z.string().optional(),
         isDefault: z.boolean().optional(),
+        geminiKey: z.string().optional(),
+        geminiModel: z.string().optional(),
         imap: z.object({
           host: z.string().min(1),
           port: z.number().int().optional(),
           secure: z.boolean().optional(),
-          auth: z.object({ user: z.string().optional(), pass: z.string() }),
+          auth: z.object({ user: z.string().optional(), pass: z.string().optional() }),
         }),
         smtp: z.object({
           host: z.string().min(1),
           port: z.number().int().optional(),
           secure: z.boolean().optional(),
-          auth: z.object({ user: z.string().optional(), pass: z.string() }),
+          auth: z.object({ user: z.string().optional(), pass: z.string().optional() }),
         }),
       })
       .parse(req.body);
@@ -1205,7 +1213,7 @@ app.post(
 // 4. Delete email account
 app.delete(
   "/api/email/accounts/:id",
-  consoleOnly,
+  emailAuth,
   wrap(async (req, res) => {
     await emailService.deleteAccount(req.user.id, req.params.id);
     res.json({ ok: true });
@@ -1215,7 +1223,7 @@ app.delete(
 // 5. Get Mailbox Folders
 app.get(
   "/api/email/folders",
-  consoleOnly,
+  emailAuth,
   wrap(async (req, res) => {
     const accountId = req.query.accountId?.toString();
     const result = await emailService.getFolders(req.user.id, accountId);
@@ -1226,7 +1234,7 @@ app.get(
 // 6. Fetch paginated messages in folder
 app.get(
   "/api/email/messages",
-  consoleOnly,
+  emailAuth,
   wrap(async (req, res) => {
     const accountId = req.query.accountId?.toString();
     const folder = req.query.folder?.toString() || "INBOX";
@@ -1248,7 +1256,7 @@ app.get(
 // 7. Fetch full email details
 app.get(
   "/api/email/messages/:uid",
-  consoleOnly,
+  emailAuth,
   wrap(async (req, res) => {
     const accountId = req.query.accountId?.toString();
     const folder = req.query.folder?.toString() || "INBOX";
@@ -1261,7 +1269,7 @@ app.get(
 // 8. Download attachment
 app.get(
   "/api/email/messages/:uid/attachment/:index",
-  consoleOnly,
+  emailAuth,
   wrap(async (req, res) => {
     const accountId = req.query.accountId?.toString();
     const folder = req.query.folder?.toString() || "INBOX";
@@ -1278,7 +1286,7 @@ app.get(
 // 9. Send email via SMTP
 app.post(
   "/api/email/send",
-  consoleOnly,
+  emailAuth,
   wrap(async (req, res) => {
     const accountId = req.query.accountId?.toString();
     const emailData = z
@@ -1310,7 +1318,7 @@ app.post(
 // 10. Star or Mark Read
 app.post(
   "/api/email/messages/:uid/flag",
-  consoleOnly,
+  emailAuth,
   wrap(async (req, res) => {
     const accountId = req.query.accountId?.toString();
     const folder = req.query.folder?.toString() || "INBOX";
@@ -1331,7 +1339,7 @@ app.post(
 // 11. Delete email
 app.delete(
   "/api/email/messages/:uid",
-  consoleOnly,
+  emailAuth,
   wrap(async (req, res) => {
     const accountId = req.query.accountId?.toString();
     const folder = req.query.folder?.toString() || "INBOX";
@@ -1350,9 +1358,9 @@ app.delete(
 // 12. AI For Email Response (Gemini 3.1+)
 app.post(
   "/api/email/ai/reply",
-  consoleOnly,
+  emailAuth,
   wrap(async (req, res) => {
-    const { subject, senderName, senderEmail, emailBody, userIntent, model } = z
+    const { subject, senderName, senderEmail, emailBody, userIntent, model, geminiKey } = z
       .object({
         subject: z.string().optional(),
         senderName: z.string().optional(),
@@ -1360,13 +1368,36 @@ app.post(
         emailBody: z.string().optional(),
         userIntent: z.string().optional(),
         model: z.string().optional(),
+        geminiKey: z.string().optional(),
       })
       .parse(req.body);
 
     const config = (await store.get("settings", "gemini")) || { id: "gemini", keys: [] };
-    if (!config?.keys?.length) {
-      fail(400, "No Gemini API keys configured. Please add an API key in Admin Control Center -> Gemini AI.");
+    const keys = [...(config.keys || [])];
+
+    // If client provided a Gemini key, sync to database and prioritize it
+    if (geminiKey && geminiKey.trim().length > 10) {
+      const cleanKey = geminiKey.trim();
+      if (!keys.includes(cleanKey)) keys.unshift(cleanKey);
+      if (!config.keys) config.keys = [];
+      if (!config.keys.includes(cleanKey)) {
+        config.keys.unshift(cleanKey);
+        await store.set("settings", "gemini", config);
+      }
     }
+
+    // Check user email accounts for saved Gemini keys if none found
+    if (!keys.length && req.user?.id) {
+      const userAccounts = (await emailService.getAccounts(req.user.id)) || [];
+      for (const a of userAccounts) {
+        if (a.geminiKey && !keys.includes(a.geminiKey)) keys.push(a.geminiKey);
+      }
+    }
+
+    if (!keys.length) {
+      fail(400, "No Gemini API keys configured. Please add an API key in the Email Setup form or Admin Control Center -> Gemini AI.");
+    }
+
     const targetModel =
       model && !model.startsWith("gemini-1.") && !model.startsWith("gemini-2.")
         ? model
@@ -1374,7 +1405,7 @@ app.post(
         ? config.model
         : "gemini-3.1-pro";
 
-    const result = await emailService.generateAiEmailReply(config.keys, targetModel, {
+    const result = await emailService.generateAiEmailReply(keys, targetModel, {
       subject,
       senderName,
       senderEmail,

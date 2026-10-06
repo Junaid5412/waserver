@@ -242,15 +242,21 @@ class _EmailComposerScreenState extends State<EmailComposerScreen> {
       setState(() => _isGeneratingAi = true);
       try {
         final auth = Provider.of<AuthService>(context, listen: false);
+        final currentAcc = widget.accounts.firstWhere(
+          (a) => a['id']?.toString() == _currentAccountId,
+          orElse: () => widget.accounts.isNotEmpty ? widget.accounts.first : <String, dynamic>{},
+        );
         final res = await auth.api.generateAiEmailReply(
           subject: _subjectController.text.trim().isNotEmpty ? _subjectController.text.trim() : null,
           userIntent: result,
           emailBody: _bodyController.text.trim().isNotEmpty ? _bodyController.text.trim() : null,
+          geminiKey: currentAcc['geminiKey']?.toString(),
+          model: currentAcc['geminiModel']?.toString(),
         );
 
         if (res['replies'] is List && (res['replies'] as List).isNotEmpty) {
-          final first = res['replies'][0];
-          final replyText = first['reply']?.toString() ?? '';
+          final first = Map<String, dynamic>.from(res['replies'][0] is Map ? res['replies'][0] : {});
+          final replyText = (first['reply'] ?? first['body'])?.toString() ?? '';
           setState(() {
             _bodyController.text = replyText;
             if (_subjectController.text.trim().isEmpty && first['label'] != null) {

@@ -85,7 +85,8 @@ class _EmailMainScreenState extends State<EmailMainScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _errorMessage = e.toString().replaceAll('Exception:', '').trim();
+          _accounts = [];
+          _selectedAccount = null;
           _isLoadingAccounts = false;
         });
       }

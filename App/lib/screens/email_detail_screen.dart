@@ -296,12 +296,18 @@ class _EmailDetailScreenState extends State<EmailDetailScreen> {
               });
               try {
                 final auth = Provider.of<AuthService>(context, listen: false);
+                final activeAcc = widget.accounts.firstWhere(
+                  (a) => a['id']?.toString() == widget.accountId,
+                  orElse: () => widget.accounts.isNotEmpty ? widget.accounts.first : <String, dynamic>{},
+                );
                 final res = await auth.api.generateAiEmailReply(
                   subject: subject,
                   senderName: senderName,
                   senderEmail: senderEmail,
                   emailBody: emailBody,
                   userIntent: intent ?? customIntentCtrl.text.trim(),
+                  geminiKey: activeAcc['geminiKey']?.toString(),
+                  model: activeAcc['geminiModel']?.toString(),
                 );
                 if (res['replies'] is List) {
                   setSheetState(() {
@@ -449,11 +455,11 @@ class _EmailDetailScreenState extends State<EmailDetailScreen> {
                           itemCount: generatedReplies.length,
                           separatorBuilder: (_, __) => const SizedBox(height: 12),
                           itemBuilder: (context, index) {
-                            final r = generatedReplies[index];
-                            final tone = r['tone'] ?? 'Professional';
-                            final label = r['label'] ?? '';
-                            final replyText = r['reply'] ?? '';
-                            final reasoning = r['reasoning'] ?? '';
+                            final r = Map<String, dynamic>.from(generatedReplies[index] is Map ? generatedReplies[index] : {});
+                            final tone = (r['tone'] ?? r['type'] ?? 'Professional').toString();
+                            final label = (r['label'] ?? r['type'] ?? tone).toString();
+                            final replyText = (r['reply'] ?? r['body'] ?? '').toString();
+                            final reasoning = (r['reasoning'] ?? '').toString();
 
                             return Container(
                               padding: const EdgeInsets.all(14),

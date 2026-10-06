@@ -10,6 +10,28 @@ export function createEmailService(store, enc) {
   // In-memory IMAP client connection pool for fast interactive responsiveness
   const clientPool = new Map();
 
+  function sealPass(pass) {
+    if (!pass) return "";
+    if (typeof pass === "string" && pass.startsWith("enc:")) return pass;
+    try {
+      return `enc:${enc.seal(pass)}`;
+    } catch (_) {
+      return pass;
+    }
+  }
+
+  function openPass(sealed) {
+    if (!sealed) return "";
+    if (typeof sealed === "string" && sealed.startsWith("enc:")) {
+      try {
+        return enc.open(sealed.slice(4));
+      } catch (_) {
+        return sealed;
+      }
+    }
+    return sealed;
+  }
+
   function getClientKey(account) {
     return `${account.id}:${account.email}`;
   }
@@ -17,13 +39,14 @@ export function createEmailService(store, enc) {
   function createImapClient(account) {
     const imapConfig = account.imap;
     const isSecure = imapConfig.secure !== false && imapConfig.port !== 143;
+    const cleanPass = openPass(imapConfig.auth?.pass);
     return new ImapFlow({
       host: imapConfig.host,
       port: Number(imapConfig.port) || (isSecure ? 993 : 143),
       secure: isSecure,
       auth: {
         user: imapConfig.auth?.user || account.email,
-        pass: imapConfig.auth?.pass,
+        pass: cleanPass,
       },
       logger: false,
       emitLogs: false,
@@ -62,13 +85,14 @@ export function createEmailService(store, enc) {
     try {
       const smtpConfig = accountData.smtp;
       const isSecure = smtpConfig.secure === true || smtpConfig.port === 465;
+      const cleanPass = openPass(smtpConfig.auth?.pass);
       const transporter = nodemailer.createTransport({
         host: smtpConfig.host,
         port: Number(smtpConfig.port) || (isSecure ? 465 : 587),
         secure: isSecure,
         auth: {
           user: smtpConfig.auth?.user || accountData.email,
-          pass: smtpConfig.auth?.pass,
+          pass: cleanPass,
         },
         tls: {
           rejectUnauthorized: false,
@@ -91,25 +115,34 @@ export function createEmailService(store, enc) {
   }
 
   /**
-   * Save or update an email account for a user.
+   * Save or update an email account for a user and sync Gemini key to database.
    */
   async function saveAccount(userId, accountData) {
-    const list = (await store.get("email_accounts", userId)) || [];
+    const rawRecord = (await store.get("email_accounts", userId)) || { id: userId, userId, accounts: [] };
+    const list = Array.isArray(rawRecord) ? rawRecord : (rawRecord.accounts || []);
     const id = accountData.id || `acc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const isFirst = list.length === 0;
+
+    const existingIndex = list.findIndex((a) => a.id === id);
+    const existing = existingIndex >= 0 ? list[existingIndex] : null;
+
+    const imapPass = accountData.imap?.auth?.pass || (existing ? openPass(existing.imap?.auth?.pass) : "");
+    const smtpPass = accountData.smtp?.auth?.pass || (existing ? openPass(existing.smtp?.auth?.pass) : "");
 
     const account = {
       id,
       userId,
       email: accountData.email.trim().toLowerCase(),
       name: accountData.name?.trim() || accountData.email.split("@")[0],
+      geminiKey: accountData.geminiKey?.trim() || existing?.geminiKey || "",
+      geminiModel: accountData.geminiModel?.trim() || existing?.geminiModel || "gemini-3.1-pro",
       imap: {
         host: accountData.imap.host.trim(),
         port: Number(accountData.imap.port) || 993,
         secure: accountData.imap.secure !== false,
         auth: {
           user: (accountData.imap.auth?.user || accountData.email).trim(),
-          pass: accountData.imap.auth?.pass || "",
+          pass: sealPass(imapPass),
         },
       },
       smtp: {
@@ -118,15 +151,14 @@ export function createEmailService(store, enc) {
         secure: accountData.smtp.secure !== false,
         auth: {
           user: (accountData.smtp.auth?.user || accountData.email).trim(),
-          pass: accountData.smtp.auth?.pass || "",
+          pass: sealPass(smtpPass),
         },
       },
       isDefault: accountData.isDefault ?? isFirst,
       updatedAt: new Date().toISOString(),
-      createdAt: accountData.createdAt || new Date().toISOString(),
+      createdAt: existing?.createdAt || accountData.createdAt || new Date().toISOString(),
     };
 
-    const existingIndex = list.findIndex((a) => a.id === id);
     if (existingIndex >= 0) {
       list[existingIndex] = account;
     } else {
@@ -136,7 +168,28 @@ export function createEmailService(store, enc) {
       list.push(account);
     }
 
-    await store.set("email_accounts", userId, list);
+    // Save to Database: store as object with metadata support
+    await store.set("email_accounts", userId, {
+      id: userId,
+      userId,
+      accounts: list,
+      updatedAt: new Date().toISOString(),
+    });
+
+    // Save Gemini Key to database settings/gemini as well
+    if (accountData.geminiKey && accountData.geminiKey.trim().length > 10) {
+      const cleanKey = accountData.geminiKey.trim();
+      const geminiConfig = (await store.get("settings", "gemini")) || { id: "gemini", keys: [] };
+      if (!geminiConfig.keys) geminiConfig.keys = [];
+      if (!geminiConfig.keys.includes(cleanKey)) {
+        geminiConfig.keys.unshift(cleanKey);
+      }
+      if (accountData.geminiModel) {
+        geminiConfig.model = accountData.geminiModel;
+      }
+      await store.set("settings", "gemini", geminiConfig);
+    }
+
     return sanitizeAccount(account);
   }
 
@@ -144,7 +197,8 @@ export function createEmailService(store, enc) {
    * Get all accounts for a user (without passwords exposed).
    */
   async function getAccounts(userId) {
-    const list = (await store.get("email_accounts", userId)) || [];
+    const rawRecord = (await store.get("email_accounts", userId)) || { id: userId, accounts: [] };
+    const list = Array.isArray(rawRecord) ? rawRecord : (rawRecord.accounts || []);
     return list.map(sanitizeAccount);
   }
 
@@ -152,21 +206,50 @@ export function createEmailService(store, enc) {
    * Delete an email account.
    */
   async function deleteAccount(userId, accountId) {
-    let list = (await store.get("email_accounts", userId)) || [];
+    const rawRecord = (await store.get("email_accounts", userId)) || { id: userId, accounts: [] };
+    let list = Array.isArray(rawRecord) ? rawRecord : (rawRecord.accounts || []);
     list = list.filter((a) => a.id !== accountId);
     if (list.length > 0 && !list.some((a) => a.isDefault)) {
       list[0].isDefault = true;
     }
-    await store.set("email_accounts", userId, list);
+    await store.set("email_accounts", userId, {
+      id: userId,
+      userId,
+      accounts: list,
+      updatedAt: new Date().toISOString(),
+    });
     return { ok: true };
   }
 
   async function getRawAccount(userId, accountId) {
-    const list = (await store.get("email_accounts", userId)) || [];
+    const rawRecord = (await store.get("email_accounts", userId)) || { id: userId, accounts: [] };
+    const list = Array.isArray(rawRecord) ? rawRecord : (rawRecord.accounts || []);
+    let found = null;
     if (accountId) {
-      return list.find((a) => a.id === accountId) || null;
+      found = list.find((a) => a.id === accountId) || null;
+    } else {
+      found = list.find((a) => a.isDefault) || list[0] || null;
     }
-    return list.find((a) => a.isDefault) || list[0] || null;
+    if (!found) return null;
+
+    // Decrypt passwords for IMAP/SMTP transport
+    return {
+      ...found,
+      imap: {
+        ...found.imap,
+        auth: {
+          ...found.imap.auth,
+          pass: openPass(found.imap.auth?.pass),
+        },
+      },
+      smtp: {
+        ...found.smtp,
+        auth: {
+          ...found.smtp.auth,
+          pass: openPass(found.smtp.auth?.pass),
+        },
+      },
+    };
   }
 
   function sanitizeAccount(acc) {
@@ -174,6 +257,9 @@ export function createEmailService(store, enc) {
       id: acc.id,
       email: acc.email,
       name: acc.name,
+      geminiKey: acc.geminiKey ? `${acc.geminiKey.slice(0, 6)}...${acc.geminiKey.slice(-4)}` : "",
+      hasGeminiKey: !!(acc.geminiKey && acc.geminiKey.length > 8),
+      geminiModel: acc.geminiModel || "gemini-3.1-pro",
       isDefault: !!acc.isDefault,
       imap: {
         host: acc.imap.host,
@@ -598,9 +684,33 @@ STRICTLY return ONLY a raw JSON object with this exact schema:
 {
   "summary": "1-sentence summary",
   "replies": [
-    { "type": "Accept / Confirm", "subject": "Re: ...", "body": "Dear ...\\n\\n..." },
-    { "type": "Request Info", "subject": "Re: ...", "body": "Dear ...\\n\\n..." },
-    { "type": "Alternative / Decline", "subject": "Re: ...", "body": "Dear ...\\n\\n..." }
+    {
+      "tone": "Formal & Confirmed",
+      "type": "Accept / Confirm",
+      "label": "Confirm & Proceed",
+      "subject": "Re: ...",
+      "body": "Dear ...\\n\\n...",
+      "reply": "Dear ...\\n\\n...",
+      "reasoning": "Why this response works well"
+    },
+    {
+      "tone": "Polite Inquiry",
+      "type": "Request Info",
+      "label": "Request Clarification",
+      "subject": "Re: ...",
+      "body": "Dear ...\\n\\n...",
+      "reply": "Dear ...\\n\\n...",
+      "reasoning": "Why this response works well"
+    },
+    {
+      "tone": "Diplomatic",
+      "type": "Alternative / Decline",
+      "label": "Polite Alternative",
+      "subject": "Re: ...",
+      "body": "Dear ...\\n\\n...",
+      "reply": "Dear ...\\n\\n...",
+      "reasoning": "Why this response works well"
+    }
   ]
 }
 `;
@@ -610,20 +720,57 @@ STRICTLY return ONLY a raw JSON object with this exact schema:
     try {
       const cleanJson = rawResponse.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
       const parsed = JSON.parse(cleanJson);
+      if (Array.isArray(parsed.replies)) {
+        parsed.replies = parsed.replies.map((r, i) => {
+          const bodyText = r.body || r.reply || "";
+          const toneText = r.tone || r.type || (i === 0 ? "Professional" : i === 1 ? "Inquiry" : "Alternative");
+          const labelText = r.label || r.type || toneText;
+          return {
+            tone: toneText,
+            type: r.type || toneText,
+            label: labelText,
+            subject: r.subject || `Re: ${subject || "Inquiry"}`,
+            body: bodyText,
+            reply: bodyText,
+            reasoning: r.reasoning || "",
+          };
+        });
+      }
       return parsed;
     } catch (_) {
+      const defaultConfirmation = `Dear ${senderName || "Sir/Madam"},\n\nThank you for reaching out. I have reviewed your message and confirm that we are proceeding accordingly.\n\nPlease let me know if you need any additional details.\n\nBest regards,\n`;
+      const defaultReview = `Dear ${senderName || "Sir/Madam"},\n\nThank you for your email. I am currently reviewing the details and will get back to you with a comprehensive update shortly.\n\nBest regards,\n`;
+      const defaultInfo = `Dear ${senderName || "Sir/Madam"},\n\nThank you for your message. Could you please provide some additional information and context regarding this request so we can proceed effectively?\n\nLooking forward to hearing from you.\n\nBest regards,\n`;
+
       return {
         summary: "Email received from " + (senderName || senderEmail),
         replies: [
           {
+            tone: "Formal & Confirmed",
             type: "Professional Confirmation",
+            label: "Confirm & Proceed",
             subject: "Re: " + (subject || "Inquiry"),
-            body: `Dear ${senderName || "Sir/Madam"},\n\nThank you for reaching out. I have reviewed your message and confirm that we are proceeding accordingly.\n\nPlease let me know if you need any additional details.\n\nBest regards,\n`,
+            body: defaultConfirmation,
+            reply: defaultConfirmation,
+            reasoning: "Politely confirms receipt and indicates affirmative next steps.",
           },
           {
+            tone: "Reviewing",
             type: "Acknowledge & Review",
+            label: "Will Update Shortly",
             subject: "Re: " + (subject || "Inquiry"),
-            body: `Dear ${senderName || "Sir/Madam"},\n\nThank you for your email. I am currently reviewing the details and will get back to you with a comprehensive update shortly.\n\nBest regards,\n`,
+            body: defaultReview,
+            reply: defaultReview,
+            reasoning: "Acknowledges the email and sets expectations for a follow-up.",
+          },
+          {
+            tone: "Polite Inquiry",
+            type: "Request Clarification",
+            label: "Request More Details",
+            subject: "Re: " + (subject || "Inquiry"),
+            body: defaultInfo,
+            reply: defaultInfo,
+            reasoning: "Requests further details before making a decision.",
           },
         ],
       };
