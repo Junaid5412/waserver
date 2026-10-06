@@ -2040,30 +2040,6 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.videocam_rounded, color: Colors.white, size: 23),
-            tooltip: 'Video Call',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => CallScreen(chat: widget.chat, isVideo: true),
-                ),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.call_rounded, color: Colors.white, size: 21),
-            tooltip: 'Audio Call',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => CallScreen(chat: widget.chat, isVideo: false),
-                ),
-              );
-            },
-          ),
-          IconButton(
             icon: const Icon(Icons.done_all_rounded, color: Colors.white, size: 22),
             tooltip: 'Mark as read',
             onPressed: () async {

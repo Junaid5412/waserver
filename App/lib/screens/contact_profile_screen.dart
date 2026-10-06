@@ -184,6 +184,7 @@ class _ContactProfileScreenState extends State<ContactProfileScreen> {
               ),
             ),
           ),
+        ),
 
           // Profile Body Content
           SliverToBoxAdapter(

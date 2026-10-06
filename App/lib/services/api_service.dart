@@ -637,6 +637,8 @@ class ApiService {
     }
   }
 
+  Future<void> removeAdminGeminiKey(String apiKey) => deleteAdminGeminiKey(apiKey);
+
   Future<List<String>> generateSmartReply(String instanceId, String chatJid, List<MessageModel> recentMessages, {String? prompt}) async {
     final res = await http.post(
       Uri.parse('${ApiConfig.baseUrl}/api/instances/$instanceId/ai/suggest-reply'),
