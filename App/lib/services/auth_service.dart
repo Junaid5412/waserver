@@ -26,6 +26,7 @@ class AuthService extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
   bool get isAuthenticated => _currentUser != null && _token != null;
+  Map<String, String> get apiHeaders => api.authHeaders;
 
   static const String _prefTokenKey = 'zelon_auth_token';
   static const String _prefUserKey = 'zelon_auth_user';

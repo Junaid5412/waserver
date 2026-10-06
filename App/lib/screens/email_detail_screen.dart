@@ -178,7 +178,7 @@ class _EmailDetailScreenState extends State<EmailDetailScreen> {
         builder: (_) => DocumentViewerScreen(
           title: filename,
           documentUrl: downloadUrl,
-          headers: auth.apiHeaders,
+          headers: auth.api.authHeaders,
           filename: filename,
           mimetype: mimetype,
         ),
@@ -403,7 +403,7 @@ class _EmailDetailScreenState extends State<EmailDetailScreen> {
                         ),
                         const SizedBox(width: 8),
                         IconButton.filled(
-                          style: IconButton.filled(backgroundColor: WhatsAppTheme.primaryGreen),
+                          style: IconButton.styleFrom(backgroundColor: WhatsAppTheme.primaryGreen),
                           icon: isGenerating
                               ? const SizedBox(
                                   width: 18,
@@ -557,7 +557,7 @@ class _EmailDetailScreenState extends State<EmailDetailScreen> {
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
-              mainAxisAlignment: MainTestAxisAlignment.center,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const Icon(Icons.error_outline, size: 48, color: Colors.red),
                 const SizedBox(height: 12),

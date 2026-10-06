@@ -104,7 +104,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     chat: ChatModel(
                       chatId: incomingChatId,
                       name: sender,
-                      lastMessage: text,
+                      lastPreview: text,
                     ),
                   ),
                 ),
