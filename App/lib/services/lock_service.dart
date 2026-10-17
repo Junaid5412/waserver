@@ -51,6 +51,11 @@ class LockService extends ChangeNotifier {
   }
 
   void onAppPaused() {
+    // Only an unlocked session counts as activity; the auto-lock timeout is
+    // measured from the moment the app was sent to the background.
+    if (_isUnlockedSession) {
+      recordActivity();
+    }
     if (_timeoutMinutes == 0) {
       _isUnlockedSession = false;
       notifyListeners();

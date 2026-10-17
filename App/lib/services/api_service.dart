@@ -381,7 +381,7 @@ class ApiService {
     required String currentPassword,
     required String newPassword,
   }) async {
-    final res = await http.post(
+    final res = await http.put(
       Uri.parse('${ApiConfig.baseUrl}/api/account/password'),
       headers: _headers(),
       body: jsonEncode({
@@ -497,6 +497,18 @@ class ApiService {
     if (quotedWaId != null && quotedWaId.isNotEmpty) body['quotedId'] = quotedWaId;
     if (ptt) body['ptt'] = ptt;
 
+    // The server rejects inline base64 above ~750k chars (and JSON bodies above 1 MB),
+    // so larger files go through the chunked media upload and are sent by mediaId.
+    if (base64Data.length > 700000) {
+      body.remove('data');
+      body['mediaId'] = await _uploadMediaChunked(
+        instanceId,
+        base64Decode(base64Data),
+        filename: (filename != null && filename.isNotEmpty) ? filename : 'file',
+        mimetype: mimetype,
+      );
+    }
+
     final res = await http.post(
       Uri.parse(ApiConfig.sendMessageUrl(instanceId)),
       headers: _headers(),
@@ -506,6 +518,62 @@ class ApiService {
       final d = jsonDecode(res.body);
       throw Exception(d['error'] ?? 'Failed to send media');
     }
+  }
+
+  Future<String> _uploadMediaChunked(
+    String instanceId,
+    List<int> bytes, {
+    required String filename,
+    String? mimetype,
+  }) async {
+    final base = '${ApiConfig.baseUrl}/api/instances/$instanceId/media';
+    // The media store only accepts a bare type/subtype (no "; codecs=..." parameters).
+    final bareMime = (mimetype ?? '').split(';').first.trim();
+    final createRes = await http.post(
+      Uri.parse(base),
+      headers: _headers(),
+      body: jsonEncode({
+        'filename': filename,
+        if (bareMime.isNotEmpty) 'mimetype': bareMime,
+        'size': bytes.length,
+      }),
+    );
+    if (createRes.statusCode != 201 && createRes.statusCode != 200) {
+      throw Exception(_errorFrom(createRes.body, 'Failed to start upload'));
+    }
+    final created = jsonDecode(createRes.body) as Map<String, dynamic>;
+    final mediaId = created['id'].toString();
+    final chunkSize = (created['chunkSize'] as num?)?.toInt() ?? 512 * 1024;
+
+    for (var i = 0, offset = 0; offset < bytes.length; i++, offset += chunkSize) {
+      final end = (offset + chunkSize < bytes.length) ? offset + chunkSize : bytes.length;
+      final chunkRes = await http.put(
+        Uri.parse('$base/$mediaId/chunks/$i'),
+        headers: _headers({'Content-Type': 'application/octet-stream'}),
+        body: bytes.sublist(offset, end),
+      );
+      if (chunkRes.statusCode != 200) {
+        throw Exception(_errorFrom(chunkRes.body, 'Upload failed at part ${i + 1}'));
+      }
+    }
+
+    final doneRes = await http.post(
+      Uri.parse('$base/$mediaId/complete'),
+      headers: _headers(),
+      body: jsonEncode({}),
+    );
+    if (doneRes.statusCode != 200) {
+      throw Exception(_errorFrom(doneRes.body, 'Failed to finalize upload'));
+    }
+    return mediaId;
+  }
+
+  String _errorFrom(String body, String fallback) {
+    try {
+      final d = jsonDecode(body);
+      if (d is Map && d['error'] != null) return d['error'].toString();
+    } catch (_) {}
+    return fallback;
   }
 
   Future<void> markMessageAsRead(String instanceId, String waId) async {

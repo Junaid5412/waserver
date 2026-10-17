@@ -31,6 +31,8 @@ class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
   StreamSubscription<RealtimeEvent>? _realtimeSub;
   int _unreadBroadcastsCount = 0;
+  // LinkedHashSet keeps insertion order so the oldest id can be evicted.
+  final Set<String> _notifiedWaIds = <String>{};
 
   @override
   void initState() {
@@ -74,7 +76,17 @@ class _HomeScreenState extends State<HomeScreen> {
         );
 
         _showBroadcastPopup(data);
-      } else if (event.type == 'message' && event.fromMe != true) {
+      } else if (event.type == 'message' &&
+          event.fromMe != true &&
+          event.raw['data'] == null &&
+          event.raw['notify'] == true) {
+        // The server sends two events per message; only the inbox event (no
+        // 'data', normalized chatId, 'notify' flag) is used, so history syncs
+        // and our own messages don't notify and nothing shows twice.
+        final waId = event.waId ?? '';
+        if (waId.isNotEmpty && !_notifiedWaIds.add(waId)) return;
+        if (_notifiedWaIds.length > 200) _notifiedWaIds.remove(_notifiedWaIds.first);
+
         final incomingChatId = RealtimeEvent.normalizeJid(event.chatId);
 
         // Same-Chat Suppression: If user is currently looking at this exact chat, DO NOT show notification!
@@ -82,14 +94,14 @@ class _HomeScreenState extends State<HomeScreen> {
           return;
         }
 
-        final raw = event.raw['data'] as Map<String, dynamic>? ?? {};
-        final sender = raw['pushName']?.toString() ?? 'WhatsApp Contact';
-        final text = raw['message']?['conversation']?.toString() ??
-            raw['message']?['extendedTextMessage']?['text']?.toString() ??
-            (raw['message']?['audioMessage'] != null ? '🎤 Voice message' :
-             raw['message']?['imageMessage'] != null ? '📷 Photo' :
-             raw['message']?['videoMessage'] != null ? '🎥 Video' :
-             raw['message']?['documentMessage'] != null ? '📄 Document' : 'New message received');
+        final pushName = event.raw['pushName']?.toString() ?? '';
+        final sender = pushName.isNotEmpty
+            ? pushName
+            : (incomingChatId.endsWith('@s.whatsapp.net')
+                ? '+${incomingChatId.split('@').first}'
+                : 'WhatsApp Contact');
+        final preview = event.raw['preview']?.toString() ?? '';
+        final text = preview.isNotEmpty ? preview : 'New message received';
 
         // Top Header Notification Banner
         HeaderNotification.showMessage(

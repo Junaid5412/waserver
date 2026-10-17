@@ -7,6 +7,7 @@ import '../config/theme.dart';
 import '../config/permissions.dart';
 import '../models/status_model.dart';
 import '../services/auth_service.dart';
+import '../services/media_download.dart';
 
 class SegmentedCirclePainter extends CustomPainter {
   final int count;
@@ -140,13 +141,27 @@ class _StatusTabState extends State<StatusTab> {
                   final inst = auth.selectedInstance;
                   if (inst != null) {
                     try {
-                      await auth.api.postStatus(inst.id, txt, ['broadcast']);
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      // WhatsApp delivers a status only to the listed contacts, and the
+                      // server requires real individual JIDs, so use the direct chats.
+                      final chats = await auth.api.getChats(inst.id);
+                      final audience = chats
+                          .map((c) => c.chatId)
+                          .where((id) => id.endsWith('@s.whatsapp.net') || id.endsWith('@lid'))
+                          .toSet()
+                          .take(5000)
+                          .toList();
+                      if (audience.isEmpty) {
+                        throw Exception('No contacts to share the status with yet');
+                      }
+                      await auth.api.postStatus(inst.id, txt, audience);
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(this.context).showSnackBar(
                         const SnackBar(content: Text('Status update posted!')),
                       );
                       _loadStatuses();
                     } catch (e) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(this.context).showSnackBar(
                         SnackBar(content: Text('Failed: $e')),
                       );
                     }
@@ -353,14 +368,25 @@ class _MultiStoryViewerState extends State<_MultiStoryViewer> {
     }
   }
 
-  void _downloadStatus(StatusModel st) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Status media saved to device gallery!'),
-        backgroundColor: WhatsAppTheme.primaryGreen,
-        duration: Duration(seconds: 2),
-      ),
-    );
+  Future<void> _downloadStatus(StatusModel st) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final isMedia = st.hasMedia || st.type == 'image' || st.type == 'video';
+    if (!isMedia) {
+      messenger.showSnackBar(const SnackBar(content: Text('This status has no media to save')));
+      return;
+    }
+    final url = '${ApiConfig.baseUrl}/api/instances/${widget.instanceId}/inbox/${st.waId}/media';
+    final name = (st.filename?.isNotEmpty == true)
+        ? st.filename!
+        : 'status.${MediaDownload.extensionFor(st.mimetype, st.type == 'video' ? 'mp4' : 'jpg')}';
+    try {
+      final path = await MediaDownload.fromUrl(url, widget.headers, name);
+      messenger.showSnackBar(
+        SnackBar(content: Text('Saved to $path'), backgroundColor: WhatsAppTheme.primaryGreen),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Download failed: $e')));
+    }
   }
 
   void _markAsRead(StatusModel st) {

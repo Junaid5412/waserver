@@ -67,9 +67,12 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
     setState(() => _isLoadingQr = true);
     try {
       await auth.api.connectInstance(inst.id);
+      if (!mounted) return;
       await _fetchQr();
+      if (!mounted) return;
       _qrPollTimer?.cancel();
       _qrPollTimer = Timer.periodic(const Duration(seconds: 4), (_) async {
+        if (!mounted) return;
         await _fetchQr();
         await auth.refreshInstances();
         final current = auth.selectedInstance;
@@ -90,6 +93,7 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
   }
 
   Future<void> _fetchQr() async {
+    if (!mounted) return;
     final auth = Provider.of<AuthService>(context, listen: false);
     final inst = auth.selectedInstance;
     if (inst == null) return;
@@ -123,6 +127,7 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
     setState(() => _isLoadingPair = true);
     try {
       final code = await auth.api.requestPairingCode(inst.id, phone);
+      if (!mounted) return;
       setState(() {
         _pairingCode = code;
         _isLoadingPair = false;
@@ -143,12 +148,11 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
         }
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => _isLoadingPair = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
     }
   }
 
@@ -190,11 +194,18 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
                 Navigator.pop(ctx);
                 final auth = Provider.of<AuthService>(context, listen: false);
                 try {
-                  final newInst = await auth.api.createInstance(name);
+                  final created = await auth.api.createInstance(name);
                   await auth.refreshInstances();
-                  auth.selectInstance(newInst);
+                  if (!mounted) return;
+                  // The server only returns {id}; use the full model from the
+                  // refreshed list so the name/status are shown correctly.
+                  final matches = auth.instances.where((x) => x.id == created.id);
+                  final newInst = matches.isNotEmpty
+                      ? matches.first
+                      : InstanceModel(id: created.id, name: name, status: created.status);
                   _startLinkingFlow(newInst);
                 } catch (e) {
+                  if (!mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text('Failed: $e')),
                   );

@@ -14,6 +14,7 @@ import '../models/message.dart';
 import '../services/auth_service.dart';
 import '../services/cache_service.dart';
 import '../services/realtime_service.dart';
+import '../services/media_download.dart';
 import '../widgets/chat_avatar.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/message_actions_sheet.dart';
@@ -36,6 +37,7 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
+  late final AuthService _auth;
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
   List<MessageModel> _messages = [];
@@ -77,7 +79,8 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    final auth = Provider.of<AuthService>(context, listen: false);
+    _auth = Provider.of<AuthService>(context, listen: false);
+    final auth = _auth;
     auth.currentOpenChatId = RealtimeEvent.normalizeJid(widget.chat.chatId);
     _loadMessages();
     _subscribePresenceAndRealtime();
@@ -113,7 +116,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _handleOutgoingTyping(bool isTyping) {
-    final auth = Provider.of<AuthService>(context, listen: false);
+    final auth = _auth;
     final instanceId = auth.selectedInstance?.id;
     if (instanceId == null) return;
 
@@ -137,7 +140,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _subscribePresenceAndRealtime() {
-    final auth = Provider.of<AuthService>(context, listen: false);
+    final auth = _auth;
     final instanceId = auth.selectedInstance?.id;
     if (instanceId != null) {
       auth.realtime.ensureConnected(instanceId);
@@ -152,7 +155,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
     _streamSub?.cancel();
     _streamSub = auth.realtime.events.listen((event) {
-      if (_isSameChat(event.chatId) || event.type == 'message' || event.type == 'update' || event.type == 'receipt') {
+      // poll_tick / ready carry no chatId; the foreground timer already covers them.
+      final hasChat = event.chatId != null && event.chatId!.isNotEmpty;
+      if ((hasChat && _isSameChat(event.chatId)) ||
+          (!hasChat && (event.type == 'message' || event.type == 'update' || event.type == 'receipt'))) {
         _debouncedSync();
       }
 
@@ -190,7 +196,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
-    final auth = Provider.of<AuthService>(context, listen: false);
+    final auth = _auth;
     if (auth.currentOpenChatId == RealtimeEvent.normalizeJid(widget.chat.chatId)) {
       auth.currentOpenChatId = null;
     }
@@ -208,12 +214,13 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _loadMessages() async {
-    final auth = Provider.of<AuthService>(context, listen: false);
+    final auth = _auth;
     final instanceId = auth.selectedInstance?.id;
     if (instanceId == null) return;
 
     final cached = await CacheService.getCachedMessages(instanceId, widget.chat.chatId);
-    if (cached.isNotEmpty && mounted) {
+    if (!mounted) return;
+    if (cached.isNotEmpty) {
       setState(() {
         _messages = cached;
         _isLoading = false;
@@ -226,26 +233,43 @@ class _ChatScreenState extends State<ChatScreen> {
     _syncMessagesSilently(forceScroll: true);
   }
 
+  bool _syncing = false;
+  bool _syncQueued = false;
+  bool _queuedForceScroll = false;
+  DateTime? _clearedAt;
+
+  String _signature(List<MessageModel> list) => list
+      .map((m) => '${m.waId}|${m.status}|${m.text}|${m.edited}|${m.deleted}|${m.starred}|${m.reactions}')
+      .join(';');
+
   Future<void> _syncMessagesSilently({bool checkForNewOnly = false, bool forceScroll = false}) async {
-    final auth = Provider.of<AuthService>(context, listen: false);
+    final auth = _auth;
     final instanceId = auth.selectedInstance?.id;
     if (instanceId == null) return;
+    // Avoid overlapping requests whose out-of-order replies would overwrite newer data.
+    if (_syncing) {
+      _syncQueued = true;
+      _queuedForceScroll = _queuedForceScroll || forceScroll;
+      return;
+    }
+    _syncing = true;
 
     try {
-      final fresh = await auth.api.getMessages(instanceId, widget.chat.chatId, limit: 40);
+      var fresh = await auth.api.getMessages(instanceId, widget.chat.chatId, limit: 40);
       if (!mounted) return;
 
-      if (_messages.isNotEmpty && fresh.length == _messages.length) {
-        if (fresh.last.waId == _messages.last.waId &&
-            fresh.last.text == _messages.last.text &&
-            fresh.last.status == _messages.last.status &&
-            fresh.last.edited == _messages.last.edited &&
-            fresh.last.deleted == _messages.last.deleted) {
-          return;
-        }
+      final clearedAt = _clearedAt;
+      if (clearedAt != null) {
+        fresh = fresh.where((m) => m.createdAt?.isAfter(clearedAt) ?? true).toList();
       }
+      // Keep optimistic bubbles that the server has not echoed back yet.
+      final pending = _messages.where((m) => m.waId.startsWith('temp_')).toList();
+      if (pending.isNotEmpty) fresh = [...fresh, ...pending];
+
+      if (_messages.isNotEmpty && _signature(fresh) == _signature(_messages)) return;
 
       final hadMessages = _messages.isNotEmpty;
+      final prevLastId = hadMessages ? _messages.last.waId : null;
       final isNearBottom = !_scrollController.hasClients ||
           (_scrollController.position.maxScrollExtent - _scrollController.offset < 120);
 
@@ -254,12 +278,25 @@ class _ChatScreenState extends State<ChatScreen> {
         _isLoading = false;
       });
       await CacheService.saveMessages(instanceId, widget.chat.chatId, fresh);
+      if (!mounted) return;
 
-      if (forceScroll || !hadMessages || (isNearBottom && fresh.length > _messages.length)) {
+      if (forceScroll || !hadMessages || (isNearBottom && fresh.isNotEmpty && fresh.last.waId != prevLastId)) {
         _scrollToBottom(smooth: hadMessages);
       }
     } catch (_) {
       if (mounted && _messages.isEmpty) setState(() => _isLoading = false);
+    } finally {
+      _syncing = false;
+      if (_syncQueued && mounted) {
+        _syncQueued = false;
+        final force = _queuedForceScroll;
+        _queuedForceScroll = false;
+        if (force) {
+          _syncMessagesSilently(forceScroll: true);
+        } else {
+          _debouncedSync();
+        }
+      }
     }
   }
 
@@ -366,6 +403,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final path = await _recorder!.stop();
       _recorder!.dispose();
       _recorder = null;
+      if (!mounted) return;
       setState(() {
         _isRecording = false;
         _recordingStartTime = null;
@@ -378,7 +416,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final bytes = await file.readAsBytes();
       final b64 = base64Encode(bytes);
 
-      final auth = Provider.of<AuthService>(context, listen: false);
+      final auth = _auth;
       final instanceId = auth.selectedInstance?.id;
       if (instanceId == null) return;
 
@@ -409,7 +447,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final text = _textController.text.trim();
     if (text.isEmpty) return;
 
-    final auth = Provider.of<AuthService>(context, listen: false);
+    final auth = _auth;
     final instanceId = auth.selectedInstance?.id;
     if (instanceId == null) return;
 
@@ -508,9 +546,19 @@ class _ChatScreenState extends State<ChatScreen> {
         text: text,
         quotedWaId: quoted?.waId,
       );
-      _debouncedSync();
+      // The server copy replaces the optimistic bubble on the next sync.
+      if (mounted) setState(() => _messages.removeWhere((m) => m.waId == tempWaId));
+      _syncMessagesSilently();
     } catch (e) {
       if (mounted) {
+        // Drop the optimistic bubble and give the text back so it is not lost.
+        setState(() {
+          _messages.removeWhere((m) => m.waId == tempWaId);
+          if (_textController.text.isEmpty) {
+            _textController.text = text;
+            _isComposing = true;
+          }
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to send: $e'), backgroundColor: Colors.red.shade700),
         );
@@ -519,7 +567,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _showMessageActions(MessageModel message) {
-    final auth = Provider.of<AuthService>(context, listen: false);
+    final auth = _auth;
     final instanceId = auth.selectedInstance?.id;
     if (instanceId == null) return;
 
@@ -612,17 +660,26 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _downloadMedia(MessageModel msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Saved ${msg.filename ?? "media attachment"} to device gallery'),
-        backgroundColor: WhatsAppTheme.primaryGreen,
-      ),
-    );
+  Future<void> _downloadMedia(MessageModel msg) async {
+    final instanceId = _auth.selectedInstance?.id;
+    if (instanceId == null) return;
+    final url = '${ApiConfig.baseUrl}/api/instances/$instanceId/inbox/${msg.waId}/media';
+    final name = (msg.filename?.isNotEmpty == true)
+        ? msg.filename!
+        : '${msg.type}.${MediaDownload.extensionFor(msg.mimetype, 'bin')}';
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final path = await MediaDownload.fromUrl(url, _auth.api.authHeaders, name);
+      messenger.showSnackBar(
+        SnackBar(content: Text('Saved to $path'), backgroundColor: WhatsAppTheme.primaryGreen),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Download failed: $e')));
+    }
   }
 
   void _viewPdf(MessageModel msg) {
-    final auth = Provider.of<AuthService>(context, listen: false);
+    final auth = _auth;
     final instanceId = auth.selectedInstance?.id;
     if (instanceId == null) return;
     final mediaUrl = '${ApiConfig.baseUrl}/api/instances/$instanceId/inbox/${msg.waId}/media?inline=1';
@@ -679,7 +736,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _markMessageSeen(MessageModel msg) async {
-    final auth = Provider.of<AuthService>(context, listen: false);
+    final auth = _auth;
     final instanceId = auth.selectedInstance?.id;
     if (instanceId == null) return;
     try {
@@ -696,7 +753,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _openForwardDialog(MessageModel message) async {
-    final auth = Provider.of<AuthService>(context, listen: false);
+    final auth = _auth;
     final instanceId = auth.selectedInstance?.id;
     if (instanceId == null) return;
 
@@ -768,7 +825,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             } catch (_) {}
                           }
                           if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            ScaffoldMessenger.of(this.context).showSnackBar(
                               SnackBar(
                                 content: Text('Forwarded to $count conversation${count == 1 ? "" : "s"}'),
                                 backgroundColor: WhatsAppTheme.primaryGreen,
@@ -864,7 +921,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _showAttachmentSheet() {
-    final auth = Provider.of<AuthService>(context, listen: false);
+    final auth = _auth;
     if (!UserPermissions.canSendMediaAttachments(auth.currentUser)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -1318,7 +1375,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             ? null
                             : () async {
                                 setModalState(() => isSending = true);
-                                final auth = Provider.of<AuthService>(this.context, listen: false);
+                                final auth = _auth;
                                 final instanceId = auth.selectedInstance?.id;
                                 if (instanceId == null) {
                                   Navigator.pop(ctx);
@@ -1338,7 +1395,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                   if (mounted) {
                                     setState(() => _replyingTo = null);
                                     _syncMessagesSilently();
-                                    Navigator.pop(ctx);
+                                    if (ctx.mounted) Navigator.pop(ctx);
                                     ScaffoldMessenger.of(this.context).showSnackBar(
                                       SnackBar(
                                         content: Text('${type[0].toUpperCase()}${type.substring(1)} sent!'),
@@ -1347,7 +1404,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                     );
                                   }
                                 } catch (e) {
-                                  setModalState(() => isSending = false);
+                                  if (ctx.mounted) setModalState(() => isSending = false);
                                   if (mounted) {
                                     ScaffoldMessenger.of(this.context).showSnackBar(
                                       SnackBar(content: Text('Failed to send media: $e')),
@@ -1375,7 +1432,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _showLocationDialog() async {
-    final auth = Provider.of<AuthService>(context, listen: false);
+    final auth = _auth;
     final instanceId = auth.selectedInstance?.id;
     if (instanceId == null) return;
 
@@ -1440,7 +1497,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _showContactDialog() {
-    final auth = Provider.of<AuthService>(context, listen: false);
+    final auth = _auth;
     final instanceId = auth.selectedInstance?.id;
     if (instanceId == null) return;
 
@@ -1552,7 +1609,8 @@ class _ChatScreenState extends State<ChatScreen> {
                         ? null
                         : () async {
                             final name = nameCtrl.text.trim();
-                            final phone = phoneCtrl.text.trim();
+                            // The server only accepts digits with an optional leading +.
+                            final phone = phoneCtrl.text.trim().replaceAll(RegExp(r'[\s().-]'), '');
                             if (name.isEmpty || phone.isEmpty) {
                               ScaffoldMessenger.of(this.context).showSnackBar(
                                 const SnackBar(content: Text('Name and phone number are required')),
@@ -1571,7 +1629,7 @@ class _ChatScreenState extends State<ChatScreen> {
                               if (mounted) {
                                 setState(() => _replyingTo = null);
                                 _syncMessagesSilently();
-                                Navigator.pop(ctx);
+                                if (ctx.mounted) Navigator.pop(ctx);
                                 ScaffoldMessenger.of(this.context).showSnackBar(
                                   const SnackBar(
                                     content: Text('👤 Contact shared!'),
@@ -1580,7 +1638,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                 );
                               }
                             } catch (e) {
-                              setModalState(() => isSending = false);
+                              if (ctx.mounted) setModalState(() => isSending = false);
                               if (mounted) {
                                 ScaffoldMessenger.of(this.context).showSnackBar(
                                   SnackBar(content: Text('Failed to share contact: $e')),
@@ -1610,7 +1668,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _showPollDialog() {
-    final auth = Provider.of<AuthService>(context, listen: false);
+    final auth = _auth;
     final instanceId = auth.selectedInstance?.id;
     if (instanceId == null) return;
 
@@ -1780,7 +1838,7 @@ class _ChatScreenState extends State<ChatScreen> {
                               if (mounted) {
                                 setState(() => _replyingTo = null);
                                 _syncMessagesSilently();
-                                Navigator.pop(ctx);
+                                if (ctx.mounted) Navigator.pop(ctx);
                                 ScaffoldMessenger.of(this.context).showSnackBar(
                                   const SnackBar(
                                     content: Text('📊 Poll created!'),
@@ -1789,7 +1847,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                 );
                               }
                             } catch (e) {
-                              setModalState(() => isSending = false);
+                              if (ctx.mounted) setModalState(() => isSending = false);
                               if (mounted) {
                                 ScaffoldMessenger.of(this.context).showSnackBar(
                                   SnackBar(content: Text('Failed to create poll: $e')),
@@ -1831,6 +1889,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (widget.chat.isGroup) {
       return 'tap for group info';
     }
+    if (!widget.chat.chatId.endsWith('@s.whatsapp.net')) return 'tap for contact info';
     final rawNumber = widget.chat.chatId.split('@').first;
     return rawNumber.isNotEmpty ? '+$rawNumber' : 'Offline';
   }
@@ -1952,7 +2011,10 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                 );
               } else if (val == 'clear') {
-                setState(() => _messages.clear());
+                setState(() {
+                  _clearedAt = DateTime.now();
+                  _messages.clear();
+                });
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Chat view cleared')),
                 );
@@ -2046,6 +2108,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           itemBuilder: (context, index) {
                             final msg = _messages[index];
                             return ChatBubble(
+                              key: ValueKey(msg.waId),
                               message: msg,
                               currentUser: user,
                               instanceId: instanceId,

@@ -29,6 +29,9 @@ class _EmailMainScreenState extends State<EmailMainScreen> {
   int _currentPage = 1;
   final int _pageSize = 25;
   bool _hasMore = false;
+  // Incremented on every _loadMessages call so a slow, older response
+  // cannot overwrite the result of a newer request.
+  int _reqSeq = 0;
 
   String _currentFolder = 'INBOX';
   List<Map<String, dynamic>> _folders = [];
@@ -98,7 +101,10 @@ class _EmailMainScreenState extends State<EmailMainScreen> {
     try {
       final auth = Provider.of<AuthService>(context, listen: false);
       final res = await auth.api.getEmailFolders(accountId: _selectedAccount!['id']?.toString());
-      final folderList = (res['folders'] as List?)?.map((e) => Map<String, dynamic>.from(e)).toList() ?? [];
+      // Local-only folders (e.g. Outbox) have no IMAP mailbox behind them, so they cannot be fetched.
+      final folderList = ((res['folders'] as List?)?.map((e) => Map<String, dynamic>.from(e)).toList() ?? <Map<String, dynamic>>[])
+          .where((f) => f['isLocal'] != true)
+          .toList();
       if (mounted) {
         setState(() {
           _folders = folderList;
@@ -110,6 +116,8 @@ class _EmailMainScreenState extends State<EmailMainScreen> {
   Future<void> _loadMessages({bool reset = false}) async {
     if (_selectedAccount == null) return;
 
+    final seq = ++_reqSeq;
+
     if (reset) {
       _currentPage = 1;
       _messages.clear();
@@ -117,6 +125,8 @@ class _EmailMainScreenState extends State<EmailMainScreen> {
         _isLoadingMessages = true;
         _errorMessage = null;
       });
+    } else {
+      setState(() => _isLoadingMessages = true);
     }
 
     try {
@@ -130,28 +140,35 @@ class _EmailMainScreenState extends State<EmailMainScreen> {
         filter: _selectedFilter,
       );
 
+      if (!mounted || seq != _reqSeq) return;
+
       final msgList = (res['messages'] as List?)?.map((e) => Map<String, dynamic>.from(e)).toList() ?? [];
       final total = int.tryParse(res['total']?.toString() ?? '0') ?? 0;
-      final totalPages = int.tryParse(res['totalPages']?.toString() ?? '1') ?? 1;
 
-      if (mounted) {
-        setState(() {
-          if (reset) {
-            _messages = msgList;
-          } else {
-            _messages.addAll(msgList);
-          }
-          _totalMessages = total;
-          _hasMore = _currentPage < totalPages;
-          _isLoadingMessages = false;
-        });
-      }
+      setState(() {
+        if (reset) {
+          _messages = msgList;
+        } else {
+          _messages.addAll(msgList);
+        }
+        _totalMessages = total;
+        _hasMore = res['hasMore'] == true;
+        _isLoadingMessages = false;
+      });
     } catch (e) {
-      if (mounted) {
+      if (mounted && seq == _reqSeq) {
+        final errText = e.toString().replaceAll('Exception:', '').trim();
         setState(() {
-          _errorMessage = e.toString().replaceAll('Exception:', '').trim();
+          _errorMessage = errText;
           _isLoadingMessages = false;
+          // A failed "Load More" must not skip a page on the next attempt.
+          if (!reset && _currentPage > 1) _currentPage--;
         });
+        if (!reset) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to load more emails: $errText')),
+          );
+        }
       }
     }
   }
@@ -165,11 +182,11 @@ class _EmailMainScreenState extends State<EmailMainScreen> {
 
   Future<void> _toggleStar(Map<String, dynamic> msg) async {
     final uid = msg['uid']?.toString() ?? '';
-    final curStar = msg['flagged'] == true;
+    final curStar = msg['isStarred'] == true;
     final newStar = !curStar;
 
     setState(() {
-      msg['flagged'] = newStar;
+      msg['isStarred'] = newStar;
     });
 
     try {
@@ -181,7 +198,7 @@ class _EmailMainScreenState extends State<EmailMainScreen> {
         star: newStar,
       );
     } catch (_) {
-      if (mounted) setState(() => msg['flagged'] = curStar);
+      if (mounted) setState(() => msg['isStarred'] = curStar);
     }
   }
 
@@ -250,10 +267,42 @@ class _EmailMainScreenState extends State<EmailMainScreen> {
                           IconButton(
                             icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
                             onPressed: () async {
-                              final auth = Provider.of<AuthService>(context, listen: false);
-                              await auth.api.deleteEmailAccount(acc['id']);
-                              Navigator.pop(ctx);
-                              _loadAccounts();
+                              final confirmed = await showDialog<bool>(
+                                context: ctx,
+                                builder: (dialogCtx) => AlertDialog(
+                                  title: const Text('Remove Email Account'),
+                                  content: Text(
+                                    'Remove ${acc['email'] ?? 'this account'} from this app? Emails on the mail server will not be deleted.',
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(dialogCtx, false),
+                                      child: const Text('Cancel'),
+                                    ),
+                                    ElevatedButton(
+                                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                                      onPressed: () => Navigator.pop(dialogCtx, true),
+                                      child: const Text('Remove', style: TextStyle(color: Colors.white)),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (confirmed != true || !mounted) return;
+                              if (ctx.mounted) Navigator.pop(ctx);
+                              try {
+                                final auth = Provider.of<AuthService>(this.context, listen: false);
+                                await auth.api.deleteEmailAccount(acc['id']?.toString() ?? '');
+                                if (!mounted) return;
+                                _loadAccounts();
+                              } catch (e) {
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(this.context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Failed to remove account: ${e.toString().replaceAll('Exception:', '').trim()}'),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
+                              }
                             },
                           ),
                         ],
@@ -493,16 +542,6 @@ class _EmailMainScreenState extends State<EmailMainScreen> {
                   },
                 ),
                 ListTile(
-                  leading: const Icon(Icons.outbox_outlined, color: WhatsAppTheme.primaryGreen),
-                  title: const Text('Outbox'),
-                  selected: _currentFolder == 'Outbox',
-                  onTap: () {
-                    Navigator.pop(context);
-                    setState(() => _currentFolder = 'Outbox');
-                    _loadMessages(reset: true);
-                  },
-                ),
-                ListTile(
                   leading: const Icon(Icons.delete_outline, color: WhatsAppTheme.primaryGreen),
                   title: const Text('Trash'),
                   selected: _currentFolder.toLowerCase().contains('trash') || _currentFolder.toLowerCase().contains('junk'),
@@ -523,9 +562,9 @@ class _EmailMainScreenState extends State<EmailMainScreen> {
                     child: Text('All Folders', style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
                   ),
                   ..._folders.map((f) {
-                    final fPath = f['path'] ?? f['name'] ?? '';
+                    final fPath = (f['path'] ?? f['id'] ?? f['name'] ?? '').toString();
                     final isSel = _currentFolder == fPath;
-                    final unseen = int.tryParse(f['unseen']?.toString() ?? '0') ?? 0;
+                    final unseen = int.tryParse((f['unread'] ?? f['unseen'])?.toString() ?? '0') ?? 0;
                     return ListTile(
                       leading: Icon(_getFolderIcon(f['name'] ?? '', f['specialUse']), size: 20),
                       title: Text(_formatFolderName(f['name'] ?? ''), style: const TextStyle(fontSize: 14)),
@@ -708,22 +747,23 @@ class _EmailMainScreenState extends State<EmailMainScreen> {
                                   padding: const EdgeInsets.symmetric(vertical: 16),
                                   child: Center(
                                     child: OutlinedButton(
-                                      onPressed: () {
-                                        _currentPage++;
-                                        _loadMessages();
-                                      },
-                                      child: const Text('Load More Emails'),
+                                      onPressed: _isLoadingMessages
+                                          ? null
+                                          : () {
+                                              _currentPage++;
+                                              _loadMessages();
+                                            },
+                                      child: Text(_isLoadingMessages ? 'Loading...' : 'Load More Emails'),
                                     ),
                                   ),
                                 );
                               }
 
                               final msg = _messages[index];
-                              final isSeen = msg['seen'] == true;
-                              final isStarred = msg['flagged'] == true;
-                              final fromObj = msg['from'];
-                              final fromName = fromObj is Map ? fromObj['name']?.toString() ?? '' : '';
-                              final fromAddress = fromObj is Map ? fromObj['address']?.toString() ?? '' : fromObj.toString();
+                              final isSeen = msg['isRead'] == true;
+                              final isStarred = msg['isStarred'] == true;
+                              final fromName = msg['fromName']?.toString().trim() ?? '';
+                              final fromAddress = msg['fromAddress']?.toString().trim() ?? '';
                               final displayName = fromName.isNotEmpty ? fromName : (fromAddress.isNotEmpty ? fromAddress : 'Unknown');
                               final initial = displayName.isNotEmpty ? displayName[0].toUpperCase() : '?';
 
@@ -809,7 +849,7 @@ class _EmailMainScreenState extends State<EmailMainScreen> {
                                 ),
                                 onTap: () async {
                                   // Mark local state as seen
-                                  setState(() => msg['seen'] = true);
+                                  setState(() => msg['isRead'] = true);
                                   final uid = msg['uid']?.toString() ?? '';
                                   final refreshed = await Navigator.push(
                                     context,
@@ -819,6 +859,10 @@ class _EmailMainScreenState extends State<EmailMainScreen> {
                                         folder: _currentFolder,
                                         accountId: _selectedAccount?['id']?.toString(),
                                         accounts: _accounts,
+                                        initiallyStarred: isStarred,
+                                        onStarChanged: (starred) {
+                                          if (mounted) setState(() => msg['isStarred'] = starred);
+                                        },
                                       ),
                                     ),
                                   );

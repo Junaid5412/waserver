@@ -30,14 +30,16 @@ class _LockScreenState extends State<LockScreen> {
     super.initState();
     if (!widget.isSetup) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
         _triggerBiometrics();
       });
     }
   }
 
   Future<void> _triggerBiometrics() async {
+    if (widget.isSetup) return;
     final lockService = Provider.of<LockService>(context, listen: false);
-    if (lockService.isBiometricsEnabled || lockService.canCheckBiometrics) {
+    if (lockService.isBiometricsEnabled && lockService.canCheckBiometrics) {
       final success = await lockService.authenticateBiometrics();
       if (success && mounted) {
         widget.onUnlocked();
@@ -144,15 +146,31 @@ class _LockScreenState extends State<LockScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final lockService = Provider.of<LockService>(context);
+    final showBiometricKey =
+        !widget.isSetup && lockService.isBiometricsEnabled && lockService.canCheckBiometrics;
 
     return WillPopScope(
-      onWillPop: () async => false, // prevent back without unlock
+      // Unlock mode: prevent back without unlock. Setup mode: allow leaving.
+      onWillPop: () async => widget.isSetup,
       child: Scaffold(
         backgroundColor: isDark ? WhatsAppTheme.bgDark : Colors.white,
         body: SafeArea(
           child: Column(
             children: [
-              const SizedBox(height: 48),
+              if (widget.isSetup)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: IconButton(
+                    icon: Icon(
+                      Icons.close_rounded,
+                      color: isDark ? Colors.white70 : Colors.black54,
+                    ),
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  ),
+                )
+              else
+                const SizedBox(height: 48),
 
               // Shield Icon with Lock
               Container(
@@ -262,21 +280,24 @@ class _LockScreenState extends State<LockScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        // Biometric icon placeholder
-                        InkWell(
-                          onTap: _triggerBiometrics,
-                          borderRadius: BorderRadius.circular(40),
-                          child: Container(
-                            width: 72,
-                            height: 72,
-                            decoration: const BoxDecoration(shape: BoxShape.circle),
-                            child: const Icon(
-                              Icons.fingerprint_rounded,
-                              size: 34,
-                              color: WhatsAppTheme.primaryGreen,
+                        // Biometric key (only when fingerprint unlock is enabled & available)
+                        if (showBiometricKey)
+                          InkWell(
+                            onTap: _triggerBiometrics,
+                            borderRadius: BorderRadius.circular(40),
+                            child: Container(
+                              width: 72,
+                              height: 72,
+                              decoration: const BoxDecoration(shape: BoxShape.circle),
+                              child: const Icon(
+                                Icons.fingerprint_rounded,
+                                size: 34,
+                                color: WhatsAppTheme.primaryGreen,
+                              ),
                             ),
-                          ),
-                        ),
+                          )
+                        else
+                          const SizedBox(width: 72, height: 72),
                         _buildKeypadButton('0'),
                         // Delete Button
                         InkWell(

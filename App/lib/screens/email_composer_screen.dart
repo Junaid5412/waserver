@@ -96,6 +96,7 @@ class _EmailComposerScreenState extends State<EmailComposerScreen> {
         if (bytes == null && f.path != null) {
           bytes = await File(f.path!).readAsBytes();
         }
+        if (!mounted) return;
         if (bytes != null && bytes.isNotEmpty) {
           final b64 = base64Encode(bytes);
           setState(() {
@@ -238,6 +239,7 @@ class _EmailComposerScreenState extends State<EmailComposerScreen> {
       },
     );
 
+    if (!mounted) return;
     if (result != null && result.isNotEmpty) {
       setState(() => _isGeneratingAi = true);
       try {
@@ -246,21 +248,23 @@ class _EmailComposerScreenState extends State<EmailComposerScreen> {
           (a) => a['id']?.toString() == _currentAccountId,
           orElse: () => widget.accounts.isNotEmpty ? widget.accounts.first : <String, dynamic>{},
         );
+        // The account's geminiKey is masked by the server ("AIzaSy...abcd"), so it is not sent.
         final res = await auth.api.generateAiEmailReply(
           subject: _subjectController.text.trim().isNotEmpty ? _subjectController.text.trim() : null,
           userIntent: result,
           emailBody: _bodyController.text.trim().isNotEmpty ? _bodyController.text.trim() : null,
-          geminiKey: currentAcc['geminiKey']?.toString(),
           model: currentAcc['geminiModel']?.toString(),
         );
+        if (!mounted) return;
 
         if (res['replies'] is List && (res['replies'] as List).isNotEmpty) {
           final first = Map<String, dynamic>.from(res['replies'][0] is Map ? res['replies'][0] : {});
           final replyText = (first['reply'] ?? first['body'])?.toString() ?? '';
+          final draftSubject = (first['subject'] ?? first['label'])?.toString() ?? '';
           setState(() {
             _bodyController.text = replyText;
-            if (_subjectController.text.trim().isEmpty && first['label'] != null) {
-              _subjectController.text = first['label'].toString();
+            if (_subjectController.text.trim().isEmpty && draftSubject.isNotEmpty) {
+              _subjectController.text = draftSubject;
             }
           });
           if (mounted) {

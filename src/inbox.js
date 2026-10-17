@@ -313,6 +313,7 @@ export function createInbox(store, enc, notify = () => {}) {
       });
       if (rows[0]) row = rows[0];
     }
+    if (!row) return null;
     const rawData = row.data || row.payload;
     if (!rawData) return null;
     try {
@@ -474,7 +475,7 @@ export function createInbox(store, enc, notify = () => {}) {
         lastPreview: enc.seal(previewOf(info)),
         lastMessageId: m.key.id,
       });
-      tell(instance, { type: "message", chatId, waId: m.key.id, fromMe: !!m.key.fromMe, notify });
+      tell(instance, { type: "message", chatId, waId: m.key.id, fromMe: !!m.key.fromMe, notify, pushName: m.pushName || "", preview: previewOf(info) });
     }
     const chatKey = hash(instance.id + ":" + chatId);
     await store.insert("chats", chatKey, {
@@ -502,7 +503,7 @@ export function createInbox(store, enc, notify = () => {}) {
         unread: (c.unread || 0) + (fresh && notify && !m.key.fromMe ? 1 : 0),
       };
     });
-    if (fresh) tell(instance, { type: "message", chatId, waId: m.key.id, fromMe: !!m.key.fromMe, notify });
+    if (fresh) tell(instance, { type: "message", chatId, waId: m.key.id, fromMe: !!m.key.fromMe, notify, pushName: m.pushName || "", preview: previewOf(info) });
     return fresh;
   }
   async function receipt(instance, updates) {

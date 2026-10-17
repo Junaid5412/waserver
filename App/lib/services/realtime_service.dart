@@ -44,6 +44,7 @@ class RealtimeEvent {
     if (json['data'] is Map) {
       final d = json['data'] as Map;
       if (chat == null && d['chatId'] != null) chat = d['chatId'].toString();
+      if (isFromMe == null && d['fromMe'] is bool) isFromMe = d['fromMe'] as bool;
       if (chat == null && d['id'] != null && d['id'].toString().contains('@')) chat = d['id'].toString();
       if (d['key'] is Map) {
         chat ??= d['key']['remoteJid']?.toString();
@@ -79,6 +80,10 @@ class RealtimeService {
   Timer? _reconnectTimer;
   Timer? _fallbackPollTimer;
   bool _isConnected = false;
+  // Bumped on every new stream; callbacks from an older stream are ignored so a
+  // closed client cannot schedule a reconnect that tears down the healthy one.
+  int _generation = 0;
+  int _tickCount = 0;
 
   Stream<RealtimeEvent> get events => _controller.stream;
   bool get isConnected => _isConnected;
@@ -100,6 +105,7 @@ class RealtimeService {
   }
 
   void disconnect() {
+    _generation++;
     _isConnected = false;
     _reconnectTimer?.cancel();
     _fallbackPollTimer?.cancel();
@@ -110,6 +116,7 @@ class RealtimeService {
 
   Future<void> _startStream(String instanceId) async {
     if (_isDisposed) return;
+    final gen = ++_generation;
     _streamClient?.close();
     final client = http.Client();
     _streamClient = client;
@@ -122,6 +129,10 @@ class RealtimeService {
       request.headers['Cache-Control'] = 'no-cache';
 
       final response = await client.send(request);
+      if (gen != _generation) {
+        client.close();
+        return;
+      }
 
       if (response.statusCode == 200) {
         _isConnected = true;
@@ -153,19 +164,20 @@ class RealtimeService {
               }
             }
           },
-          onError: (_) => _handleStreamDisconnect(instanceId),
-          onDone: () => _handleStreamDisconnect(instanceId),
+          onError: (_) => _handleStreamDisconnect(instanceId, gen),
+          onDone: () => _handleStreamDisconnect(instanceId, gen),
           cancelOnError: true,
         );
       } else {
-        _handleStreamDisconnect(instanceId);
+        _handleStreamDisconnect(instanceId, gen);
       }
     } catch (_) {
-      _handleStreamDisconnect(instanceId);
+      _handleStreamDisconnect(instanceId, gen);
     }
   }
 
-  void _handleStreamDisconnect(String instanceId) {
+  void _handleStreamDisconnect(String instanceId, int gen) {
+    if (gen != _generation) return;
     _isConnected = false;
     _scheduleReconnect(instanceId);
   }
@@ -185,6 +197,10 @@ class RealtimeService {
     // Pulse every 3 seconds to keep UI responsive under all network conditions
     _fallbackPollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
       if (_isDisposed || _currentInstanceId != instanceId) return;
+      // While the event stream is live it delivers changes itself; only send a
+      // slow safety tick (every 30s) instead of hammering the API every 3s.
+      _tickCount++;
+      if (_isConnected && _tickCount % 10 != 0) return;
       _controller.add(RealtimeEvent(
         type: 'poll_tick',
         raw: {'instanceId': instanceId},

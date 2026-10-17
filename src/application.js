@@ -1225,6 +1225,7 @@ app.post(
   wrap(async (req, res) => {
     const data = z
       .object({
+        id: z.string().optional(),
         email: z.string().email(),
         name: z.string().optional(),
         imap: z.object({
@@ -1241,7 +1242,8 @@ app.post(
         }),
       })
       .parse(req.body);
-    const result = await emailService.testConnection(data);
+    // Stored passwords are only looked up within the requesting user's own accounts.
+    const result = await emailService.testConnection(data, req.user.id);
     res.json(result);
   }),
 );
@@ -1453,8 +1455,9 @@ app.post(
     const config = (await store.get("settings", "gemini")) || { id: "gemini", keys: [] };
     const keys = [...(config.keys || [])];
 
-    // If client provided a Gemini key, sync to database and prioritize it
-    if (geminiKey && geminiKey.trim().length > 10) {
+    // If client provided a Gemini key, sync to database and prioritize it.
+    // Masked keys ("AIzaSy...abcd" from account listings) are ignored.
+    if (geminiKey && geminiKey.trim().length > 10 && !geminiKey.includes("...")) {
       const cleanKey = geminiKey.trim();
       if (!keys.includes(cleanKey)) keys.unshift(cleanKey);
       if (!config.keys) config.keys = [];
@@ -1466,9 +1469,9 @@ app.post(
 
     // Check user email accounts for saved Gemini keys if none found
     if (!keys.length && req.user?.id) {
-      const userAccounts = (await emailService.getAccounts(req.user.id)) || [];
-      for (const a of userAccounts) {
-        if (a.geminiKey && !keys.includes(a.geminiKey)) keys.push(a.geminiKey);
+      const accountKeys = (await emailService.getAccountGeminiKeys(req.user.id)) || [];
+      for (const k of accountKeys) {
+        if (!keys.includes(k)) keys.push(k);
       }
     }
 

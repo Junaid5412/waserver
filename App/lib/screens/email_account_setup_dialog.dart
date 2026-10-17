@@ -36,6 +36,8 @@ class _EmailAccountSetupDialogState extends State<EmailAccountSetupDialog> {
   late TextEditingController _geminiKeyController;
   String _selectedGeminiModel = 'gemini-3.1-pro';
   bool _obscureGeminiKey = true;
+  // The server only returns a masked key ("AIzaSy...abcd"), so it is never put in the field.
+  bool _hasSavedGeminiKey = false;
 
   bool _sameSmtpCredentials = true;
   bool _isDefault = false;
@@ -69,7 +71,8 @@ class _EmailAccountSetupDialogState extends State<EmailAccountSetupDialog> {
     _smtpPassController = TextEditingController();
     _smtpSecure = acc?['smtp']?['secure'] ?? true;
 
-    _geminiKeyController = TextEditingController(text: acc?['geminiKey'] ?? '');
+    _geminiKeyController = TextEditingController();
+    _hasSavedGeminiKey = acc?['hasGeminiKey'] == true || (acc?['geminiKey']?.toString().isNotEmpty ?? false);
     _selectedGeminiModel = acc?['geminiModel'] ?? 'gemini-3.1-pro';
 
     _isDefault = acc?['isDefault'] ?? false;
@@ -79,11 +82,11 @@ class _EmailAccountSetupDialogState extends State<EmailAccountSetupDialog> {
   }
 
   Future<void> _loadInitialGeminiKey() async {
-    if (_geminiKeyController.text.isEmpty) {
+    if (_geminiKeyController.text.isEmpty && !_hasSavedGeminiKey) {
       try {
         final auth = Provider.of<AuthService>(context, listen: false);
         final data = await auth.api.getAdminGeminiData();
-        final keys = List<String>.from(data['keys'] ?? []);
+        final keys = List<String>.from(data['keys'] ?? []).where((k) => !_isMaskedKey(k)).toList();
         if (keys.isNotEmpty && mounted) {
           setState(() {
             _geminiKeyController.text = keys.first;
@@ -152,8 +155,17 @@ class _EmailAccountSetupDialogState extends State<EmailAccountSetupDialog> {
     });
   }
 
+  bool _isMaskedKey(String key) => key.contains('...');
+
+  /// The Gemini key the user actually typed, or '' when blank/masked (keep the stored key).
+  String _typedGeminiKey() {
+    final key = _geminiKeyController.text.trim();
+    return _isMaskedKey(key) ? '' : key;
+  }
+
   Map<String, dynamic> _buildAccountPayload() {
     final email = _emailController.text.trim();
+    final geminiKey = _typedGeminiKey();
     final imapUser = _imapUserController.text.trim().isNotEmpty
         ? _imapUserController.text.trim()
         : email;
@@ -167,11 +179,12 @@ class _EmailAccountSetupDialogState extends State<EmailAccountSetupDialog> {
         : _smtpPassController.text.trim();
 
     return {
-      if (widget.initialAccount?['id'] != null) 'id': widget.initialAccount!['id'],
+      // Also sent to "Test connection" so the server can use the stored password when the field is blank.
+      if (widget.initialAccount?['id'] != null) 'id': widget.initialAccount!['id'].toString(),
       'name': _nameController.text.trim().isNotEmpty ? _nameController.text.trim() : email.split('@')[0],
       'email': email,
       'isDefault': _isDefault,
-      'geminiKey': _geminiKeyController.text.trim(),
+      if (geminiKey.isNotEmpty) 'geminiKey': geminiKey,
       'geminiModel': _selectedGeminiModel,
       'imap': {
         'host': _imapHostController.text.trim(),
@@ -206,6 +219,7 @@ class _EmailAccountSetupDialogState extends State<EmailAccountSetupDialog> {
       final auth = Provider.of<AuthService>(context, listen: false);
       final payload = _buildAccountPayload();
       final res = await auth.api.testEmailAccount(payload);
+      if (!mounted) return;
       if (res['success'] == true) {
         setState(() {
           _testResultSuccess = res['message'] ?? 'IMAP & SMTP connection verified successfully!';
@@ -216,6 +230,7 @@ class _EmailAccountSetupDialogState extends State<EmailAccountSetupDialog> {
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _testResultError = e.toString().replaceAll('Exception:', '').trim();
       });
@@ -232,8 +247,9 @@ class _EmailAccountSetupDialogState extends State<EmailAccountSetupDialog> {
       final auth = Provider.of<AuthService>(context, listen: false);
       final payload = _buildAccountPayload();
 
-      // If user provided a Gemini key, immediately save to database settings & local storage
-      final gemKey = _geminiKeyController.text.trim();
+      // If user typed a new Gemini key, immediately save to database settings & local storage
+      // (blank or masked values mean "keep the stored key").
+      final gemKey = _typedGeminiKey();
       if (gemKey.length > 10) {
         await auth.api.addAdminGeminiKey(gemKey);
         await auth.api.setAdminGeminiModel(_selectedGeminiModel);
@@ -667,7 +683,8 @@ class _EmailAccountSetupDialogState extends State<EmailAccountSetupDialog> {
                         obscureText: _obscureGeminiKey,
                         decoration: InputDecoration(
                           labelText: 'Gemini API Key (Optional / Saved to DB)',
-                          hintText: 'AIzaSy...',
+                          hintText: _hasSavedGeminiKey ? 'Key saved — leave blank to keep' : 'AIzaSy...',
+                          helperText: _hasSavedGeminiKey ? 'Key saved — leave blank to keep it' : null,
                           prefixIcon: const Icon(Icons.key_rounded, size: 18),
                           border: const OutlineInputBorder(),
                           isDense: true,

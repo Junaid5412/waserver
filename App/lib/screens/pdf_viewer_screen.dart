@@ -4,6 +4,7 @@ import 'package:flutter_pdfview/flutter_pdfview.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import '../config/theme.dart';
+import '../services/media_download.dart';
 
 class PdfViewerScreen extends StatefulWidget {
   final String title;
@@ -94,21 +95,27 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
-  void _downloadFile() {
-    setState(() => _isDownloaded = true);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: const [
-            Icon(Icons.check_circle, color: Colors.white, size: 20),
-            SizedBox(width: 10),
-            Text('PDF saved to device storage'),
-          ],
+  Future<void> _downloadFile() async {
+    final local = _localFilePath;
+    final messenger = ScaffoldMessenger.of(context);
+    if (local == null) {
+      messenger.showSnackBar(const SnackBar(content: Text('The PDF is still loading')));
+      return;
+    }
+    try {
+      final name = widget.filename?.isNotEmpty == true ? widget.filename! : 'document.pdf';
+      final path = await MediaDownload.fromFile(local, name);
+      if (mounted) setState(() => _isDownloaded = true);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Saved to $path'),
+          backgroundColor: WhatsAppTheme.primaryGreen,
+          duration: const Duration(seconds: 4),
         ),
-        backgroundColor: WhatsAppTheme.primaryGreen,
-        duration: const Duration(seconds: 2),
-      ),
-    );
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Download failed: $e')));
+    }
   }
 
   @override

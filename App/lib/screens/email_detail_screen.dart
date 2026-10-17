@@ -12,6 +12,8 @@ class EmailDetailScreen extends StatefulWidget {
   final String folder;
   final String? accountId;
   final List<Map<String, dynamic>> accounts;
+  final bool initiallyStarred;
+  final ValueChanged<bool>? onStarChanged;
 
   const EmailDetailScreen({
     super.key,
@@ -19,6 +21,8 @@ class EmailDetailScreen extends StatefulWidget {
     this.folder = 'INBOX',
     this.accountId,
     this.accounts = const [],
+    this.initiallyStarred = false,
+    this.onStarChanged,
   });
 
   @override
@@ -35,6 +39,7 @@ class _EmailDetailScreenState extends State<EmailDetailScreen> {
   @override
   void initState() {
     super.initState();
+    _isStarred = widget.initiallyStarred;
     _loadEmailDetail();
   }
 
@@ -54,7 +59,9 @@ class _EmailDetailScreenState extends State<EmailDetailScreen> {
       if (mounted) {
         setState(() {
           _email = data;
-          _isStarred = data['flagged'] == true;
+          if (data['isStarred'] is bool) {
+            _isStarred = data['isStarred'] == true;
+          }
           _isLoading = false;
         });
       }
@@ -79,6 +86,7 @@ class _EmailDetailScreenState extends State<EmailDetailScreen> {
         folder: widget.folder,
         star: nextState,
       );
+      widget.onStarChanged?.call(nextState);
     } catch (e) {
       if (mounted) {
         setState(() => _isStarred = !nextState);
@@ -167,10 +175,17 @@ class _EmailDetailScreenState extends State<EmailDetailScreen> {
 
   void _openAttachment(Map<String, dynamic> att) {
     final auth = Provider.of<AuthService>(context, listen: false);
-    final index = att['index'] ?? 0;
-    final filename = att['filename'] ?? 'attachment';
-    final mimetype = att['contentType'] ?? 'application/octet-stream';
-    final downloadUrl = '${ApiConfig.emailAttachmentUrl(widget.uid, index)}?folder=${widget.folder}${widget.accountId != null ? "&accountId=${widget.accountId}" : ""}';
+    // The server lists attachments with `id` (their position in the parsed message).
+    final index = int.tryParse('${att['id'] ?? att['index'] ?? 0}') ?? 0;
+    final filename = att['filename']?.toString() ?? 'attachment';
+    final mimetype = att['contentType']?.toString() ?? 'application/octet-stream';
+    final queryParams = <String, String>{'folder': widget.folder};
+    if (widget.accountId != null && widget.accountId!.isNotEmpty) {
+      queryParams['accountId'] = widget.accountId!;
+    }
+    final downloadUrl = Uri.parse(ApiConfig.emailAttachmentUrl(widget.uid, index))
+        .replace(queryParameters: queryParams)
+        .toString();
 
     Navigator.push(
       context,
@@ -300,22 +315,30 @@ class _EmailDetailScreenState extends State<EmailDetailScreen> {
                   (a) => a['id']?.toString() == widget.accountId,
                   orElse: () => widget.accounts.isNotEmpty ? widget.accounts.first : <String, dynamic>{},
                 );
+                // The account's geminiKey is masked by the server ("AIzaSy...abcd"), so it is
+                // never sent; the server resolves the real key from its own storage.
                 final res = await auth.api.generateAiEmailReply(
                   subject: subject,
                   senderName: senderName,
                   senderEmail: senderEmail,
                   emailBody: emailBody,
                   userIntent: intent ?? customIntentCtrl.text.trim(),
-                  geminiKey: activeAcc['geminiKey']?.toString(),
                   model: activeAcc['geminiModel']?.toString(),
                 );
+                if (!context.mounted) return;
                 if (res['replies'] is List) {
                   setSheetState(() {
                     generatedReplies = res['replies'];
                     isGenerating = false;
                   });
+                } else {
+                  setSheetState(() {
+                    aiError = 'AI did not return any reply suggestions.';
+                    isGenerating = false;
+                  });
                 }
               } catch (e) {
+                if (!context.mounted) return;
                 setSheetState(() {
                   aiError = e.toString().replaceAll('Exception:', '').trim();
                   isGenerating = false;

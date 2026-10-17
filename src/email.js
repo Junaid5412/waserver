@@ -32,6 +32,16 @@ export function createEmailService(store, enc) {
     return sealed;
   }
 
+  // sanitizeAccount() returns keys masked as "AIzaSy...abcd"; such values must never be stored.
+  function isMaskedKey(key) {
+    return typeof key === "string" && key.includes("...");
+  }
+
+  function usableGeminiKey(key) {
+    const clean = typeof key === "string" ? key.trim() : "";
+    return clean && !isMaskedKey(clean) ? clean : "";
+  }
+
   function getClientKey(account) {
     return `${account.id}:${account.email}`;
   }
@@ -61,7 +71,30 @@ export function createEmailService(store, enc) {
   /**
    * Test IMAP and SMTP connectivity and verify credentials.
    */
-  async function testConnection(accountData) {
+  async function testConnection(accountData, userId) {
+    // When editing an existing account the password fields are left blank;
+    // fall back to the stored (decrypted) passwords of that same user's account.
+    if (userId && accountData.id) {
+      const imapPass = accountData.imap?.auth?.pass;
+      const smtpPass = accountData.smtp?.auth?.pass;
+      if (!imapPass || !smtpPass) {
+        const stored = await getRawAccount(userId, accountData.id);
+        if (stored) {
+          accountData = {
+            ...accountData,
+            imap: {
+              ...accountData.imap,
+              auth: { ...(accountData.imap?.auth || {}), pass: imapPass || stored.imap?.auth?.pass || "" },
+            },
+            smtp: {
+              ...accountData.smtp,
+              auth: { ...(accountData.smtp?.auth || {}), pass: smtpPass || stored.smtp?.auth?.pass || "" },
+            },
+          };
+        }
+      }
+    }
+
     const diagnostics = {
       imap: { ok: false, error: null },
       smtp: { ok: false, error: null },
@@ -134,7 +167,7 @@ export function createEmailService(store, enc) {
       userId,
       email: accountData.email.trim().toLowerCase(),
       name: accountData.name?.trim() || accountData.email.split("@")[0],
-      geminiKey: accountData.geminiKey?.trim() || existing?.geminiKey || "",
+      geminiKey: usableGeminiKey(accountData.geminiKey) || existing?.geminiKey || "",
       geminiModel: accountData.geminiModel?.trim() || existing?.geminiModel || "gemini-3.1-pro",
       imap: {
         host: accountData.imap.host.trim(),
@@ -177,8 +210,9 @@ export function createEmailService(store, enc) {
     });
 
     // Save Gemini Key to database settings/gemini as well
-    if (accountData.geminiKey && accountData.geminiKey.trim().length > 10) {
-      const cleanKey = accountData.geminiKey.trim();
+    const incomingKey = usableGeminiKey(accountData.geminiKey);
+    if (incomingKey.length > 10) {
+      const cleanKey = incomingKey;
       const geminiConfig = (await store.get("settings", "gemini")) || { id: "gemini", keys: [] };
       if (!geminiConfig.keys) geminiConfig.keys = [];
       if (!geminiConfig.keys.includes(cleanKey)) {
@@ -200,6 +234,20 @@ export function createEmailService(store, enc) {
     const rawRecord = (await store.get("email_accounts", userId)) || { id: userId, accounts: [] };
     const list = Array.isArray(rawRecord) ? rawRecord : (rawRecord.accounts || []);
     return list.map(sanitizeAccount);
+  }
+
+  /**
+   * Unmasked Gemini keys saved on a user's email accounts (server-side use only).
+   */
+  async function getAccountGeminiKeys(userId) {
+    const rawRecord = (await store.get("email_accounts", userId)) || { id: userId, accounts: [] };
+    const list = Array.isArray(rawRecord) ? rawRecord : (rawRecord.accounts || []);
+    const keys = [];
+    for (const a of list) {
+      const key = usableGeminiKey(a.geminiKey);
+      if (key && !keys.includes(key)) keys.push(key);
+    }
+    return keys;
   }
 
   /**
@@ -454,9 +502,18 @@ export function createEmailService(store, enc) {
 
       const parsed = await simpleParser(downloadResult.content);
 
+      let isStarred = false;
+      let isRead = false;
+      try {
+        const meta = await client.fetchOne(String(uid), { uid: true, flags: true }, { uid: true });
+        isStarred = meta?.flags?.has("\\Flagged") || false;
+        isRead = meta?.flags?.has("\\Seen") || false;
+      } catch (_) {}
+
       // Auto-mark as read
       try {
         await client.messageFlagsAdd({ uid: Number(uid) }, ["\\Seen"], { uid: true });
+        isRead = true;
       } catch (_) {}
 
       const attachments = (parsed.attachments || []).map((att, idx) => ({
@@ -484,6 +541,8 @@ export function createEmailService(store, enc) {
         text: parsed.text || "",
         html: parsed.html || (parsed.textAsHtml ? parsed.textAsHtml : null) || `<pre style="white-space: pre-wrap; font-family: inherit;">${parsed.text || ""}</pre>`,
         attachments,
+        isRead,
+        isStarred,
       };
     } finally {
       await client.logout().catch(() => {});
@@ -781,6 +840,7 @@ STRICTLY return ONLY a raw JSON object with this exact schema:
     testConnection,
     saveAccount,
     getAccounts,
+    getAccountGeminiKeys,
     deleteAccount,
     getFolders,
     fetchMessages,

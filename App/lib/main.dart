@@ -62,22 +62,53 @@ class _ZelonMessengerAppState extends State<ZelonMessengerApp> with WidgetsBindi
   }
 
   @override
-  Widget build(BuildContext context) {
-    final lock = Provider.of<LockService>(context);
+  Future<bool> didPopRoute() async {
+    // While the App Lock overlay is showing, swallow the system back button so
+    // it cannot pop routes hidden underneath the lock screen.
+    final lock = Provider.of<LockService>(context, listen: false);
+    return lock.shouldPromptLock();
+  }
 
+  @override
+  Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Zelon Messenger',
       debugShowCheckedModeBanner: false,
       theme: WhatsAppTheme.lightTheme,
       darkTheme: WhatsAppTheme.darkTheme,
       themeMode: ThemeMode.system,
-      home: lock.shouldPromptLock()
-          ? LockScreen(
-              onUnlocked: () {
-                setState(() {});
-              },
-            )
-          : const SplashScreen(),
+      // The app always boots through the splash screen; the lock is drawn as
+      // an overlay above the navigator (see builder) so it also appears when
+      // the app is re-locked after being backgrounded, not only on cold start.
+      home: const SplashScreen(),
+      builder: (context, child) {
+        return Consumer<LockService>(
+          builder: (context, lock, _) {
+            final locked = lock.shouldPromptLock();
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                // Keep the navigator mounted (and its routes' state alive)
+                // underneath the lock; just block touch & keyboard focus
+                // (e.g. an open text field) while locked.
+                ExcludeFocus(
+                  excluding: locked,
+                  child: IgnorePointer(
+                    ignoring: locked,
+                    child: child ?? const SizedBox.shrink(),
+                  ),
+                ),
+                if (locked)
+                  LockScreen(
+                    // LockService flips its unlocked flag and notifies
+                    // listeners, which removes this overlay automatically.
+                    onUnlocked: () {},
+                  ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }

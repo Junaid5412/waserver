@@ -133,7 +133,7 @@ export function createChatResolver({ store, wa }) {
       if (isNewsletter) {
         entry.kind = "channel";
         entry.isChannel = true;
-      } else if (isComm || entry.isCommunity || (name && name.toLowerCase().includes("community"))) {
+      } else if (isComm || entry.isCommunity) {
         entry.kind = "community";
         entry.isCommunity = true;
       } else if (isGroup(entry.chatId)) {

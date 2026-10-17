@@ -86,8 +86,19 @@ class _ChatsTabState extends State<ChatsTab> {
   }
 
   bool _isPreloading = false;
+  String? _preloadedFor;
+  DateTime? _preloadedAt;
   Future<void> _preloadRecentChats(String instanceId, List<ChatModel> chatList) async {
     if (_isPreloading || chatList.isEmpty) return;
+    // Every sync used to restart this, re-fetching many chats back to back.
+    // Warm the cache at most once every 5 minutes per account.
+    final last = _preloadedAt;
+    if (_preloadedFor == instanceId && last != null &&
+        DateTime.now().difference(last) < const Duration(minutes: 5)) {
+      return;
+    }
+    _preloadedFor = instanceId;
+    _preloadedAt = DateTime.now();
     _isPreloading = true;
     try {
       final auth = Provider.of<AuthService>(context, listen: false);

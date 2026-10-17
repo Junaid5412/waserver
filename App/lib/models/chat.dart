@@ -38,8 +38,7 @@ class ChatModel {
   bool get isCommunity =>
       isCommunityFlag ||
       kind == 'community' ||
-      chatId.contains('@community') ||
-      (!isChannel && name.toLowerCase().contains('community'));
+      chatId.contains('@community');
 
   bool get isGroup =>
       !isChannel && !isCommunity && !isStatus && (kind == 'group' || chatId.endsWith('@g.us'));
@@ -72,8 +71,7 @@ class ChatModel {
     final rawName = json['name']?.toString() ?? '';
     final isComm = json['isCommunity'] == true ||
         rawKind == 'community' ||
-        rawChatId.contains('@community') ||
-        rawName.toLowerCase().contains('community');
+        rawChatId.contains('@community');
     final isChan = json['isChannel'] == true ||
         rawKind == 'channel' ||
         rawKind == 'newsletter' ||

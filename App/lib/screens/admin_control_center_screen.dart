@@ -7,6 +7,7 @@ import '../config/theme.dart';
 import '../models/user.dart';
 import '../services/auth_service.dart';
 import '../services/api_service.dart';
+import 'login_screen.dart';
 
 class AdminControlCenterScreen extends StatefulWidget {
   const AdminControlCenterScreen({super.key});
@@ -381,10 +382,13 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
                           'view_receipts': canReceipts,
                         },
                       );
+                      if (!mounted) return;
                       _loadUsers();
                       _showCreatedPasswordDialog(created['email'] ?? email, created['password'] ?? '');
                     } catch (e) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      // The dialog's context is gone after pop; use the screen's.
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(this.context).showSnackBar(
                         SnackBar(content: Text('Failed: $e')),
                       );
                     }
@@ -653,12 +657,14 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
                                   'view_receipts': canReceipts,
                                 },
                               );
+                              if (!mounted) return;
                               _loadUsers();
-                              ScaffoldMessenger.of(context).showSnackBar(
+                              ScaffoldMessenger.of(this.context).showSnackBar(
                                 const SnackBar(content: Text('User updated successfully!')),
                               );
                             } catch (e) {
-                              ScaffoldMessenger.of(context).showSnackBar(
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(this.context).showSnackBar(
                                 SnackBar(content: Text('Failed: $e')),
                               );
                             }
@@ -1116,10 +1122,14 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
     final byStatus = instances['byStatus'] as Map<String, dynamic>? ?? {};
 
     final counts = h['counts'] as Map<String, dynamic>? ?? {};
-    final totalMessages = counts['messages'] ?? 0;
-    final totalUsers = counts['users'] ?? 0;
-    final totalMedia = counts['media'] ?? 0;
-    final totalHooks = counts['hooks'] ?? 0;
+    // Each count is a {status: n} breakdown from the server; show the total.
+    int sumOf(dynamic v) => v is Map
+        ? v.values.fold<int>(0, (a, b) => a + (b is num ? b.toInt() : 0))
+        : (v is num ? v.toInt() : 0);
+    final totalMessages = sumOf(counts['messages']);
+    final totalUsers = sumOf(counts['users']);
+    final totalMedia = sumOf(counts['media']);
+    final totalHooks = sumOf(counts['hooks']);
 
     return RefreshIndicator(
       onRefresh: _loadHealth,
@@ -1970,6 +1980,12 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
                           );
                           return;
                         }
+                        if (n1.length < 12) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('New password must be at least 12 characters')),
+                          );
+                          return;
+                        }
                         try {
                           await auth.api.updateAccountPassword(
                             currentPassword: curr,
@@ -1978,10 +1994,18 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
                           _currPassCtrl.clear();
                           _newPassCtrl.clear();
                           _confirmPassCtrl.clear();
+                          // The server signs out every session after a password change.
+                          await auth.logout();
+                          if (!context.mounted) return;
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Password updated successfully!')),
+                            const SnackBar(content: Text('Password updated. Please sign in again.')),
+                          );
+                          Navigator.of(context).pushAndRemoveUntil(
+                            MaterialPageRoute(builder: (_) => const LoginScreen()),
+                            (route) => false,
                           );
                         } catch (e) {
+                          if (!context.mounted) return;
                           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
                         }
                       },

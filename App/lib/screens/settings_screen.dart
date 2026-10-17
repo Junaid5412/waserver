@@ -23,7 +23,16 @@ class SettingsScreen extends StatelessWidget {
           isSetup: true,
           onPinCreated: (pin) async {
             final lock = Provider.of<LockService>(context, listen: false);
-            await lock.setPin(pin);
+            // When changing an existing PIN, keep the user's current
+            // auto-lock timeout and biometrics preference instead of
+            // resetting them to the setPin defaults.
+            final isChangingPin = lock.isLockEnabled && lock.hasPin;
+            await lock.setPin(
+              pin,
+              timeoutMinutes: lock.timeoutMinutes,
+              enableBiometrics: isChangingPin ? lock.isBiometricsEnabled : true,
+            );
+            if (!context.mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text('App Lock PIN successfully set!'),

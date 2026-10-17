@@ -152,12 +152,14 @@ class _AdminScreenState extends State<AdminScreen> {
                               'canViewMessageSeen': canReceipts,
                             },
                           );
-                          ScaffoldMessenger.of(context).showSnackBar(
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(this.context).showSnackBar(
                             const SnackBar(content: Text('Permissions updated successfully!')),
                           );
                           _loadUsers();
                         } catch (e) {
-                          ScaffoldMessenger.of(context).showSnackBar(
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(this.context).showSnackBar(
                             SnackBar(content: Text('Failed: $e')),
                           );
                         }

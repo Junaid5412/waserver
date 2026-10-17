@@ -56,8 +56,13 @@ class _ContactProfileScreenState extends State<ContactProfileScreen> {
     final instanceId = auth.selectedInstance?.id;
     final chat = widget.chat;
     final isGroup = chat.isGroup;
-    final rawNumber = chat.chatId.split('@').first;
-    final formattedPhone = rawNumber.isNotEmpty ? '+$rawNumber' : chat.chatId;
+    // Only @s.whatsapp.net ids are phone numbers; @lid ids are opaque, so
+    // prefer the phone the server resolved for them.
+    final infoPhone = _info['phone']?.toString() ?? '';
+    final rawNumber = chat.chatId.endsWith('@s.whatsapp.net') ? chat.chatId.split('@').first : '';
+    final formattedPhone = infoPhone.isNotEmpty
+        ? (infoPhone.startsWith('+') ? infoPhone : '+$infoPhone')
+        : (rawNumber.isNotEmpty ? '+$rawNumber' : '');
 
     // Real dynamic data extracted from Baileys
     final realAbout = _info['about']?.toString().isNotEmpty == true
@@ -212,7 +217,7 @@ class _ContactProfileScreenState extends State<ContactProfileScreen> {
                                 ? 'Community ID: ${chat.chatId}'
                                 : isGroup
                                     ? 'Group ID: ${chat.chatId}'
-                                    : formattedPhone,
+                                    : (formattedPhone.isNotEmpty ? formattedPhone : chat.chatId),
                         style: TextStyle(fontSize: 14, color: isDark ? Colors.white70 : Colors.black54),
                       ),
                       const SizedBox(height: 16),
@@ -280,7 +285,7 @@ class _ContactProfileScreenState extends State<ContactProfileScreen> {
                               : (realAbout ?? 'Hey there! I am using WhatsApp.'),
                           style: const TextStyle(fontSize: 15),
                         ),
-                      if (!isGroup) ...[
+                      if (chat.isDirect && formattedPhone.isNotEmpty) ...[
                         const SizedBox(height: 12),
                         const Divider(height: 1),
                         const SizedBox(height: 12),

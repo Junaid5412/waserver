@@ -13,6 +13,7 @@ import '../screens/pdf_viewer_screen.dart';
 import '../screens/document_viewer_screen.dart';
 import 'status_indicator.dart';
 import 'voice_player.dart';
+import '../services/media_download.dart';
 
 class ChatBubble extends StatelessWidget {
   final MessageModel message;
@@ -32,6 +33,18 @@ class ChatBubble extends StatelessWidget {
     this.onReact,
   });
 
+  Future<void> _saveToDevice(BuildContext context, String url, Map<String, String> headers, String name) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final path = await MediaDownload.fromUrl(url, headers, name);
+      messenger.showSnackBar(
+        SnackBar(content: Text('Saved to $path'), backgroundColor: WhatsAppTheme.primaryGreen),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Download failed: $e')));
+    }
+  }
+
   void _openFullImage(BuildContext context, String imageUrl, Map<String, String> headers, String caption) {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -48,14 +61,14 @@ class ChatBubble extends StatelessWidget {
               IconButton(
                 icon: const Icon(Icons.download_rounded, color: Colors.white),
                 tooltip: 'Download Photo',
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Photo downloaded to device storage'),
-                      backgroundColor: WhatsAppTheme.primaryGreen,
-                    ),
-                  );
-                },
+                onPressed: () => _saveToDevice(
+                  context,
+                  imageUrl,
+                  headers,
+                  message.filename?.isNotEmpty == true
+                      ? message.filename!
+                      : 'photo.${MediaDownload.extensionFor(message.mimetype, 'jpg')}',
+                ),
               ),
             ],
           ),
@@ -216,14 +229,7 @@ class ChatBubble extends StatelessWidget {
                   IconButton(
                     icon: const Icon(Icons.download_rounded, color: WhatsAppTheme.primaryGreen, size: 22),
                     tooltip: 'Download Document',
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Downloading $docName to device...'),
-                          backgroundColor: WhatsAppTheme.primaryGreen,
-                        ),
-                      );
-                    },
+                    onPressed: () => _saveToDevice(context, mediaUrl, headers, docName),
                   ),
                 ],
               ),
@@ -241,6 +247,7 @@ class ChatBubble extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           VoicePlayerWidget(
+            key: ValueKey(message.waId),
             audioUrl: mediaUrl,
             headers: headers,
             messageId: message.waId,
@@ -536,7 +543,7 @@ class ChatBubble extends StatelessWidget {
           ),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-            child: Column(
+            child: _intrinsicUnlessAudio(Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -720,10 +727,21 @@ class ChatBubble extends StatelessWidget {
                   ),
                 ],
               ],
-            ),
+            )),
           ),
         ),
       ),
     );
+  }
+
+  // IntrinsicWidth sizes the bubble to its content so the timestamp row's Spacer
+  // doesn't stretch every bubble to max width. The voice player uses a
+  // LayoutBuilder, which can't report intrinsic sizes, so audio is left as is.
+  Widget _intrinsicUnlessAudio(Widget child) {
+    final type = message.type.toLowerCase();
+    final isAudio = type == 'audio' ||
+        type == 'ptt' ||
+        message.mimetype?.startsWith('audio/') == true;
+    return isAudio ? child : IntrinsicWidth(child: child);
   }
 }
