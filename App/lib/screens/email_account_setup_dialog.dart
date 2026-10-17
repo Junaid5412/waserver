@@ -250,9 +250,13 @@ class _EmailAccountSetupDialogState extends State<EmailAccountSetupDialog> {
       // If user typed a new Gemini key, immediately save to database settings & local storage
       // (blank or masked values mean "keep the stored key").
       final gemKey = _typedGeminiKey();
-      if (gemKey.length > 10) {
-        await auth.api.addAdminGeminiKey(gemKey);
-        await auth.api.setAdminGeminiModel(_selectedGeminiModel);
+      // The global key list is admin-only; the key still travels with the
+      // account payload, so a non-admin's save must not fail on this.
+      if (gemKey.length > 10 && auth.currentUser?.isAdmin == true) {
+        try {
+          await auth.api.addAdminGeminiKey(gemKey);
+          await auth.api.setAdminGeminiModel(_selectedGeminiModel);
+        } catch (_) {}
       }
 
       final res = await auth.api.saveEmailAccount(payload);

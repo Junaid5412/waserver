@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../config/theme.dart';
 import '../services/auth_service.dart';
 import '../services/realtime_service.dart';
@@ -39,6 +40,36 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _checkUnreadBroadcasts();
     _subscribeRealtime();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeAskBatteryExemption());
+  }
+
+  /// Many phones (Xiaomi, Oppo, Vivo, Infinix, Tecno...) stop background apps
+  /// to save battery, which also stops new-message alerts. Ask once.
+  Future<void> _maybeAskBatteryExemption() async {
+    const prefKey = 'zelon_battery_prompt_shown';
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool(prefKey) == true) return;
+      final auth = Provider.of<AuthService>(context, listen: false);
+      if (await auth.isIgnoringBatteryOptimizations()) return;
+      if (!mounted) return;
+      await prefs.setBool(prefKey, true);
+      final allow = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Get message alerts'),
+          content: const Text(
+            'To notify you about new messages while Zelon is closed, allow it to run in the background. '
+            'On the next screen choose "Allow".',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Not now')),
+            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Allow')),
+          ],
+        ),
+      );
+      if (allow == true) await auth.requestIgnoreBatteryOptimizations();
+    } catch (_) {}
   }
 
   @override
@@ -68,12 +99,8 @@ class _HomeScreenState extends State<HomeScreen> {
           type: HeaderNotificationType.info,
           onTap: () => _showBroadcastPopup(data),
         );
-        // System tray notification when closed/backgrounded
-        HeaderNotification.showSystemNotification(
-          title: title,
-          body: body,
-          isBroadcast: true,
-        );
+        // Status-bar notifications while the app is in the background or
+        // closed come from the native MessageListenerService.
 
         _showBroadcastPopup(data);
       } else if (event.type == 'message' &&
@@ -93,6 +120,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (incomingChatId.isNotEmpty && auth.currentOpenChatId == incomingChatId) {
           return;
         }
+        if (incomingChatId.isNotEmpty && auth.isChatMuted(incomingChatId)) return;
 
         final pushName = event.raw['pushName']?.toString() ?? '';
         final sender = pushName.isNotEmpty
@@ -125,12 +153,6 @@ class _HomeScreenState extends State<HomeScreen> {
           },
         );
 
-        // System notification in Android status bar for when app is minimized/closed
-        HeaderNotification.showSystemNotification(
-          title: sender,
-          body: text,
-          chatId: incomingChatId,
-        );
       }
     });
   }

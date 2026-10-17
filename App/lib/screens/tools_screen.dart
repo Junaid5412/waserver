@@ -4,6 +4,7 @@ import '../config/theme.dart';
 import '../models/campaign.dart';
 import '../services/auth_service.dart';
 import 'admin_screen.dart';
+import 'auto_reply_rules_screen.dart';
 import 'connect_screen.dart';
 
 class ToolsScreen extends StatefulWidget {
@@ -16,29 +17,47 @@ class ToolsScreen extends StatefulWidget {
 class _ToolsScreenState extends State<ToolsScreen> {
   List<CampaignModel> _campaigns = [];
   bool _isLoading = false;
+  // Instance whose campaigns are shown; reloaded whenever the selected instance changes.
+  String? _loadedInstanceId;
+  bool _hasLoadedOnce = false;
 
   @override
-  void initState() {
-    super.initState();
-    _loadData();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Listening here re-runs this whenever AuthService notifies (e.g. instance switch).
+    final instanceId = Provider.of<AuthService>(context).selectedInstance?.id;
+    if (!_hasLoadedOnce || instanceId != _loadedInstanceId) {
+      _hasLoadedOnce = true;
+      _loadedInstanceId = instanceId;
+      // Defer so setState is never called while the framework is building this widget.
+      Future.microtask(_loadData);
+    }
   }
 
   Future<void> _loadData() async {
+    if (!mounted) return;
     final auth = Provider.of<AuthService>(context, listen: false);
     final inst = auth.selectedInstance;
-    if (inst == null) return;
+    if (inst == null) {
+      setState(() {
+        _campaigns = [];
+        _isLoading = false;
+      });
+      return;
+    }
 
     setState(() => _isLoading = true);
     try {
       final list = await auth.api.getCampaigns(inst.id);
-      if (mounted) {
+      // Ignore a stale response if the user switched instance meanwhile.
+      if (mounted && inst.id == _loadedInstanceId) {
         setState(() {
           _campaigns = list;
           _isLoading = false;
         });
       }
     } catch (_) {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted && inst.id == _loadedInstanceId) setState(() => _isLoading = false);
     }
   }
 
@@ -131,8 +150,17 @@ class _ToolsScreenState extends State<ToolsScreen> {
             subtitle: 'Automatic replies with keyword matching and cooldown',
             color: Colors.blue,
             onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Auto-reply rules are active on server.')),
+              final inst = auth.selectedInstance;
+              if (inst == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Select or link a WhatsApp account first.')),
+                );
+                return;
+              }
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => AutoReplyRulesScreen(instanceId: inst.id, instanceName: inst.name),
+                ),
               );
             },
           ),

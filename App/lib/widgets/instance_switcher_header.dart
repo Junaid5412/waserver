@@ -8,7 +8,8 @@ import '../services/auth_service.dart';
 class InstanceSwitcherHeader extends StatelessWidget {
   const InstanceSwitcherHeader({super.key});
 
-  void _showInstancePicker(BuildContext context) {
+  // Account picker with set-default and delete; also opened from Settings.
+  static void showPicker(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     showModalBottomSheet(
@@ -318,7 +319,7 @@ class InstanceSwitcherHeader extends StatelessWidget {
     final isOnline = inst?.isConnected == true;
 
     return InkWell(
-      onTap: () => _showInstancePicker(context),
+      onTap: () => showPicker(context),
       borderRadius: BorderRadius.circular(20),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),

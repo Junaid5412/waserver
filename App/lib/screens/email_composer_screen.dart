@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:provider/provider.dart';
+import '../config/permissions.dart';
 import '../config/theme.dart';
 import '../services/auth_service.dart';
 
@@ -47,6 +48,8 @@ class _EmailComposerScreenState extends State<EmailComposerScreen> {
   String? _currentAccountId;
   bool _isSending = false;
   bool _isGeneratingAi = false;
+  // Set when the last "AI draft" was actually a canned template because the AI request failed.
+  String? _aiFallbackReason;
 
   final List<Map<String, dynamic>> _attachments = [];
 
@@ -261,17 +264,23 @@ class _EmailComposerScreenState extends State<EmailComposerScreen> {
           final first = Map<String, dynamic>.from(res['replies'][0] is Map ? res['replies'][0] : {});
           final replyText = (first['reply'] ?? first['body'])?.toString() ?? '';
           final draftSubject = (first['subject'] ?? first['label'])?.toString() ?? '';
+          final isFallback = res['fallback'] == true;
           setState(() {
             _bodyController.text = replyText;
             if (_subjectController.text.trim().isEmpty && draftSubject.isNotEmpty) {
               _subjectController.text = draftSubject;
             }
+            _aiFallbackReason = isFallback
+                ? (res['fallbackReason']?.toString() ?? 'unknown error')
+                : null;
           });
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('AI draft generated! Review and make any adjustments before sending.'),
-                backgroundColor: WhatsAppTheme.primaryGreen,
+              SnackBar(
+                content: Text(isFallback
+                    ? 'AI unavailable - a standard template was inserted instead. Edit it before sending.'
+                    : 'AI draft generated! Review and make any adjustments before sending.'),
+                backgroundColor: isFallback ? Colors.orange : WhatsAppTheme.primaryGreen,
               ),
             );
           }
@@ -361,6 +370,9 @@ class _EmailComposerScreenState extends State<EmailComposerScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final canUseAi = UserPermissions.canUseAiAssistant(
+      Provider.of<AuthService>(context).currentUser,
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -372,17 +384,18 @@ class _EmailComposerScreenState extends State<EmailComposerScreen> {
             icon: const Icon(Icons.attach_file),
             onPressed: _pickAttachment,
           ),
-          IconButton(
-            tooltip: 'Draft with Gemini AI',
-            icon: _isGeneratingAi
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                  )
-                : const Icon(Icons.auto_awesome),
-            onPressed: _isGeneratingAi ? null : _promptAiDraft,
-          ),
+          if (canUseAi)
+            IconButton(
+              tooltip: 'Draft with Gemini AI',
+              icon: _isGeneratingAi
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.auto_awesome),
+              onPressed: _isGeneratingAi ? null : _promptAiDraft,
+            ),
           IconButton(
             tooltip: 'Send Email',
             icon: _isSending
@@ -400,6 +413,31 @@ class _EmailComposerScreenState extends State<EmailComposerScreen> {
         key: _formKey,
         child: Column(
           children: [
+            // Shown when the inserted draft is a template because the AI request failed
+            if (_aiFallbackReason != null)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(16, 8, 4, 8),
+                color: Colors.orange.withOpacity(0.12),
+                child: Row(
+                  children: [
+                    const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'AI unavailable ($_aiFallbackReason). The body contains a standard template, not an AI draft.',
+                        style: const TextStyle(fontSize: 12, color: Colors.orange),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Dismiss',
+                      icon: const Icon(Icons.close, size: 18, color: Colors.orange),
+                      onPressed: () => setState(() => _aiFallbackReason = null),
+                    ),
+                  ],
+                ),
+              ),
+
             // Sender Account selector (if accounts > 1)
             if (widget.accounts.isNotEmpty)
               Container(

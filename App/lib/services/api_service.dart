@@ -167,18 +167,53 @@ class ApiService {
   }
 
   Future<List<ChatModel>> getChats(String instanceId, {String? search}) async {
-    var url = ApiConfig.chatsUrl(instanceId);
-    if (search != null && search.isNotEmpty) {
-      url += '?search=${Uri.encodeComponent(search)}';
+    // The server returns at most 100 chats per page; follow its cursor headers
+    // so accounts with more chats still see older ones (capped at 5 pages).
+    final chats = <ChatModel>[];
+    final seen = <String>{};
+    String? cursorCreated;
+    String? cursorId;
+    for (var pageNo = 0; pageNo < 5; pageNo++) {
+      final params = <String, String>{'limit': '100'};
+      if (search != null && search.isNotEmpty) params['search'] = search;
+      if (cursorCreated != null && cursorId != null) {
+        params['before'] = cursorCreated;
+        params['beforeId'] = cursorId;
+      }
+      final uri = Uri.parse(ApiConfig.chatsUrl(instanceId)).replace(queryParameters: params);
+      final res = await http.get(uri, headers: _headers());
+      if (res.statusCode != 200) {
+        if (pageNo == 0) throw Exception('Failed to load chats');
+        break;
+      }
+      final list = jsonDecode(res.body) as List;
+      for (final e in list) {
+        final chat = ChatModel.fromJson(Map<String, dynamic>.from(e));
+        if (seen.add(chat.chatId)) chats.add(chat);
+      }
+      final hasMore = res.headers['x-has-more'] == 'true';
+      cursorCreated = res.headers['x-cursor-created'];
+      cursorId = res.headers['x-cursor-id'];
+      if (!hasMore || cursorCreated == null || cursorCreated.isEmpty || cursorId == null || cursorId.isEmpty) {
+        break;
+      }
     }
-    final res = await http.get(Uri.parse(url), headers: _headers());
-    if (res.statusCode != 200) throw Exception('Failed to load chats');
-    final list = jsonDecode(res.body) as List;
-    return list.map((e) => ChatModel.fromJson(Map<String, dynamic>.from(e))).toList();
+    return chats;
   }
 
-  Future<List<MessageModel>> getMessages(String instanceId, String chatJid, {int limit = 50}) async {
-    final url = '${ApiConfig.chatMessagesUrl(instanceId, chatJid)}?limit=$limit';
+  Future<List<MessageModel>> getMessages(
+    String instanceId,
+    String chatJid, {
+    int limit = 50,
+    DateTime? before,
+    String? beforeId,
+  }) async {
+    var url = '${ApiConfig.chatMessagesUrl(instanceId, chatJid)}?limit=$limit';
+    // Older page: the server pages by (createdAt, id) of the oldest loaded message.
+    if (before != null && beforeId != null && beforeId.isNotEmpty) {
+      url += '&before=${Uri.encodeComponent(before.toUtc().toIso8601String())}'
+          '&beforeId=${Uri.encodeComponent(beforeId)}';
+    }
     final res = await http.get(Uri.parse(url), headers: _headers());
     if (res.statusCode != 200) throw Exception('Failed to load messages');
     final list = jsonDecode(res.body) as List;
@@ -866,57 +901,67 @@ class ApiService {
     return List<String>.from(data['keys'] ?? []);
   }
 
+  /// Extracts the server's `error` message from an API response, or [fallback].
+  String _serverErrorMessage(http.Response res, String fallback) {
+    try {
+      final d = jsonDecode(res.body);
+      if (d is Map && d['error'] != null) return d['error'].toString();
+    } catch (_) {}
+    return '$fallback (HTTP ${res.statusCode})';
+  }
+
+  /// Posts a Gemini settings change and throws with the server's error unless it succeeded.
+  Future<void> _postGeminiSetting(String path, Map<String, dynamic> body, String fallbackError) async {
+    http.Response? res;
+    try {
+      res = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}$path'),
+        headers: _headers(),
+        body: jsonEncode(body),
+      ).timeout(const Duration(seconds: 8));
+    } catch (_) {
+      res = null;
+    }
+    if (res == null) {
+      throw Exception('$fallbackError: server unreachable');
+    }
+    if (res.statusCode != 200) {
+      throw Exception(_serverErrorMessage(res, fallbackError));
+    }
+  }
+
   Future<void> addAdminGeminiKey(String apiKey) async {
     final cleanKey = apiKey.trim();
     if (cleanKey.isEmpty) return;
 
-    // 1. Immediately persist locally so it always works
+    // Save on the server first; only cache locally once the server accepted it.
+    await _postGeminiSetting('/api/admin/gemini', {'key': cleanKey}, 'Failed to save Gemini API key');
+
     final prefs = await SharedPreferences.getInstance();
     final keys = prefs.getStringList(_prefGeminiKeys) ?? [];
     if (!keys.contains(cleanKey)) {
       keys.add(cleanKey);
       await prefs.setStringList(_prefGeminiKeys, keys);
     }
-
-    // 2. Synchronize to server (catch any endpoint errors gracefully)
-    try {
-      await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/api/admin/gemini'),
-        headers: _headers(),
-        body: jsonEncode({'key': cleanKey}),
-      ).timeout(const Duration(seconds: 5));
-    } catch (_) {}
   }
 
   Future<void> setAdminGeminiModel(String model) async {
+    await _postGeminiSetting('/api/admin/gemini', {'model': model}, 'Failed to update Gemini model');
+
     _cachedActiveModel = model;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefGeminiModel, model);
-
-    try {
-      await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/api/admin/gemini'),
-        headers: _headers(),
-        body: jsonEncode({'model': model}),
-      ).timeout(const Duration(seconds: 5));
-    } catch (_) {}
   }
 
   Future<void> deleteAdminGeminiKey(String apiKey) async {
     final cleanKey = apiKey.trim();
 
+    await _postGeminiSetting('/api/admin/gemini/delete', {'key': cleanKey}, 'Failed to remove Gemini API key');
+
     final prefs = await SharedPreferences.getInstance();
     final keys = prefs.getStringList(_prefGeminiKeys) ?? [];
     keys.remove(cleanKey);
     await prefs.setStringList(_prefGeminiKeys, keys);
-
-    try {
-      await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/api/admin/gemini/delete'),
-        headers: _headers(),
-        body: jsonEncode({'key': cleanKey}),
-      ).timeout(const Duration(seconds: 5));
-    } catch (_) {}
   }
 
   Future<void> removeAdminGeminiKey(String apiKey) => deleteAdminGeminiKey(apiKey);
@@ -1364,6 +1409,76 @@ STRICTLY return ONLY a raw JSON array of 3 strings: ["reply1", "reply2", "reply3
     if (res.statusCode != 200) throw Exception('Failed to send reply');
   }
 
+  // ==================== AUTO-REPLY RULES ====================
+  // Server: GET/POST /api/instances/:id/rules, PUT/DELETE /api/instances/:id/rules/:rule
+
+  /// List auto-reply rules for an instance (newest first, up to 100).
+  Future<List<Map<String, dynamic>>> getAutoReplyRules(String instanceId) async {
+    final res = await http.get(Uri.parse(ApiConfig.rulesUrl(instanceId)), headers: _headers());
+    if (res.statusCode != 200) {
+      throw Exception(_serverErrorMessage(res, 'Failed to load auto-reply rules'));
+    }
+    final list = jsonDecode(res.body);
+    if (list is! List) return [];
+    return list.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+  }
+
+  /// Create a rule. [match] is one of 'any', 'exact', 'contains'; [keyword] is required unless match is 'any'.
+  Future<String> createAutoReplyRule(
+    String instanceId, {
+    required String name,
+    required String match,
+    String keyword = '',
+    required String reply,
+    int cooldownSeconds = 60,
+    bool enabled = true,
+    bool stopAfterMatch = true,
+  }) async {
+    final res = await http.post(
+      Uri.parse(ApiConfig.rulesUrl(instanceId)),
+      headers: _headers(),
+      body: jsonEncode({
+        'name': name,
+        'match': match,
+        'keyword': keyword,
+        'reply': reply,
+        'cooldownSeconds': cooldownSeconds,
+        'enabled': enabled,
+        'stopAfterMatch': stopAfterMatch,
+      }),
+    );
+    if (res.statusCode != 200 && res.statusCode != 201) {
+      throw Exception(_serverErrorMessage(res, 'Failed to create rule'));
+    }
+    final d = jsonDecode(res.body);
+    return d is Map ? (d['id']?.toString() ?? '') : '';
+  }
+
+  /// Enable/disable a rule and/or change its reply text.
+  Future<void> updateAutoReplyRule(String instanceId, String ruleId, {bool? enabled, String? reply}) async {
+    final res = await http.put(
+      Uri.parse('${ApiConfig.rulesUrl(instanceId)}/${Uri.encodeComponent(ruleId)}'),
+      headers: _headers(),
+      body: jsonEncode({
+        if (enabled != null) 'enabled': enabled,
+        if (reply != null) 'reply': reply,
+      }),
+    );
+    if (res.statusCode != 200) {
+      throw Exception(_serverErrorMessage(res, 'Failed to update rule'));
+    }
+  }
+
+  Future<void> deleteAutoReplyRule(String instanceId, String ruleId) async {
+    final res = await http.delete(
+      Uri.parse('${ApiConfig.rulesUrl(instanceId)}/${Uri.encodeComponent(ruleId)}'),
+      headers: _headers(),
+    );
+    if (res.statusCode != 200) {
+      throw Exception(_serverErrorMessage(res, 'Failed to delete rule'));
+    }
+  }
+
   // ==================== BUSINESS EMAIL SUITE ====================
 
   /// Fetch all configured email accounts for current user
@@ -1612,7 +1727,11 @@ STRICTLY return ONLY a raw JSON array of 3 strings: ["reply1", "reply2", "reply3
 
     final targetModel = model ?? await getActiveGeminiModel();
 
+    // Why the AI path failed; shown to the user if we end up returning templates.
+    String failureReason = 'AI service unavailable';
+
     // 2. Try backend API endpoint first
+    http.Response? serverRes;
     try {
       final res = await http.post(
         Uri.parse(ApiConfig.emailAiReplyUrl),
@@ -1627,16 +1746,33 @@ STRICTLY return ONLY a raw JSON array of 3 strings: ["reply1", "reply2", "reply3
           if (effectiveKey.isNotEmpty) 'geminiKey': effectiveKey,
         }),
       ).timeout(const Duration(seconds: 15));
+      serverRes = res;
 
       if (res.statusCode == 200) {
         final parsed = jsonDecode(res.body);
         if (parsed is Map<String, dynamic> && parsed['replies'] is List) {
           _normalizeReplies(parsed, subject, senderName);
+          // The server flags canned templates with `fallback: true` when Gemini failed.
+          final isFallback = parsed['fallback'] == true;
+          parsed['fallback'] = isFallback;
+          if (isFallback) {
+            parsed['fallbackReason'] = parsed['fallbackReason']?.toString() ?? failureReason;
+          }
           return parsed;
         }
+        failureReason = 'Server returned an invalid AI response';
+      } else {
+        failureReason = _serverErrorMessage(res, 'AI request failed');
       }
     } catch (_) {
       // Backend failed or endpoint not found; proceed to direct Gemini call
+      failureReason = 'AI server unreachable';
+    }
+
+    // AI access was denied for this account: never bypass that with a direct Gemini call or templates.
+    final deniedRes = serverRes;
+    if (deniedRes != null && (deniedRes.statusCode == 401 || deniedRes.statusCode == 403)) {
+      throw Exception(_serverErrorMessage(deniedRes, 'You do not have permission to use AI features'));
     }
 
     // 3. Fallback: Direct call to Google Generative Language API
@@ -1652,17 +1788,20 @@ STRICTLY return ONLY a raw JSON array of 3 strings: ["reply1", "reply2", "reply3
           userIntent: userIntent,
         );
         if (directRes != null && directRes['replies'] is List && (directRes['replies'] as List).isNotEmpty) {
+          directRes['fallback'] = false;
           return directRes;
         }
+        failureReason = '$failureReason; direct Gemini call also failed';
       } catch (_) {}
     }
 
-    // 4. Ultimate graceful fallback: Professional corporate reply templates
+    // 4. Last resort: canned reply templates, explicitly flagged as NOT AI-generated
     return _buildFallbackEmailReplies(
       subject: subject,
       senderName: senderName,
       senderEmail: senderEmail,
       userIntent: userIntent,
+      reason: failureReason,
     );
   }
 
@@ -1797,6 +1936,7 @@ STRICTLY return ONLY a raw JSON object with this exact schema:
     String? senderName,
     String? senderEmail,
     String? userIntent,
+    String? reason,
   }) {
     final name = senderName ?? (senderEmail != null ? senderEmail.split('@')[0] : 'Sir/Madam');
     final sub = subject ?? 'Inquiry';
@@ -1809,6 +1949,8 @@ STRICTLY return ONLY a raw JSON object with this exact schema:
 
     return {
       'summary': 'Incoming email regarding $sub',
+      'fallback': true,
+      'fallbackReason': reason ?? 'AI service unavailable',
       'replies': [
         {
           'tone': 'Formal & Confirmed',

@@ -82,6 +82,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _auth = Provider.of<AuthService>(context, listen: false);
     final auth = _auth;
     auth.currentOpenChatId = RealtimeEvent.normalizeJid(widget.chat.chatId);
+    _scrollController.addListener(_onScroll);
     _loadMessages();
     _subscribePresenceAndRealtime();
     _startForegroundPolling();
@@ -210,6 +211,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _outgoingPresenceTimer?.cancel();
     _textController.dispose();
     _scrollController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -231,6 +233,73 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     _syncMessagesSilently(forceScroll: true);
+  }
+
+  // In-chat search (opened from the contact profile's Search button).
+  bool _searching = false;
+  String _searchQuery = '';
+  final _searchController = TextEditingController();
+
+  List<MessageModel> get _visibleMessages => _searchQuery.isEmpty
+      ? _messages
+      : _messages.where((m) => m.text.toLowerCase().contains(_searchQuery)).toList();
+
+  Future<void> _openProfile() async {
+    final result = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (_) => ContactProfileScreen(chat: widget.chat)),
+    );
+    if (result == 'search' && mounted) setState(() => _searching = true);
+  }
+
+  // Older pages loaded by scrolling up; polling only refreshes the newest 40.
+  List<MessageModel> _older = [];
+  bool _loadingOlder = false;
+  bool _hasOlder = true;
+
+  void _onScroll() {
+    if (!_scrollController.hasClients || _loadingOlder || !_hasOlder || _searching) return;
+    if (_scrollController.position.pixels <= 80) _loadOlder();
+  }
+
+  Future<void> _loadOlder() async {
+    final instanceId = _auth.selectedInstance?.id;
+    final loaded = _messages.where((m) => !m.waId.startsWith('temp_')).toList();
+    if (instanceId == null || loaded.isEmpty) return;
+    final oldest = loaded.first;
+    final oldestAt = oldest.createdAt;
+    if (oldestAt == null || oldest.id.isEmpty) return;
+    _loadingOlder = true;
+    try {
+      final page = await _auth.api.getMessages(
+        instanceId,
+        widget.chat.chatId,
+        limit: 40,
+        before: oldestAt,
+        beforeId: oldest.id,
+      );
+      if (!mounted) return;
+      final known = _messages.map((m) => m.waId).toSet();
+      final added = page.where((m) => !known.contains(m.waId)).toList();
+      if (added.isEmpty) {
+        _hasOlder = false;
+        return;
+      }
+      final beforeExtent = _scrollController.hasClients ? _scrollController.position.maxScrollExtent : 0.0;
+      setState(() {
+        _older = [...added, ..._older];
+        _messages = [...added, ..._messages];
+      });
+      // Keep the user's place instead of jumping to the newly added top.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_scrollController.hasClients) return;
+        final grown = _scrollController.position.maxScrollExtent - beforeExtent;
+        _scrollController.jumpTo(_scrollController.offset + grown);
+      });
+    } catch (_) {
+    } finally {
+      _loadingOlder = false;
+    }
   }
 
   bool _syncing = false;
@@ -258,6 +327,18 @@ class _ChatScreenState extends State<ChatScreen> {
       var fresh = await auth.api.getMessages(instanceId, widget.chat.chatId, limit: 40);
       if (!mounted) return;
 
+      if (_older.isNotEmpty) {
+        // Once older pages are loaded, keep everything already shown that is
+        // older than the newest-40 window, so new arrivals don't push
+        // messages out of the middle of the conversation.
+        final freshIds = fresh.map((m) => m.waId).toSet();
+        final windowStart = fresh.isNotEmpty ? fresh.first.createdAt : null;
+        final keep = _messages.where((m) =>
+            !m.waId.startsWith('temp_') &&
+            !freshIds.contains(m.waId) &&
+            (windowStart == null || m.createdAt == null || !m.createdAt!.isAfter(windowStart)));
+        fresh = [...keep, ...fresh];
+      }
       final clearedAt = _clearedAt;
       if (clearedAt != null) {
         fresh = fresh.where((m) => m.createdAt?.isAfter(clearedAt) ?? true).toList();
@@ -975,6 +1056,15 @@ class _ChatScreenState extends State<ChatScreen> {
                 },
               ),
               _attachAction(
+                icon: Icons.videocam_rounded,
+                label: 'Video',
+                gradient: const [Color(0xFFE84393), Color(0xFFFD79A8)],
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickVideo();
+                },
+              ),
+              _attachAction(
                 icon: Icons.headphones_rounded,
                 label: 'Audio',
                 gradient: const [Color(0xFFFA8231), Color(0xFFFD9644)],
@@ -1096,6 +1186,39 @@ class _ChatScreenState extends State<ChatScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to pick image: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _pickVideo() async {
+    try {
+      final picked = await ImagePicker().pickVideo(source: ImageSource.gallery);
+      if (picked == null) return;
+      final file = File(picked.path);
+      final size = await file.length();
+      // Large videos are uploaded in chunks; keep memory use reasonable on phones.
+      if (size > 32 * 1024 * 1024) {
+        throw Exception('Video is too large (max 32 MB)');
+      }
+      final bytes = await file.readAsBytes();
+      final filename = picked.name.isNotEmpty ? picked.name : 'video.mp4';
+      final ext = filename.split('.').last.toLowerCase();
+      final mimetype = ext == '3gp'
+          ? 'video/3gpp'
+          : (ext == 'webm' ? 'video/webm' : (ext == 'mov' ? 'video/quicktime' : 'video/mp4'));
+      if (!mounted) return;
+      _showMediaConfirmation(
+        type: 'video',
+        filename: filename,
+        fileBytes: bytes,
+        mimetype: mimetype,
+        base64Data: base64Encode(bytes),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to pick video: $e')),
         );
       }
     }
@@ -1460,7 +1583,7 @@ class _ChatScreenState extends State<ChatScreen> {
             _debouncedSync();
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('📡 Live location shared successfully!'),
+                content: Text('📍 Your current location was shared (live tracking is not supported yet)'),
                 backgroundColor: WhatsAppTheme.primaryGreen,
               ),
             );
@@ -1571,32 +1694,6 @@ class _ChatScreenState extends State<ChatScreen> {
                       fillColor: isDark ? Colors.black26 : Colors.grey.shade100,
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 8,
-                    children: [
-                      ActionChip(
-                        avatar: const Icon(Icons.support_agent_rounded, size: 16),
-                        label: const Text('Support (+1234567890)'),
-                        onPressed: () {
-                          setModalState(() {
-                            nameCtrl.text = 'Zelon Support';
-                            phoneCtrl.text = '+1234567890';
-                          });
-                        },
-                      ),
-                      ActionChip(
-                        avatar: const Icon(Icons.storefront_rounded, size: 16),
-                        label: const Text('Sales (+1987654321)'),
-                        onPressed: () {
-                          setModalState(() {
-                            nameCtrl.text = 'Sales Team';
-                            phoneCtrl.text = '+1987654321';
-                          });
-                        },
-                      ),
-                    ],
                   ),
                   const SizedBox(height: 16),
                   ElevatedButton.icon(
@@ -1912,14 +2009,7 @@ class _ChatScreenState extends State<ChatScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: InkWell(
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ContactProfileScreen(chat: widget.chat),
-              ),
-            );
-          },
+          onTap: _openProfile,
           child: Row(
             children: [
               ChatAvatar(
@@ -2004,15 +2094,12 @@ class _ChatScreenState extends State<ChatScreen> {
                   }
                 }
               } else if (val == 'info') {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => ContactProfileScreen(chat: widget.chat),
-                  ),
-                );
+                _openProfile();
               } else if (val == 'clear') {
                 setState(() {
                   _clearedAt = DateTime.now();
+                  _older = [];
+                  _hasOlder = false;
                   _messages.clear();
                 });
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -2082,6 +2169,35 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         child: Column(
           children: [
+            if (_searching)
+              Container(
+                color: isDark ? WhatsAppTheme.surfaceDark : Colors.white,
+                padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _searchController,
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                          hintText: 'Search in this chat...',
+                          prefixIcon: Icon(Icons.search, size: 20),
+                          border: InputBorder.none,
+                        ),
+                        onChanged: (v) => setState(() => _searchQuery = v.trim().toLowerCase()),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => setState(() {
+                        _searching = false;
+                        _searchQuery = '';
+                        _searchController.clear();
+                      }),
+                    ),
+                  ],
+                ),
+              ),
             // Messages List View
             Expanded(
               child: _isLoading && _messages.isEmpty
@@ -2104,9 +2220,9 @@ class _ChatScreenState extends State<ChatScreen> {
                       : ListView.builder(
                           controller: _scrollController,
                           padding: const EdgeInsets.symmetric(vertical: 10),
-                          itemCount: _messages.length,
+                          itemCount: _visibleMessages.length,
                           itemBuilder: (context, index) {
-                            final msg = _messages[index];
+                            final msg = _visibleMessages[index];
                             return ChatBubble(
                               key: ValueKey(msg.waId),
                               message: msg,

@@ -5,7 +5,7 @@ import { writeFileSync, chmodSync, rmSync } from "node:fs";
 import { workerEndpoint } from "./follower.js";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
-import { requestKey } from "./request-key.js";
+import { requestKey, apiRequestKey } from "./request-key.js";
 import cookieParser from "cookie-parser";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
@@ -87,7 +87,7 @@ app.use(cookieParser());
 app.use(
   "/api",
   rateLimit({
-    keyGenerator: requestKey,
+    keyGenerator: apiRequestKey,
     windowMs: 60000,
     limit: (req) => (/\/media\/[^/]+\/chunks\/|\/picture$|\/inbox\/[^/]+\/media$/.test(req.path) ? 1500 : 240),
     standardHeaders: "draft-8",
@@ -813,7 +813,8 @@ app.put(
     }
     if (data.name !== undefined) u.name = data.name;
     if (data.role !== undefined) u.role = data.role;
-    if (data.permissions !== undefined) u.permissions = data.permissions;
+    // Merge so a partial permissions update (e.g. a few toggles) never wipes the other flags.
+    if (data.permissions !== undefined) u.permissions = { ...(u.permissions || {}), ...data.permissions };
     if (data.disabled !== undefined) {
       u.disabled = data.disabled;
       if (data.disabled) u.sessionVersion = token();
@@ -1084,6 +1085,9 @@ app.post(
   }),
 );
 
+// Administrators always have AI access; other users only lose it when an admin explicitly sets canUseAi: false.
+const canUseAi = (user) => !!user && (user.role === "admin" || user.permissions?.canUseAi !== false);
+
 app.post(
   "/api/instances/:id/ai/suggest-reply",
   consoleOnly,
@@ -1102,9 +1106,7 @@ app.post(
       keys: z.array(z.string()).optional(),
     }).parse(req.body);
 
-    if (req.user.permissions && req.user.permissions.canUseAi === false) {
-      fail(403, "You do not have permission to use AI features");
-    }
+    if (!canUseAi(req.user)) fail(403, "You do not have permission to use AI features");
 
     const config = (await store.get("settings", "gemini")) || { id: "gemini", keys: [] };
     let keys = (config?.keys && config.keys.length > 0) ? config.keys : (clientKeys || []);
@@ -1451,6 +1453,8 @@ app.post(
         geminiKey: z.string().optional(),
       })
       .parse(req.body);
+
+    if (!canUseAi(req.user)) fail(403, "You do not have permission to use AI features");
 
     const config = (await store.get("settings", "gemini")) || { id: "gemini", keys: [] };
     const keys = [...(config.keys || [])];

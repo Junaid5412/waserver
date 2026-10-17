@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/api_config.dart';
@@ -42,11 +43,78 @@ class AuthService extends ChangeNotifier {
     realtime = RealtimeService(api: api);
   }
 
+  // Native Android service that keeps listening for new messages while the
+  // app is in the background or closed (see MessageListenerService.kt).
+  static const MethodChannel _backgroundChannel = MethodChannel('com.zelon.messenger/background');
+
+  Future<void> _startBackgroundListener() async {
+    final token = _token;
+    final instanceId = _selectedInstance?.id;
+    if (token == null || token.isEmpty || instanceId == null) return;
+    try {
+      await _backgroundChannel.invokeMethod('start', {
+        'baseUrl': ApiConfig.baseUrl,
+        'token': token,
+        'instanceId': instanceId,
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _stopBackgroundListener() async {
+    try {
+      await _backgroundChannel.invokeMethod('stop');
+    } catch (_) {}
+  }
+
+  /// Whether Android battery optimisation is off for the app (needed on some
+  /// phones so background message alerts aren't delayed or stopped).
+  Future<bool> isIgnoringBatteryOptimizations() async {
+    try {
+      return await _backgroundChannel.invokeMethod<bool>('isIgnoringBatteryOptimizations') ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  static const String _prefMutedKey = 'zelon_muted_chats';
+  Set<String> _mutedChats = {};
+
+  bool isChatMuted(String chatId) => _mutedChats.contains(RealtimeEvent.normalizeJid(chatId));
+
+  Future<void> setChatMuted(String chatId, bool muted) async {
+    final id = RealtimeEvent.normalizeJid(chatId);
+    if (muted) {
+      _mutedChats.add(id);
+    } else {
+      _mutedChats.remove(id);
+    }
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_prefMutedKey, _mutedChats.toList());
+    } catch (_) {}
+    await _pushMutedChats();
+  }
+
+  Future<void> _pushMutedChats() async {
+    try {
+      await _backgroundChannel.invokeMethod('setMutedChats', {'chatIds': _mutedChats.toList()});
+    } catch (_) {}
+  }
+
+  Future<void> requestIgnoreBatteryOptimizations() async {
+    try {
+      await _backgroundChannel.invokeMethod('requestIgnoreBatteryOptimizations');
+    } catch (_) {}
+  }
+
   Future<void> init() async {
     _isLoading = true;
     notifyListeners();
     try {
       final prefs = await SharedPreferences.getInstance();
+      _mutedChats = (prefs.getStringList(_prefMutedKey) ?? const <String>[]).toSet();
+      _pushMutedChats();
       _token = prefs.getString(_prefTokenKey);
       final userStr = prefs.getString(_prefUserKey);
       if (_token != null && userStr != null) {
@@ -137,6 +205,7 @@ class AuthService extends ChangeNotifier {
   /// Clears the in-memory and persisted session (token, user, instance
   /// selection). Never touches the network.
   Future<void> _clearLocalSession() async {
+    await _stopBackgroundListener();
     _token = null;
     _currentUser = null;
     _selectedInstance = null;
@@ -173,6 +242,7 @@ class AuthService extends ChangeNotifier {
           (_instances.isNotEmpty ? _instances.first : null);
       if (_selectedInstance != null) {
         realtime.connect(_selectedInstance!.id);
+        await _startBackgroundListener();
       }
       notifyListeners();
     } catch (_) {}
@@ -183,6 +253,7 @@ class AuthService extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefSelectedInstKey, inst.id);
     realtime.connect(inst.id);
+    await _startBackgroundListener();
     notifyListeners();
   }
 

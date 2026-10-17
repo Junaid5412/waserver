@@ -10,6 +10,7 @@ import 'admin_control_center_screen.dart';
 import 'lock_screen.dart';
 import 'login_screen.dart';
 import 'notifications_screen.dart';
+import '../widgets/instance_switcher_header.dart';
 
 class SettingsScreen extends StatelessWidget {
   final bool showAppBar;
@@ -315,6 +316,13 @@ class SettingsScreen extends StatelessWidget {
                 );
               }).toList(),
             ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.manage_accounts_rounded, color: WhatsAppTheme.primaryGreen),
+            title: const Text('Manage WhatsApp Accounts'),
+            subtitle: const Text('Switch, set default or delete linked accounts'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => InstanceSwitcherHeader.showPicker(context),
           ),
           const Divider(height: 1),
 

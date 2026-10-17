@@ -236,7 +236,7 @@ class _ContactProfileScreenState extends State<ContactProfileScreen> {
                             context,
                             Icons.search_rounded,
                             'Search',
-                            () => Navigator.pop(context),
+                            () => Navigator.pop(context, 'search'),
                           ),
                         ],
                       ),
@@ -282,7 +282,7 @@ class _ContactProfileScreenState extends State<ContactProfileScreen> {
                         Text(
                           isGroup
                               ? (realDesc ?? 'No group description provided.')
-                              : (realAbout ?? 'Hey there! I am using WhatsApp.'),
+                              : (realAbout ?? 'About not available'),
                           style: const TextStyle(fontSize: 15),
                         ),
                       if (chat.isDirect && formattedPhone.isNotEmpty) ...[
@@ -382,10 +382,12 @@ class _ContactProfileScreenState extends State<ContactProfileScreen> {
                       ListTile(
                         leading: const Icon(Icons.notifications_none_rounded, color: WhatsAppTheme.primaryGreen),
                         title: const Text('Mute notifications'),
-                        trailing: Switch(
-                          value: false,
-                          activeColor: WhatsAppTheme.primaryGreen,
-                          onChanged: (v) {},
+                        trailing: Consumer<AuthService>(
+                          builder: (_, a, __) => Switch(
+                            value: a.isChatMuted(chat.chatId),
+                            activeColor: WhatsAppTheme.primaryGreen,
+                            onChanged: (v) => a.setChatMuted(chat.chatId, v),
+                          ),
                         ),
                       ),
                       const Divider(height: 1, indent: 56),
@@ -393,8 +395,6 @@ class _ContactProfileScreenState extends State<ContactProfileScreen> {
                         leading: const Icon(Icons.lock_rounded, color: WhatsAppTheme.primaryGreen),
                         title: const Text('Encryption'),
                         subtitle: const Text('Messages and calls are end-to-end encrypted.', style: TextStyle(fontSize: 12)),
-                        trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
-                        onTap: () {},
                       ),
                     ],
                   ),

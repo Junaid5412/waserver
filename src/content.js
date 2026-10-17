@@ -148,15 +148,15 @@ export function buildContent(media, loadMessage) {
         },
       };
     else if (d.type === "liveLocation")
+      // Baileys has no builder for liveLocationMessage (an unknown key falls
+      // through to media upload and throws), and continuous position updates
+      // are not implemented, so share the current position as a location pin.
       content = {
-        liveLocation: {
+        location: {
           degreesLatitude: Number(d.latitude),
           degreesLongitude: Number(d.longitude),
-          accuracyInMeters: Number(d.accuracy || 10),
-          speedInMps: Number(d.speed || 0),
-          caption: d.caption || d.text || d.name || "",
-          sequenceNumber: Number(d.sequenceNumber || 1),
-          timeOffset: Number(d.timeOffset || 0),
+          name: d.name || d.caption || d.text || "Current location",
+          address: d.address || "",
         },
       };
     else if (d.type === "poll")

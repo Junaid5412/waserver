@@ -14,6 +14,8 @@ import '../screens/document_viewer_screen.dart';
 import 'status_indicator.dart';
 import 'voice_player.dart';
 import '../services/media_download.dart';
+import '../screens/video_player_screen.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class ChatBubble extends StatelessWidget {
   final MessageModel message;
@@ -268,7 +270,14 @@ class ChatBubble extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
+          GestureDetector(
+            onTap: () => VideoPlayerScreen.open(
+              context,
+              mediaUrl,
+              headers,
+              title: message.text.isNotEmpty ? message.text : 'Video',
+            ),
+            child: Container(
             height: 160,
             width: 220,
             decoration: BoxDecoration(
@@ -290,6 +299,7 @@ class ChatBubble extends StatelessWidget {
                 ),
               ],
             ),
+          ),
           ),
           if (message.text.isNotEmpty) ...[
             const SizedBox(height: 6),
@@ -459,6 +469,16 @@ class ChatBubble extends StatelessWidget {
                           ),
                           actions: [
                             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+                            ElevatedButton(
+                              onPressed: () async {
+                                Navigator.pop(ctx);
+                                final uri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
+                                try {
+                                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                } catch (_) {}
+                              },
+                              child: const Text('Open Maps'),
+                            ),
                           ],
                         ),
                       );

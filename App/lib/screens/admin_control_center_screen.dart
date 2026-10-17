@@ -29,6 +29,8 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
   // Server Health Tab
   Map<String, dynamic>? _health;
   bool _isLoadingHealth = false;
+  // True when the latest refresh failed and [_health] is an older snapshot.
+  bool _healthStale = false;
   Timer? _healthTimer;
 
   // Account Tab
@@ -751,12 +753,17 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
       if (mounted) {
         setState(() {
           _health = h;
+          _healthStale = false;
           _isLoadingHealth = false;
         });
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _isLoadingHealth = false);
+        setState(() {
+          // Keep the last snapshot on screen, but stop presenting it as current.
+          _healthStale = _health != null;
+          _isLoadingHealth = false;
+        });
       }
     }
   }
@@ -1131,6 +1138,46 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
     final totalMedia = sumOf(counts['media']);
     final totalHooks = sumOf(counts['hooks']);
 
+    // Status banner derived from the loaded health data instead of fixed text.
+    final dbHealthy = h['database']?.toString() == 'healthy';
+    final dbMsNum = dbMs is num ? dbMs : 0;
+    final totalInstNum = totalInst is num ? totalInst.toInt() : 0;
+    final socketsNum = sockets is num ? sockets.toInt() : 0;
+    final String statusTitle;
+    final String statusDetail;
+    final IconData statusIcon;
+    final List<Color> statusColors;
+    if (_healthStale) {
+      statusTitle = 'Server Unreachable';
+      statusDetail = 'Last refresh failed - showing the previous snapshot';
+      statusIcon = Icons.cloud_off_rounded;
+      statusColors = const [Color(0xFF757575), Color(0xFF424242)];
+    } else if (!dbHealthy) {
+      statusTitle = 'Database Unhealthy';
+      statusDetail = 'Database status: ${h['database'] ?? 'unknown'}';
+      statusIcon = Icons.error_rounded;
+      statusColors = const [Color(0xFFE53935), Color(0xFFB71C1C)];
+    } else if (totalInstNum > 0 && socketsNum == 0) {
+      statusTitle = 'Server Online - WhatsApp Offline';
+      statusDetail = 'Database OK; no WhatsApp sockets open (0 / $totalInstNum)';
+      statusIcon = Icons.warning_rounded;
+      statusColors = const [Color(0xFFFB8C00), Color(0xFFE65100)];
+    } else if (socketsNum < totalInstNum || dbMsNum > 1000) {
+      statusTitle = 'Server Online - Degraded';
+      statusDetail = dbMsNum > 1000
+          ? 'Slow database response (${dbMs}ms); sockets $socketsNum / $totalInstNum'
+          : 'Database OK; $socketsNum of $totalInstNum WhatsApp sockets open';
+      statusIcon = Icons.warning_rounded;
+      statusColors = const [Color(0xFFFB8C00), Color(0xFFE65100)];
+    } else {
+      statusTitle = 'Server Operational';
+      statusDetail = totalInstNum == 0
+          ? 'Database OK; no WhatsApp instances configured'
+          : 'Database OK; all $totalInstNum WhatsApp sockets open';
+      statusIcon = Icons.check_circle_rounded;
+      statusColors = const [WhatsAppTheme.primaryGreen, Color(0xFF075E54)];
+    }
+
     return RefreshIndicator(
       onRefresh: _loadHealth,
       child: LayoutBuilder(
@@ -1145,15 +1192,15 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [WhatsAppTheme.primaryGreen, Color(0xFF075E54)],
+                  gradient: LinearGradient(
+                    colors: statusColors,
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
-                      color: WhatsAppTheme.primaryGreen.withOpacity(0.3),
+                      color: statusColors.first.withOpacity(0.3),
                       blurRadius: 10,
                       offset: const Offset(0, 4),
                     ),
@@ -1164,19 +1211,19 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.check_circle_rounded, color: Colors.white, size: 32),
+                        Icon(statusIcon, color: Colors.white, size: 32),
                         const SizedBox(width: 12),
-                        const Expanded(
+                        Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Zelon Core Server Operational',
-                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                                statusTitle,
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
                               ),
                               Text(
-                                'Multi-Device Baileys Engine Active',
-                                style: TextStyle(color: Colors.white70, fontSize: 12),
+                                statusDetail,
+                                style: const TextStyle(color: Colors.white70, fontSize: 12),
                               ),
                             ],
                           ),
@@ -2075,17 +2122,31 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
                       }).toList(),
                       onChanged: (newModel) async {
                         if (newModel == null) return;
+                        final previousModel = _selectedGeminiModel;
                         setState(() => _selectedGeminiModel = newModel);
                         final auth = Provider.of<AuthService>(context, listen: false);
-                        await auth.api.setAdminGeminiModel(newModel);
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Active Gemini model set to $newModel (Instantly Applied)'),
-                              backgroundColor: WhatsAppTheme.primaryGreen,
-                              duration: const Duration(seconds: 2),
-                            ),
-                          );
+                        try {
+                          await auth.api.setAdminGeminiModel(newModel);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Active Gemini model set to $newModel (Instantly Applied)'),
+                                backgroundColor: WhatsAppTheme.primaryGreen,
+                                duration: const Duration(seconds: 2),
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          // The server rejected the change: restore the previous selection.
+                          if (mounted) {
+                            setState(() => _selectedGeminiModel = previousModel);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Model not changed: ${e.toString().replaceAll('Exception:', '').trim()}'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                          }
                         }
                       },
                     ),
@@ -2148,7 +2209,12 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
                               }
                             } catch (e) {
                               if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Key not saved: ${e.toString().replaceAll('Exception:', '').trim()}'),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
                               }
                             }
                           },
@@ -2171,7 +2237,7 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
               const Center(
                 child: Padding(
                   padding: EdgeInsets.all(32.0),
-                  child: Text('No Gemini API keys added yet. Add a key above to enable AI Smart Replies.', style: TextStyle(color: Colors.grey)),
+                  child: Text('No Gemini API keys added yet. Add a key above to enable AI email replies and drafts.', style: TextStyle(color: Colors.grey)),
                 ),
               )
             else
@@ -2252,8 +2318,23 @@ class _AdminControlCenterScreenState extends State<AdminControlCenterScreen>
                                 try {
                                   await auth.api.removeAdminGeminiKey(key);
                                   _loadGeminiKeys();
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Gemini API key removed'),
+                                        backgroundColor: WhatsAppTheme.primaryGreen,
+                                      ),
+                                    );
+                                  }
                                 } catch (e) {
-                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('Key not removed: ${e.toString().replaceAll('Exception:', '').trim()}'),
+                                        backgroundColor: Colors.red,
+                                      ),
+                                    );
+                                  }
                                 }
                               }
                             },

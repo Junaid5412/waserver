@@ -228,6 +228,31 @@ test("API authentication, origin protection, instance persistence and scoped key
       role: "user",
     });
     assert.equal(duplicateUser.status, 409);
+    // A partial permissions update merges into the stored permissions instead of replacing them.
+    assert.equal(
+      (
+        await call("/api/admin/users/" + account.id, "PUT", {
+          permissions: { canUseAi: false, canViewDeletedMessages: true },
+        })
+      ).status,
+      200,
+    );
+    assert.equal(
+      (
+        await call("/api/admin/users/" + account.id, "PUT", {
+          permissions: { canViewEditedHistory: true, canViewDeletedMessages: false },
+        })
+      ).status,
+      200,
+    );
+    const listedMember = (await (await call("/api/admin/users")).json()).find((u) => u.id === account.id);
+    assert.deepEqual(listedMember.permissions, {
+      canUseAi: false,
+      canViewDeletedMessages: false,
+      canViewEditedHistory: true,
+    });
+    // Administrators are never blocked by canUseAi (no Gemini keys here, so 400 rather than 403).
+    assert.equal((await call("/api/email/ai/reply", "POST", { subject: "Hello" })).status, 400);
     const adminCookie = cookie;
     const memberLogin = await call("/api/login", "POST", {
       email: account.email,
@@ -236,6 +261,7 @@ test("API authentication, origin protection, instance persistence and scoped key
     assert.equal(memberLogin.status, 200);
     cookie = memberLogin.headers.get("set-cookie").split(";")[0];
     assert.equal((await call("/api/admin/users")).status, 403);
+    assert.equal((await call("/api/email/ai/reply", "POST", { subject: "Hello" })).status, 403);
     assert.equal((await call("/api/instances/" + id + "/events")).status, 404);
     assert.deepEqual(await (await call("/api/instances")).json(), []);
     const memberCreate = await call("/api/instances", "POST", {

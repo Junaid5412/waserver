@@ -8,6 +8,7 @@ import '../config/permissions.dart';
 import '../models/status_model.dart';
 import '../services/auth_service.dart';
 import '../services/media_download.dart';
+import 'video_player_screen.dart';
 
 class SegmentedCirclePainter extends CustomPainter {
   final int count;
@@ -190,9 +191,7 @@ class _StatusTabState extends State<StatusTab> {
           canViewSeen: canViewSeen,
           instanceId: instanceId,
           headers: headers,
-          onMarkRead: (waId) {
-            auth.api.markMessageAsRead(instanceId, waId);
-          },
+          onMarkRead: (waId) => auth.api.markMessageAsRead(instanceId, waId),
         ),
       ),
     );
@@ -336,7 +335,7 @@ class _MultiStoryViewer extends StatefulWidget {
   final bool canViewSeen;
   final String instanceId;
   final Map<String, String> headers;
-  final Function(String waId)? onMarkRead;
+  final Future<void> Function(String waId)? onMarkRead;
 
   const _MultiStoryViewer({
     required this.contactName,
@@ -389,14 +388,16 @@ class _MultiStoryViewerState extends State<_MultiStoryViewer> {
     }
   }
 
-  void _markAsRead(StatusModel st) {
-    widget.onMarkRead?.call(st.waId);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Status marked as viewed'),
-        duration: Duration(seconds: 1),
-      ),
-    );
+  Future<void> _markAsRead(StatusModel st) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await widget.onMarkRead?.call(st.waId);
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Status marked as viewed'), duration: Duration(seconds: 1)),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Could not mark as viewed: $e')));
+    }
   }
 
   @override
@@ -420,7 +421,34 @@ class _MultiStoryViewerState extends State<_MultiStoryViewer> {
           children: [
             // Media or Text Content
             Positioned.fill(
-              child: isMedia
+              child: isMedia && (current.type == 'video' || current.mimetype?.startsWith('video/') == true)
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            iconSize: 72,
+                            icon: const Icon(Icons.play_circle_fill_rounded, color: Colors.white),
+                            onPressed: () => VideoPlayerScreen.open(
+                              context,
+                              mediaUrl,
+                              widget.headers,
+                              title: current.text.isNotEmpty ? current.text : 'Status video',
+                            ),
+                          ),
+                          if (current.text.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 24),
+                              child: Text(
+                                current.text,
+                                style: const TextStyle(color: Colors.white, fontSize: 16),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                        ],
+                      ),
+                    )
+                  : isMedia
                   ? Image.network(
                       mediaUrl,
                       headers: widget.headers,
@@ -594,8 +622,9 @@ class _MultiStoryViewerState extends State<_MultiStoryViewer> {
               ),
             ),
 
-            // Bottom Admin Views Panel (if allowed)
-            if (widget.canViewSeen)
+            // Bottom Admin Views Panel (if allowed). Hidden when there is no
+            // viewer data rather than showing a misleading "0 views".
+            if (widget.canViewSeen && current.viewers.isNotEmpty)
               Positioned(
                 bottom: 20,
                 left: 16,

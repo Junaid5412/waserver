@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import MailComposer from "nodemailer/lib/mail-composer";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { callGeminiWithFailover } from "./ai.js";
@@ -626,10 +627,10 @@ export function createEmailService(store, enc) {
       const list = await client.list();
       const sentBox = list.find((f) => f.path.toLowerCase().includes("sent"))?.path || "Sent";
       if (sentBox) {
-        const rawContent = await transporter.sendMail({ ...mailOptions, streamTransport: true });
-        const chunks = [];
-        for await (const c of rawContent.message) chunks.push(c);
-        const fullMime = Buffer.concat(chunks);
+        // Build the raw MIME locally (no second SMTP delivery) and append it to the Sent folder.
+        const composed = new MailComposer({ ...mailOptions, messageId: info.messageId || undefined }).compile();
+        composed.keepBcc = true;
+        const fullMime = await composed.build();
         await client.append(sentBox, fullMime, ["\\Seen"]);
       }
       await client.logout().catch(() => {});
@@ -774,66 +775,107 @@ STRICTLY return ONLY a raw JSON object with this exact schema:
 }
 `;
 
-    const rawResponse = await callGeminiWithFailover(geminiKeys, preferredModel || "gemini-3.1-pro", prompt, systemInstruction);
-
+    // callGeminiWithFailover resolves to { text, model, keyIndexUsed, totalKeys }.
+    let aiResult;
     try {
-      const cleanJson = rawResponse.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
-      const parsed = JSON.parse(cleanJson);
-      if (Array.isArray(parsed.replies)) {
-        parsed.replies = parsed.replies.map((r, i) => {
-          const bodyText = r.body || r.reply || "";
-          const toneText = r.tone || r.type || (i === 0 ? "Professional" : i === 1 ? "Inquiry" : "Alternative");
-          const labelText = r.label || r.type || toneText;
-          return {
-            tone: toneText,
-            type: r.type || toneText,
-            label: labelText,
-            subject: r.subject || `Re: ${subject || "Inquiry"}`,
-            body: bodyText,
-            reply: bodyText,
-            reasoning: r.reasoning || "",
-          };
-        });
-      }
-      return parsed;
-    } catch (_) {
-      const defaultConfirmation = `Dear ${senderName || "Sir/Madam"},\n\nThank you for reaching out. I have reviewed your message and confirm that we are proceeding accordingly.\n\nPlease let me know if you need any additional details.\n\nBest regards,\n`;
-      const defaultReview = `Dear ${senderName || "Sir/Madam"},\n\nThank you for your email. I am currently reviewing the details and will get back to you with a comprehensive update shortly.\n\nBest regards,\n`;
-      const defaultInfo = `Dear ${senderName || "Sir/Madam"},\n\nThank you for your message. Could you please provide some additional information and context regarding this request so we can proceed effectively?\n\nLooking forward to hearing from you.\n\nBest regards,\n`;
-
-      return {
-        summary: "Email received from " + (senderName || senderEmail),
-        replies: [
-          {
-            tone: "Formal & Confirmed",
-            type: "Professional Confirmation",
-            label: "Confirm & Proceed",
-            subject: "Re: " + (subject || "Inquiry"),
-            body: defaultConfirmation,
-            reply: defaultConfirmation,
-            reasoning: "Politely confirms receipt and indicates affirmative next steps.",
-          },
-          {
-            tone: "Reviewing",
-            type: "Acknowledge & Review",
-            label: "Will Update Shortly",
-            subject: "Re: " + (subject || "Inquiry"),
-            body: defaultReview,
-            reply: defaultReview,
-            reasoning: "Acknowledges the email and sets expectations for a follow-up.",
-          },
-          {
-            tone: "Polite Inquiry",
-            type: "Request Clarification",
-            label: "Request More Details",
-            subject: "Re: " + (subject || "Inquiry"),
-            body: defaultInfo,
-            reply: defaultInfo,
-            reasoning: "Requests further details before making a decision.",
-          },
-        ],
-      };
+      aiResult = await callGeminiWithFailover(geminiKeys, preferredModel || "gemini-3.1-pro", prompt, systemInstruction);
+    } catch (err) {
+      return buildTemplateEmailReplies(emailContext, `Gemini request failed: ${err?.message || "unknown error"}`);
     }
+
+    let parsed;
+    try {
+      const cleanJson = String(aiResult?.text || "").replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+      parsed = JSON.parse(cleanJson);
+    } catch (_) {
+      return buildTemplateEmailReplies(emailContext, "AI returned an unreadable response");
+    }
+    if (!parsed || !Array.isArray(parsed.replies) || parsed.replies.length === 0) {
+      return buildTemplateEmailReplies(emailContext, "AI returned no reply suggestions");
+    }
+    parsed.replies = parsed.replies.map((r, i) => {
+      const bodyText = r.body || r.reply || "";
+      const toneText = r.tone || r.type || (i === 0 ? "Professional" : i === 1 ? "Inquiry" : "Alternative");
+      const labelText = r.label || r.type || toneText;
+      return {
+        tone: toneText,
+        type: r.type || toneText,
+        label: labelText,
+        subject: r.subject || `Re: ${subject || "Inquiry"}`,
+        body: bodyText,
+        reply: bodyText,
+        reasoning: r.reasoning || "",
+      };
+    });
+    parsed.fallback = false;
+    if (aiResult?.model) parsed.model = aiResult.model;
+    return parsed;
+  }
+
+  /**
+   * Canned template replies used when Gemini is unavailable. These are NOT AI output:
+   * the result is flagged with `fallback: true` and a human-readable `fallbackReason`
+   * so clients can tell the user they are looking at templates.
+   */
+  function buildTemplateEmailReplies(emailContext, reason) {
+    const { subject, senderName, senderEmail } = emailContext || {};
+    const defaultConfirmation = `Dear ${senderName || "Sir/Madam"},
+
+Thank you for reaching out. I have reviewed your message and confirm that we are proceeding accordingly.
+
+Please let me know if you need any additional details.
+
+Best regards,
+`;
+    const defaultReview = `Dear ${senderName || "Sir/Madam"},
+
+Thank you for your email. I am currently reviewing the details and will get back to you with a comprehensive update shortly.
+
+Best regards,
+`;
+    const defaultInfo = `Dear ${senderName || "Sir/Madam"},
+
+Thank you for your message. Could you please provide some additional information and context regarding this request so we can proceed effectively?
+
+Looking forward to hearing from you.
+
+Best regards,
+`;
+
+    return {
+      summary: "Email received from " + (senderName || senderEmail || "sender"),
+      fallback: true,
+      fallbackReason: String(reason || "AI unavailable").slice(0, 300),
+      replies: [
+        {
+          tone: "Formal & Confirmed",
+          type: "Professional Confirmation",
+          label: "Confirm & Proceed",
+          subject: "Re: " + (subject || "Inquiry"),
+          body: defaultConfirmation,
+          reply: defaultConfirmation,
+          reasoning: "Template: politely confirms receipt and indicates affirmative next steps.",
+        },
+        {
+          tone: "Reviewing",
+          type: "Acknowledge & Review",
+          label: "Will Update Shortly",
+          subject: "Re: " + (subject || "Inquiry"),
+          body: defaultReview,
+          reply: defaultReview,
+          reasoning: "Template: acknowledges the email and sets expectations for a follow-up.",
+        },
+        {
+          tone: "Polite Inquiry",
+          type: "Request Clarification",
+          label: "Request More Details",
+          subject: "Re: " + (subject || "Inquiry"),
+          body: defaultInfo,
+          reply: defaultInfo,
+          reasoning: "Template: requests further details before making a decision.",
+        },
+      ],
+    };
   }
 
   return {

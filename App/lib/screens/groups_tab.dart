@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../config/theme.dart';
+import '../config/permissions.dart';
 import '../models/chat.dart';
 import '../models/instance.dart';
 import '../services/auth_service.dart';
@@ -422,14 +423,19 @@ class _GroupsTabState extends State<GroupsTab> {
     final auth = Provider.of<AuthService>(context);
     final inst = auth.selectedInstance;
 
+    // The admin "Access Communities" permission hides communities entirely.
+    final canCommunities = UserPermissions.canAccessCommunitiesSection(
+        Provider.of<AuthService>(context, listen: false).currentUser);
+    final items = canCommunities ? _items : _items.where((c) => !c.isCommunity).toList();
+
     // Counts
-    final allCount = _items.length;
-    final groupsCount = _items.where((c) => c.isGroup).length;
-    final communitiesCount = _items.where((c) => c.isCommunity).length;
-    final channelsCount = _items.where((c) => c.isChannel).length;
+    final allCount = items.length;
+    final groupsCount = items.where((c) => c.isGroup).length;
+    final communitiesCount = items.where((c) => c.isCommunity).length;
+    final channelsCount = items.where((c) => c.isChannel).length;
 
     // 1. Filter by category
-    final categoryFiltered = _items.where((c) {
+    final categoryFiltered = items.where((c) {
       if (_selectedCategory == 'groups') return c.isGroup;
       if (_selectedCategory == 'communities') return c.isCommunity;
       if (_selectedCategory == 'channels') return c.isChannel;
@@ -504,6 +510,7 @@ class _GroupsTabState extends State<GroupsTab> {
                     icon: Icons.groups_outlined,
                     isDark: isDark,
                   ),
+                  if (canCommunities)
                   _buildCategoryChip(
                     key: 'communities',
                     label: 'Communities',

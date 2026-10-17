@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../config/api_config.dart';
+import '../config/permissions.dart';
 import '../config/theme.dart';
 import '../services/auth_service.dart';
 import 'document_viewer_screen.dart';
@@ -294,6 +295,8 @@ class _EmailDetailScreenState extends State<EmailDetailScreen> {
     List<dynamic> generatedReplies = [];
     bool isGenerating = false;
     String? aiError;
+    // Set when the replies are canned templates because the AI request failed.
+    String? fallbackReason;
 
     await showModalBottomSheet(
       context: context,
@@ -308,6 +311,7 @@ class _EmailDetailScreenState extends State<EmailDetailScreen> {
               setSheetState(() {
                 isGenerating = true;
                 aiError = null;
+                fallbackReason = null;
               });
               try {
                 final auth = Provider.of<AuthService>(context, listen: false);
@@ -329,6 +333,9 @@ class _EmailDetailScreenState extends State<EmailDetailScreen> {
                 if (res['replies'] is List) {
                   setSheetState(() {
                     generatedReplies = res['replies'];
+                    fallbackReason = res['fallback'] == true
+                        ? (res['fallbackReason']?.toString() ?? 'unknown error')
+                        : null;
                     isGenerating = false;
                   });
                 } else {
@@ -454,6 +461,32 @@ class _EmailDetailScreenState extends State<EmailDetailScreen> {
                     if (aiError != null) ...[
                       const SizedBox(height: 10),
                       Text(aiError!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+                    ],
+
+                    if (fallbackReason != null && !isGenerating) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.orange.withOpacity(0.5)),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'AI unavailable ($fallbackReason). Showing standard templates, not AI-generated replies.',
+                                style: const TextStyle(fontSize: 12, color: Colors.orange),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
 
                     const SizedBox(height: 14),
@@ -629,6 +662,10 @@ class _EmailDetailScreenState extends State<EmailDetailScreen> {
     final rawBody = _email!['text']?.toString().isNotEmpty == true
         ? _email!['text'].toString()
         : _cleanHtml(_email!['html']?.toString() ?? '');
+
+    final canUseAi = UserPermissions.canUseAiAssistant(
+      Provider.of<AuthService>(context).currentUser,
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -808,17 +845,18 @@ class _EmailDetailScreenState extends State<EmailDetailScreen> {
             ),
             child: Row(
               children: [
-                // AI Smart Reply Button
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: WhatsAppTheme.primaryGreen,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                // AI Smart Reply Button (hidden when the account may not use AI)
+                if (canUseAi)
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: WhatsAppTheme.primaryGreen,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    ),
+                    onPressed: _openAiSmartReplySheet,
+                    icon: const Icon(Icons.auto_awesome, color: Colors.white, size: 18),
+                    label: const Text('AI Reply', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                   ),
-                  onPressed: _openAiSmartReplySheet,
-                  icon: const Icon(Icons.auto_awesome, color: Colors.white, size: 18),
-                  label: const Text('AI Reply', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                ),
                 const Spacer(),
                 OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(

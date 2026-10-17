@@ -26,6 +26,13 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity: FlutterFragmentActivity() {
+    companion object {
+        // Read by MessageListenerService so it only notifies while the app is not on screen.
+        @Volatile var isInForeground = false
+    }
+
+    private val BACKGROUND_CHANNEL = "com.zelon.messenger/background"
+    private val NOTIFICATION_PERMISSION_REQUEST_CODE = 1002
     private val NOTIFICATION_CHANNEL = "com.zelon.messenger/system_notifications"
     private val LOCATION_CHANNEL = "com.zelon.messenger/location"
     private val MESSAGES_CHANNEL_ID = "zelon_messages_channel"
@@ -39,6 +46,83 @@ class MainActivity: FlutterFragmentActivity() {
         createNotificationChannels()
         setupNotificationChannel(flutterEngine)
         setupLocationChannel(flutterEngine)
+        setupBackgroundChannel(flutterEngine)
+        requestNotificationPermissionIfNeeded()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        isInForeground = true
+    }
+
+    override fun onPause() {
+        isInForeground = false
+        super.onPause()
+    }
+
+    // Android 13+ blocks every notification until the user grants this at runtime.
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                NOTIFICATION_PERMISSION_REQUEST_CODE
+            )
+        }
+    }
+
+    private fun setupBackgroundChannel(flutterEngine: FlutterEngine) {
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, BACKGROUND_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "start" -> {
+                    val baseUrl = call.argument<String>("baseUrl") ?: ""
+                    val token = call.argument<String>("token") ?: ""
+                    val instanceId = call.argument<String>("instanceId") ?: ""
+                    if (baseUrl.isEmpty() || token.isEmpty() || instanceId.isEmpty()) {
+                        result.success(false)
+                    } else {
+                        try {
+                            MessageListenerService.start(applicationContext, baseUrl, token, instanceId)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("START_FAILED", e.message, null)
+                        }
+                    }
+                }
+                "stop" -> {
+                    MessageListenerService.stop(applicationContext)
+                    result.success(true)
+                }
+                "setMutedChats" -> {
+                    val ids = call.argument<List<String>>("chatIds") ?: emptyList()
+                    getSharedPreferences(MessageListenerService.MUTED_PREFS, Context.MODE_PRIVATE).edit()
+                        .putStringSet("chatIds", ids.toSet())
+                        .apply()
+                    result.success(true)
+                }
+                "isIgnoringBatteryOptimizations" -> {
+                    val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+                    result.success(
+                        Build.VERSION.SDK_INT < Build.VERSION_CODES.M || pm.isIgnoringBatteryOptimizations(packageName)
+                    )
+                }
+                "requestIgnoreBatteryOptimizations" -> {
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                            intent.data = android.net.Uri.parse("package:$packageName")
+                            startActivity(intent)
+                        }
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.success(false)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     private fun setupNotificationChannel(flutterEngine: FlutterEngine) {
