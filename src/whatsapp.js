@@ -21,6 +21,60 @@ export function gateway(store, encryption, emit, {
   let shuttingDown = false;
   let protocol, protocolFetchedAt = 0;
   const reconnectTimers = new Map();
+  // iPhones (and a growing share of Android phones) are LID-addressed. Baileys
+  // 7.0.0-rc14 encrypts 1:1 sends to a phone-number JID in a way those devices
+  // often cannot decrypt, so recipients see "Waiting for this message" forever
+  // (WhiskeySockets/Baileys#2297, #1964; upstream fix in unmerged PRs #2711 and
+  // #2748). Like WhatsApp Web and those PRs, resolve phone-number recipients to
+  // their LID before sending, falling back to the phone number on any failure.
+  async function toLid(socket, instance, jid) {
+    if (typeof jid !== "string" || !jid.endsWith("@s.whatsapp.net")) return jid;
+    const user = jid.split("@")[0].split(":")[0];
+    const me = socket.user?.id?.split("@")[0].split(":")[0];
+    if (!user || user === me) return jid;
+    try {
+      const lid = await socket.signalRepository?.lidMapping?.getLIDForPN(user + "@s.whatsapp.net");
+      if (typeof lid !== "string" || !lid.endsWith("@lid")) return jid;
+      const lidUser = lid.split("@")[0].split(":")[0] + "@lid";
+      // Keep the conversation under the phone-number chat in the inbox.
+      if (inbox?.alias) await inbox.alias(instance, lidUser, user + "@s.whatsapp.net");
+      return lidUser;
+    } catch {
+      return jid;
+    }
+  }
+  // Baileys never invalidates a group's sender-key-memory when a member's
+  // device identity changes, so that member's phone keeps showing "Waiting for
+  // this message" (evolution-api#2706). Re-distributing our sender key to every
+  // member at most once an hour per group (and after each restart) repairs it.
+  const SENDER_KEY_REFRESH_MS = 60 * 60 * 1000;
+  // Per socket, so every (re)connect starts with a refresh.
+  const senderKeyRefreshedAt = new WeakMap();
+  async function refreshGroupSenderKey(socket, jid) {
+    if (typeof jid !== "string" || !jid.endsWith("@g.us")) return;
+    let times = senderKeyRefreshedAt.get(socket);
+    if (!times) senderKeyRefreshedAt.set(socket, (times = new Map()));
+    if (Date.now() - (times.get(jid) || 0) < SENDER_KEY_REFRESH_MS) return;
+    try {
+      await socket.authState?.keys?.set({ "sender-key-memory": { [jid]: null } });
+      times.set(jid, Date.now());
+    } catch {}
+  }
+  function preferLidAddressing(socket, instance) {
+    if (typeof socket.sendMessage !== "function") return;
+    const send = socket.sendMessage.bind(socket);
+    socket.sendMessage = async (jid, content, options = {}) => {
+      await refreshGroupSenderKey(socket, jid);
+      if (Array.isArray(options?.statusJidList))
+        options = {
+          ...options,
+          statusJidList: await Promise.all(
+            options.statusJidList.map((j) => toLid(socket, instance, j)),
+          ),
+        };
+      return send(await toLid(socket, instance, jid), content, options);
+    };
+  }
   async function connect(instance) {
     if (
       instance.archived ||
@@ -117,6 +171,7 @@ export function gateway(store, encryption, emit, {
         shouldSyncHistoryMessage: () => true,
       });
       sockets.set(instance.id, socket);
+      preferLidAddressing(socket, instance);
       socket.ev.on("creds.update", () =>
         (sockets.get(instance.id) === socket && !stopped.has(instance.id)
           ? write("creds", creds)

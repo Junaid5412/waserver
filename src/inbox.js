@@ -318,6 +318,11 @@ export function createInbox(store, enc, notify = () => {}) {
     if (!rawData) return null;
     try {
       const data = typeof rawData === "string" ? unpack(enc, rawData) : rawData;
+      if (data?.key && row.chatId)
+        // The inbox chat (phone-number JID) the message belongs to; the key's
+        // remoteJid may be the LID it was sent to. Non-enumerable so it is
+        // never written back into stored message data.
+        Object.defineProperty(data, "chatJid", { value: row.chatId, enumerable: false });
       return data?.key
         ? data
         : {

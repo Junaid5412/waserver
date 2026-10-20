@@ -96,7 +96,7 @@ export async function validateMessage(
   for (const id of [d.quotedId, d.forwardId].filter(Boolean)) {
     const m = await loadMessage(instance.id, id);
     if (!m) fail(404, "Referenced message not found");
-    if (id === d.quotedId && m.key?.remoteJid !== d.to)
+    if (id === d.quotedId && m.key?.remoteJid !== d.to && m.chatJid !== d.to)
       fail(400, "Quoted message must belong to the recipient chat");
   }
   return d;
