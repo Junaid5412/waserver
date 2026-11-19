@@ -372,7 +372,7 @@ export async function openStore() {
           throw Error("Database lease is not held");
         }
       } else {
-        if (releaseFileLock && !(await lockfile.check(config.filename))) {
+        if (releaseFileLock && !(await lockfile.check(config.filename, { stale: 30000 }))) {
           leaseLost = true;
           throw Error("SQLite worker lease is not held");
         }
